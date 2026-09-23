@@ -281,7 +281,7 @@ func (g *gateway) proxyZen(ref providerRef, w http.ResponseWriter, r *http.Reque
 		return ""
 	}
 	if lastHint == "" {
-		lastHint = "no healthy zen keys available"
+		lastHint = "No healthy zen keys available — every key is cooling or disabled"
 	}
 	return lastHint
 }

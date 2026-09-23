@@ -266,20 +266,20 @@ func (g *gateway) handleChangeMyPassword(w http.ResponseWriter, r *http.Request)
 		return
 	}
 	if len(req.NewPassword) < 10 {
-		apiErr(w, http.StatusBadRequest, "new password must be at least 10 characters")
+		apiErr(w, http.StatusBadRequest, "New password must be at least 10 characters")
 		return
 	}
 	fresh, err := g.store.User(u.ID)
 	if err != nil || fresh == nil {
-		apiErr(w, http.StatusInternalServerError, "user lookup failed")
+		apiErr(w, http.StatusInternalServerError, "User lookup failed")
 		return
 	}
 	if fresh.Disabled {
-		apiErr(w, http.StatusForbidden, "account disabled")
+		apiErr(w, http.StatusForbidden, "Your account is disabled")
 		return
 	}
 	if bcrypt.CompareHashAndPassword([]byte(fresh.PasswordHash), []byte(req.CurrentPassword)) != nil {
-		apiErr(w, http.StatusForbidden, "current password is incorrect")
+		apiErr(w, http.StatusForbidden, "Your current password is incorrect")
 		return
 	}
 	hash, err := bcrypt.GenerateFromPassword([]byte(req.NewPassword), 10)

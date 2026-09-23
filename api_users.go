@@ -55,7 +55,7 @@ func (g *gateway) handleCreateUser(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	u := &User{Name: req.Name, Email: req.Email, PasswordHash: hash, Role: req.Role}
-	if !g.applyMutation(w, actor, "user.create", func() error { return g.store.InsertUser(u) }) {
+	if !g.applyMutation(w, actor, "user.create", "An account with this email already exists", func() error { return g.store.InsertUser(u) }) {
 		return
 	}
 	writeJSON(w, http.StatusCreated, map[string]any{"user": userView(u)})
@@ -66,18 +66,18 @@ func validateNewUser(w http.ResponseWriter, name, email, password, role *string)
 	*email = strings.ToLower(strings.TrimSpace(*email))
 	*role = strings.TrimSpace(*role)
 	if name == nil || *name == "" || email == nil || *email == "" || !strings.Contains(*email, "@") {
-		apiErr(w, http.StatusBadRequest, "name and a valid email are required")
+		apiErr(w, http.StatusBadRequest, "Name and a valid email address are required")
 		return "", false
 	}
 	if role == nil || *role == "" {
 		*role = "user"
 	}
 	if *role != "user" && *role != "superadmin" {
-		apiErr(w, http.StatusBadRequest, `role must be "user" or "superadmin"`)
+		apiErr(w, http.StatusBadRequest, `Role must be "user" or "superadmin"`)
 		return "", false
 	}
 	if len(*password) < 10 {
-		apiErr(w, http.StatusBadRequest, "password must be at least 10 characters")
+		apiErr(w, http.StatusBadRequest, "Password must be at least 10 characters")
 		return "", false
 	}
 	hash, err := bcrypt.GenerateFromPassword([]byte(*password), 10)
@@ -110,22 +110,22 @@ func (g *gateway) handlePatchUser(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	if target == nil {
-		apiErr(w, http.StatusNotFound, "no such user")
+		apiErr(w, http.StatusNotFound, "That user no longer exists (it may have been deleted)")
 		return
 	}
 	if req.Role != nil && *req.Role != "user" && *req.Role != "superadmin" {
-		apiErr(w, http.StatusBadRequest, `role must be "user" or "superadmin"`)
+		apiErr(w, http.StatusBadRequest, `Role must be "user" or "superadmin"`)
 		return
 	}
 	if req.Role != nil && target.Role == "superadmin" && *req.Role != "superadmin" {
 		if n, _ := g.store.CountSuperadmins(); n <= 1 {
-			apiErr(w, http.StatusConflict, "cannot demote the last superadmin")
+			apiErr(w, http.StatusConflict, "Cannot demote the last remaining superadmin")
 			return
 		}
 	}
 	if req.Disabled != nil && *req.Disabled && target.Role == "superadmin" {
 		if n, _ := g.store.CountSuperadmins(); n <= 1 {
-			apiErr(w, http.StatusConflict, "cannot disable the last superadmin")
+			apiErr(w, http.StatusConflict, "Cannot disable the last remaining superadmin")
 			return
 		}
 	}
@@ -137,7 +137,7 @@ func (g *gateway) handlePatchUser(w http.ResponseWriter, r *http.Request) {
 	if req.Email != nil {
 		e := strings.ToLower(strings.TrimSpace(*req.Email))
 		if !strings.Contains(e, "@") {
-			apiErr(w, http.StatusBadRequest, "invalid email")
+			apiErr(w, http.StatusBadRequest, "Invalid email address")
 			return
 		}
 		email = &e
@@ -145,7 +145,7 @@ func (g *gateway) handlePatchUser(w http.ResponseWriter, r *http.Request) {
 	var passHash *string
 	if req.Password != nil {
 		if len(*req.Password) < 10 {
-			apiErr(w, http.StatusBadRequest, "password must be at least 10 characters")
+			apiErr(w, http.StatusBadRequest, "Password must be at least 10 characters")
 			return
 		}
 		hash, err := bcrypt.GenerateFromPassword([]byte(*req.Password), 10)
@@ -157,7 +157,7 @@ func (g *gateway) handlePatchUser(w http.ResponseWriter, r *http.Request) {
 		passHash = &h
 	}
 	killSessions := passHash != nil || (req.Disabled != nil && *req.Disabled)
-	if !g.applyMutation(w, actor, "user.update", func() error {
+	if !g.applyMutation(w, actor, "user.update", "An account with this email already exists", func() error {
 		if err := g.store.UpdateUser(id, name, email, passHash, req.Role, req.Disabled); err != nil {
 			return err
 		}
@@ -179,7 +179,7 @@ func (g *gateway) handleDeleteUser(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	if actor.ID == id {
-		apiErr(w, http.StatusConflict, "cannot delete yourself")
+		apiErr(w, http.StatusConflict, "You cannot delete your own account")
 		return
 	}
 	target, err := g.store.User(id)
@@ -188,16 +188,16 @@ func (g *gateway) handleDeleteUser(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	if target == nil {
-		apiErr(w, http.StatusNotFound, "no such user")
+		apiErr(w, http.StatusNotFound, "That user no longer exists (it may have been deleted)")
 		return
 	}
 	if target.Role == "superadmin" {
 		if n, _ := g.store.CountSuperadmins(); n <= 1 {
-			apiErr(w, http.StatusConflict, "cannot delete the last superadmin")
+			apiErr(w, http.StatusConflict, "Cannot delete the last remaining superadmin")
 			return
 		}
 	}
-	if !g.applyMutation(w, actor, "user.delete", func() error { return g.store.DeleteUser(id) }) {
+	if !g.applyMutation(w, actor, "user.delete", "", func() error { return g.store.DeleteUser(id) }) {
 		return
 	}
 	writeJSON(w, http.StatusOK, map[string]any{"ok": true})

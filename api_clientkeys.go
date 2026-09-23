@@ -99,7 +99,7 @@ func (g *gateway) createKeyFor(w http.ResponseWriter, r *http.Request, actor *Us
 		return
 	}
 	if len(req.Alias) > 100 {
-		apiErr(w, http.StatusBadRequest, "alias too long (max 100)")
+		apiErr(w, http.StatusBadRequest, "Alias is too long (maximum 100 characters)")
 		return
 	}
 	var (
@@ -107,7 +107,7 @@ func (g *gateway) createKeyFor(w http.ResponseWriter, r *http.Request, actor *Us
 		ck        ClientKey
 		err       error
 	)
-	if !g.applyMutation(w, actor, "key.create", func() error {
+	if !g.applyMutation(w, actor, "key.create", "", func() error {
 		plaintext, ck, err = g.store.CreateClientKey(targetUserID, req.Alias)
 		return err
 	}) {
@@ -129,7 +129,7 @@ func (g *gateway) patchKeyFor(w http.ResponseWriter, r *http.Request, ownerID in
 		return
 	}
 	if existing == nil || existing.UserID != ownerID {
-		apiErr(w, http.StatusNotFound, "no such key")
+		apiErr(w, http.StatusNotFound, "That key no longer exists (it may have been deleted)")
 		return
 	}
 	var req struct {
@@ -140,10 +140,10 @@ func (g *gateway) patchKeyFor(w http.ResponseWriter, r *http.Request, ownerID in
 		return
 	}
 	if req.Alias != nil && len(*req.Alias) > 100 {
-		apiErr(w, http.StatusBadRequest, "alias too long (max 100)")
+		apiErr(w, http.StatusBadRequest, "Alias is too long (maximum 100 characters)")
 		return
 	}
-	if !g.applyMutation(w, actor, "key.update", func() error {
+	if !g.applyMutation(w, actor, "key.update", "", func() error {
 		if req.Alias != nil {
 			if err := g.store.UpdateClientKeyAlias(keyID, *req.Alias); err != nil {
 				return err
@@ -172,10 +172,10 @@ func (g *gateway) deleteKeyFor(w http.ResponseWriter, r *http.Request, ownerID i
 		return
 	}
 	if existing == nil || existing.UserID != ownerID {
-		apiErr(w, http.StatusNotFound, "no such key")
+		apiErr(w, http.StatusNotFound, "That key no longer exists (it may have been deleted)")
 		return
 	}
-	if !g.applyMutation(w, actor, "key.delete", func() error { return g.store.DeleteClientKey(keyID) }) {
+	if !g.applyMutation(w, actor, "key.delete", "", func() error { return g.store.DeleteClientKey(keyID) }) {
 		return
 	}
 	writeJSON(w, http.StatusOK, map[string]any{"ok": true})

@@ -261,7 +261,7 @@ func TestDisabledProviderUnknownPrefix(t *testing.T) {
 	}
 	rec = httptest.NewRecorder()
 	g.handleChat(rec, chatReq("together", "m1"))
-	if rec.Code != 400 || !strings.Contains(rec.Body.String(), "unknown provider") {
+	if rec.Code != 400 || !strings.Contains(rec.Body.String(), "Unknown provider") {
 		t.Fatalf("disabled provider: got %d: %s", rec.Code, rec.Body.String())
 	}
 }

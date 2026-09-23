@@ -116,36 +116,36 @@ func (rs *RuntimeSettings) applyDefaults() *RuntimeSettings {
 // never hold a document boot would refuse.
 func (rs *RuntimeSettings) Validate() string {
 	if rs.Rotation != rotationPriority && rs.Rotation != rotationLRU {
-		return fmt.Sprintf("rotation must be %q or %q", rotationPriority, rotationLRU)
+		return "Rotation must be \"priority\" or \"lru\""
 	}
 	if rs.Retry.MaxKeysPerRequest < 1 || rs.Retry.MaxKeysPerRequest > 100 {
-		return "retry.maxKeysPerRequest must be between 1 and 100"
+		return "Max keys per request must be between 1 and 100"
 	}
 	if rs.Retry.CooldownSeconds < 0 || rs.Retry.CooldownSeconds > 86400 {
-		return "retry.cooldownSeconds must be between 0 and 86400"
+		return "Cooldown seconds must be between 0 and 86400"
 	}
 	if rs.Retry.MaxRequestsPerKeyDay < 0 || rs.Retry.MaxRequestsPerKeyDay > 1_000_000 {
-		return "retry.maxRequestsPerKeyPerDay must be 0 (off) or between 1 and 1000000"
+		return "Daily cap must be 0 (off) or between 1 and 1000000"
 	}
 	if f := rs.Anthropic.FallbackModel; f != "" {
 		if parts := strings.Split(f, "/"); len(parts) != 2 || parts[0] == "" || parts[1] == "" {
-			return fmt.Sprintf("anthropic.fallbackModel %q must look like \"provider/model\"", f)
+			return fmt.Sprintf("Fallback model %q must look like \"provider/model\"", f)
 		}
 	}
 	if !uaVersionOK(rs.Zen.UserAgent) {
-		return fmt.Sprintf("zen.userAgent %q fails the 1.18.0 floor — the whole pool would 426", rs.Zen.UserAgent)
+		return fmt.Sprintf("Zen user agent %q fails the 1.18.0 floor — the whole pool would get 426s", rs.Zen.UserAgent)
 	}
 	for _, m := range rs.Zen.ResponsesModels {
 		if strings.TrimSpace(m) == "" {
-			return "zen.responsesModels entries must be non-empty"
+			return "Responses-API model names must not be empty"
 		}
 	}
 	for id, meta := range rs.Zen.ModelMeta {
 		if meta.ContextWindow <= 0 {
-			return fmt.Sprintf("zen.modelMeta[%q].contextWindow must be a positive integer", id)
+			return fmt.Sprintf("Model meta for %q: context window must be a positive integer", id)
 		}
 		if meta.MaxOutputTokens <= 0 {
-			return fmt.Sprintf("zen.modelMeta[%q].maxOutputTokens must be a positive integer", id)
+			return fmt.Sprintf("Model meta for %q: max output tokens must be a positive integer", id)
 		}
 	}
 	return ""

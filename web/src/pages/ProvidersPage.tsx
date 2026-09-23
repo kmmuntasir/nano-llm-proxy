@@ -43,7 +43,7 @@ function AddProviderCard() {
       await qc.invalidateQueries({ queryKey: ["providers"] })
       toaster.create({ title: "Provider added", type: "success" })
     },
-    onError: (e) => setError(e instanceof ApiError ? e.message : "create failed"),
+    onError: (e) => setError(e instanceof ApiError ? e.message : "Failed to create the provider"),
   })
 
   return (
@@ -118,7 +118,7 @@ function ProviderKeyRow({ provider, k }: { provider: ProviderView; k: ProviderKe
       toaster.create({ title: "Key updated", type: "success" })
     },
     onError: (e) =>
-      toaster.create({ title: e instanceof ApiError ? e.message : "update failed", type: "error" }),
+      toaster.create({ title: e instanceof ApiError ? e.message : "Failed to update the key", type: "error" }),
   })
   const remove = useMutation({
     mutationFn: () => del(`/api/providers/${provider.id}/keys/${k.id}`),
@@ -128,7 +128,7 @@ function ProviderKeyRow({ provider, k }: { provider: ProviderView; k: ProviderKe
       toaster.create({ title: "Key removed", type: "success" })
     },
     onError: (e) =>
-      toaster.create({ title: e instanceof ApiError ? e.message : "delete failed", type: "error" }),
+      toaster.create({ title: e instanceof ApiError ? e.message : "Failed to remove the key", type: "error" }),
   })
 
   return (
@@ -196,7 +196,7 @@ function ProviderCard({ p }: { p: ProviderView }) {
       toaster.create({ title: "Provider updated", type: "success" })
     },
     onError: (e) =>
-      toaster.create({ title: e instanceof ApiError ? e.message : "update failed", type: "error" }),
+      toaster.create({ title: e instanceof ApiError ? e.message : "Failed to update the provider", type: "error" }),
   })
   const removeP = useMutation({
     mutationFn: () => del(`/api/providers/${p.id}`),
@@ -206,7 +206,7 @@ function ProviderCard({ p }: { p: ProviderView }) {
       toaster.create({ title: "Provider deleted", type: "success" })
     },
     onError: (e) =>
-      toaster.create({ title: e instanceof ApiError ? e.message : "delete failed", type: "error" }),
+      toaster.create({ title: e instanceof ApiError ? e.message : "Failed to delete the provider", type: "error" }),
   })
   const addKey = useMutation({
     mutationFn: () => post(`/api/providers/${p.id}/keys`, { key: newKey, label: "gui" }),
@@ -216,7 +216,7 @@ function ProviderCard({ p }: { p: ProviderView }) {
       toaster.create({ title: "Key added", type: "success" })
     },
     onError: (e) =>
-      toaster.create({ title: e instanceof ApiError ? e.message : "add failed", type: "error" }),
+      toaster.create({ title: e instanceof ApiError ? e.message : "Failed to add the key", type: "error" }),
   })
 
   return (

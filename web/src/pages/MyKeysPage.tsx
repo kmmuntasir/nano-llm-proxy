@@ -45,7 +45,7 @@ export default function MyKeysPage() {
       toaster.create({ title: "Key created", type: "success" })
     },
     onError: (e) =>
-      toaster.create({ title: e instanceof ApiError ? e.message : "create failed", type: "error" }),
+      toaster.create({ title: e instanceof ApiError ? e.message : "Failed to create the API key", type: "error" }),
   })
 
   const toggle = useMutation({
@@ -56,7 +56,7 @@ export default function MyKeysPage() {
       toaster.create({ title: "Key updated", type: "success" })
     },
     onError: (e) =>
-      toaster.create({ title: e instanceof ApiError ? e.message : "update failed", type: "error" }),
+      toaster.create({ title: e instanceof ApiError ? e.message : "Failed to update the key", type: "error" }),
   })
 
   const remove = useMutation({
@@ -67,7 +67,7 @@ export default function MyKeysPage() {
       toaster.create({ title: "Key deleted", type: "success" })
     },
     onError: (e) =>
-      toaster.create({ title: e instanceof ApiError ? e.message : "delete failed", type: "error" }),
+      toaster.create({ title: e instanceof ApiError ? e.message : "Failed to delete the key", type: "error" }),
   })
 
   const keys = data?.keys ?? []

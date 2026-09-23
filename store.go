@@ -988,15 +988,15 @@ type UsageKeyRow struct {
 }
 
 type UsageActivityRow struct {
-	TS          int64  `json:"ts"`
-	Email       string `json:"email"`
-	Alias       string `json:"alias"`
-	Provider    string `json:"provider"`
-	Model       string `json:"model"`
-	InputTokens int64  `json:"inputTokens"`
-	OutputTokens int64 `json:"outputTokens"`
-	Status      int    `json:"status"`
-	DurationMs  int64  `json:"durationMs"`
+	TS           int64  `json:"ts"`
+	Email        string `json:"email"`
+	Alias        string `json:"alias"`
+	Provider     string `json:"provider"`
+	Model        string `json:"model"`
+	InputTokens  int64  `json:"inputTokens"`
+	OutputTokens int64  `json:"outputTokens"`
+	Status       int    `json:"status"`
+	DurationMs   int64  `json:"durationMs"`
 }
 
 // usageScope builds the WHERE clause + args for a ts range with an optional

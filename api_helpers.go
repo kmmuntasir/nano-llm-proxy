@@ -2,7 +2,6 @@ package main
 
 import (
 	"encoding/json"
-	"fmt"
 	"io"
 	"log"
 	"net/http"
@@ -24,7 +23,7 @@ func readJSON(w http.ResponseWriter, r *http.Request, v any) bool {
 	defer r.Body.Close()
 	dec := json.NewDecoder(io.LimitReader(r.Body, 1<<20))
 	if err := dec.Decode(v); err != nil {
-		apiErr(w, http.StatusBadRequest, "invalid JSON body: "+err.Error())
+		apiErr(w, http.StatusBadRequest, "Invalid JSON body: "+err.Error())
 		return false
 	}
 	return true
@@ -38,7 +37,7 @@ func apiErr(w http.ResponseWriter, status int, msg string) {
 func pathID(w http.ResponseWriter, r *http.Request, name string) (int64, bool) {
 	id, err := strconv.ParseInt(r.PathValue(name), 10, 64)
 	if err != nil || id <= 0 {
-		apiErr(w, http.StatusBadRequest, fmt.Sprintf("invalid %s", name))
+		apiErr(w, http.StatusBadRequest, "Invalid ID in the request path")
 		return 0, false
 	}
 	return id, true
@@ -58,16 +57,23 @@ func isUniqueViolation(err error) bool {
 
 // applyMutation runs one store write and refreshes every in-memory structure
 // the hot path reads — GUI changes are visible to /v1/* before the response.
-// Returns false if the error response was already written.
-func (g *gateway) applyMutation(w http.ResponseWriter, user *User, action string, write func() error) bool {
+// conflictMsg is the sentence shown when the write hits a uniqueness
+// constraint (e.g. "An account with this email already exists") — each call
+// site knows which field collided. Returns false if the error response was
+// already written.
+func (g *gateway) applyMutation(w http.ResponseWriter, user *User, action, conflictMsg string, write func() error) bool {
 	if err := write(); err != nil {
 		switch {
 		case isUniqueViolation(err):
-			apiErr(w, http.StatusConflict, "already exists")
+			msg := conflictMsg
+			if msg == "" {
+				msg = "That record already exists"
+			}
+			apiErr(w, http.StatusConflict, msg)
 		case err == ErrBuiltinProvider:
-			apiErr(w, http.StatusConflict, "builtin providers cannot be deleted")
+			apiErr(w, http.StatusConflict, "Built-in providers cannot be deleted")
 		case err == ErrNotFound:
-			apiErr(w, http.StatusNotFound, "not found")
+			apiErr(w, http.StatusNotFound, "That record no longer exists (it may have been deleted)")
 		default:
 			apiErr(w, http.StatusInternalServerError, err.Error())
 		}
@@ -75,7 +81,7 @@ func (g *gateway) applyMutation(w http.ResponseWriter, user *User, action string
 	}
 	if err := g.rebuildPools(); err != nil {
 		log.Printf("admin user=%s action=%s REBUILD FAILED: %v", actorEmail(user), action, err)
-		apiErr(w, http.StatusInternalServerError, "stored, but in-memory refresh failed: "+err.Error())
+		apiErr(w, http.StatusInternalServerError, "Saved to the database, but applying it live failed: "+err.Error())
 		return false
 	}
 	log.Printf("admin user=%s action=%s", actorEmail(user), action)

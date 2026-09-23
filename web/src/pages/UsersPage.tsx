@@ -80,7 +80,7 @@ function AddUserModal({ open, onOpenChange }: { open: boolean; onOpenChange: (o:
   const submit = () => {
     setError("")
     if (password !== confirm) {
-      setError("passwords don't match")
+      setError("Passwords don't match")
       return
     }
     create.mutate()
@@ -182,7 +182,7 @@ function ResetPasswordModal({
       })
     },
     onError: (e) => {
-      const msg = e instanceof ApiError ? e.message : "reset failed"
+      const msg = e instanceof ApiError ? e.message : "Failed to reset the password"
       setError(msg)
       toaster.create({ title: msg, type: "error" })
     },
@@ -274,7 +274,7 @@ function UserKeysRow({ userID, onClose }: { userID: number; onClose: () => void 
       toaster.create({ title: "Key created", type: "success" })
     },
     onError: (e) =>
-      toaster.create({ title: e instanceof ApiError ? e.message : "create failed", type: "error" }),
+      toaster.create({ title: e instanceof ApiError ? e.message : "Failed to create the key", type: "error" }),
   })
   const remove = useMutation({
     mutationFn: (id: number) => del(`/api/users/${userID}/keys/${id}`),
@@ -283,7 +283,7 @@ function UserKeysRow({ userID, onClose }: { userID: number; onClose: () => void 
       toaster.create({ title: "Key deleted", type: "success" })
     },
     onError: (e) =>
-      toaster.create({ title: e instanceof ApiError ? e.message : "delete failed", type: "error" }),
+      toaster.create({ title: e instanceof ApiError ? e.message : "Failed to delete the key", type: "error" }),
   })
   const toggle = useMutation({
     mutationFn: ({ id, disabled }: { id: number; disabled: boolean }) =>
@@ -293,7 +293,7 @@ function UserKeysRow({ userID, onClose }: { userID: number; onClose: () => void 
       toaster.create({ title: "Key updated", type: "success" })
     },
     onError: (e) =>
-      toaster.create({ title: e instanceof ApiError ? e.message : "update failed", type: "error" }),
+      toaster.create({ title: e instanceof ApiError ? e.message : "Failed to update the key", type: "error" }),
   })
 
   return (
@@ -359,7 +359,7 @@ function UserRow({ u, isSelf }: { u: UserView; isSelf: boolean }) {
       toaster.create({ title: "User updated", type: "success" })
     },
     onError: (e) =>
-      toaster.create({ title: e instanceof ApiError ? e.message : "update failed", type: "error" }),
+      toaster.create({ title: e instanceof ApiError ? e.message : "Failed to update the user", type: "error" }),
   })
 
   const removeU = useMutation({
@@ -370,7 +370,7 @@ function UserRow({ u, isSelf }: { u: UserView; isSelf: boolean }) {
       toaster.create({ title: "User deleted", type: "success" })
     },
     onError: (e) =>
-      toaster.create({ title: e instanceof ApiError ? e.message : "delete failed", type: "error" }),
+      toaster.create({ title: e instanceof ApiError ? e.message : "Failed to delete the user", type: "error" }),
   })
 
   return (

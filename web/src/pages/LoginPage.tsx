@@ -33,7 +33,7 @@ export default function LoginPage() {
       await qc.invalidateQueries()
       navigate("/")
     } catch (err) {
-      const msg = err instanceof ApiError ? err.message : "login failed"
+      const msg = err instanceof ApiError ? err.message : "Login failed — check your email and password"
       setError(msg)
       toaster.create({ title: msg, type: "error" })
     } finally {

@@ -109,7 +109,7 @@ function SyncCard({ status }: { status?: ModelMetaSyncStatusView }) {
       }
     },
     onError: (e) =>
-      toaster.create({ title: e instanceof ApiError ? e.message : "sync failed", type: "error" }),
+      toaster.create({ title: e instanceof ApiError ? e.message : "Failed to run the sync", type: "error" }),
   })
 
   return (
@@ -176,7 +176,7 @@ export default function SettingsPage() {
       toaster.create({ title: "Settings saved — live immediately", type: "success" })
     },
     onError: (e) => {
-      const msg = e instanceof ApiError ? e.message : "save failed"
+      const msg = e instanceof ApiError ? e.message : "Failed to save settings"
       setSaveError(msg)
       toaster.create({ title: msg, type: "error" })
     },

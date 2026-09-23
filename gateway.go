@@ -345,12 +345,12 @@ func (g *gateway) handleChat(w http.ResponseWriter, r *http.Request) {
 	model, _ := body["model"].(string)
 	parts := strings.SplitN(model, "/", 2)
 	if len(parts) != 2 || parts[0] == "" || parts[1] == "" {
-		writeErr(w, http.StatusBadRequest, `model must be "<provider>/<id>" (e.g. zen/mimo-...)`)
+		writeErr(w, http.StatusBadRequest, `Model must be "<provider>/<id>" (e.g. zen/mimo-...)`)
 		return
 	}
 	ref, ok := g.provider(parts[0])
 	if !ok {
-		writeErr(w, http.StatusBadRequest, fmt.Sprintf("unknown provider %q — see GET /v1/models", parts[0]))
+		writeErr(w, http.StatusBadRequest, fmt.Sprintf("Unknown provider %q — see GET /v1/models", parts[0]))
 		return
 	}
 	provider, upstreamModel := parts[0], parts[1]

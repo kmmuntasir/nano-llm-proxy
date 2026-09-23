@@ -33,12 +33,12 @@ func (g *gateway) handleMessages(w http.ResponseWriter, r *http.Request) {
 	}
 	parts := strings.SplitN(model, "/", 2)
 	if len(parts) != 2 || parts[0] == "" || parts[1] == "" {
-		writeAnthropicErr(w, http.StatusBadRequest, `model must be "<provider>/<id>" (e.g. zen/mimo-...)`)
+		writeAnthropicErr(w, http.StatusBadRequest, `Model must be "<provider>/<id>" (e.g. zen/mimo-...)`)
 		return
 	}
 	ref, ok := g.provider(parts[0])
 	if !ok {
-		writeAnthropicErr(w, http.StatusBadRequest, fmt.Sprintf("unknown provider %q — see GET /v1/models", parts[0]))
+		writeAnthropicErr(w, http.StatusBadRequest, fmt.Sprintf("Unknown provider %q — see GET /v1/models", parts[0]))
 		return
 	}
 	upstreamModel := parts[1]
@@ -159,7 +159,7 @@ func (g *gateway) messagesViaOpenAI(ref providerRef, w http.ResponseWriter, r *h
 		return "", tu
 	}
 	if lastHint == "" {
-		lastHint = fmt.Sprintf("no healthy %s keys available", ref.name)
+		lastHint = fmt.Sprintf("No healthy %s keys available — every key is cooling or disabled", ref.name)
 	}
 	return lastHint, tokenUsage{}
 }
@@ -244,7 +244,7 @@ func (g *gateway) messagesViaZen(ref providerRef, w http.ResponseWriter, r *http
 		return "", tu
 	}
 	if lastHint == "" {
-		lastHint = "no healthy zen keys available"
+		lastHint = "No healthy zen keys available — every key is cooling or disabled"
 	}
 	return lastHint, tokenUsage{}
 }
