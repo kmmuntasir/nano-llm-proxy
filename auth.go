@@ -187,7 +187,7 @@ func (g *gateway) handleLogin(w http.ResponseWriter, r *http.Request) {
 	if user == nil || bcrypt.CompareHashAndPassword([]byte(user.PasswordHash), []byte(req.Password)) != nil || user.Disabled {
 		g.backoff.fail(key)
 		// identical response for unknown email / wrong password / disabled
-		writeJSON(w, http.StatusUnauthorized, map[string]any{"error": map[string]string{"message": "invalid email or password"}})
+		writeJSON(w, http.StatusUnauthorized, map[string]any{"error": map[string]string{"message": "Invalid email or password"}})
 		return
 	}
 	g.backoff.reset(key)
