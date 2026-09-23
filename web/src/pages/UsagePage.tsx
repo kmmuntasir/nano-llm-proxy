@@ -26,11 +26,26 @@ interface UsageSummary {
   providers: UsageModelRow[]
 }
 
+// Presets snap to local midnights: "from" and "to" both sit at 00:00:00 of
+// their day, so the default window is the 7 full days before today. Custom
+// from/to edits set exact times.
 const RANGES = [
-  { label: "24h", hours: 24 },
-  { label: "7d", hours: 24 * 7 },
-  { label: "30d", hours: 24 * 30 },
+  { label: "Yesterday", days: 1 },
+  { label: "7 days", days: 7 },
+  { label: "30 days", days: 30 },
 ]
+
+function startOfToday(): number {
+  const d = new Date()
+  d.setHours(0, 0, 0, 0)
+  return Math.floor(d.getTime() / 1000)
+}
+
+function fmtLocalInput(ts: number): string {
+  const d = new Date(ts * 1000)
+  const pad = (n: number) => String(n).padStart(2, "0")
+  return `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())}T${pad(d.getHours())}:${pad(d.getMinutes())}`
+}
 
 function fmtTokens(n: number) {
   if (n >= 1_000_000) return `${(n / 1_000_000).toFixed(1)}M`
@@ -96,14 +111,17 @@ export default function UsagePage() {
   const { data: me } = useSession()
   const isSuperadmin = me?.user.role === "superadmin"
 
-  const [range, setRange] = useState("7d")
+  const [range, setRange] = useState("7 days")
   const [custom, setCustom] = useState<{ from: string; to: string } | null>(null)
 
-  const hours = RANGES.find((r) => r.label === range)?.hours ?? 168
-  const to = custom?.to ? new Date(custom.to).getTime() / 1000 : Date.now() / 1000
+  const todayStart = startOfToday()
+  const days = RANGES.find((r) => r.label === range)?.days ?? 7
+  // defaults (and every preset) sit at 00:00:00: "to" is today's midnight,
+  // "from" is the midnight N days before it
+  const to = custom?.to ? new Date(custom.to).getTime() / 1000 : todayStart
   const from = custom?.from
     ? new Date(custom.from).getTime() / 1000
-    : to - hours * 3600
+    : todayStart - days * 86400
   const qs = `from=${Math.floor(from)}&to=${Math.ceil(to)}`
 
   const summary = useQuery({
@@ -137,8 +155,8 @@ export default function UsagePage() {
             setRange(label)
             setCustom(null)
           }}
-          from={custom?.from ?? ""}
-          to={custom?.to ?? ""}
+          from={custom?.from ?? fmtLocalInput(from)}
+          to={custom?.to ?? fmtLocalInput(to)}
           onCustom={(f, tt) => setCustom({ from: f, to: tt })}
         />
       </HStack>
@@ -186,7 +204,7 @@ export default function UsagePage() {
           <Card.Header>
             <Heading size="sm">Most used models</Heading>
           </Card.Header>
-          <Card.Body pt={0}>
+          <Card.Body pt={3}>
             <Table.Root size="sm">
               <Table.Header>
                 <Table.Row>
@@ -223,7 +241,7 @@ export default function UsagePage() {
           <Card.Header>
             <Heading size="sm">Providers</Heading>
           </Card.Header>
-          <Card.Body pt={0}>
+          <Card.Body pt={3}>
             <Table.Root size="sm">
               <Table.Header>
                 <Table.Row>
@@ -262,7 +280,7 @@ export default function UsagePage() {
           <Card.Header>
             <Heading size="sm">By user</Heading>
           </Card.Header>
-          <Card.Body pt={0}>
+          <Card.Body pt={3}>
             <Table.Root size="sm">
               <Table.Header>
                 <Table.Row>
@@ -298,7 +316,7 @@ export default function UsagePage() {
         <Card.Header>
           <Heading size="sm">By API key</Heading>
         </Card.Header>
-        <Card.Body pt={0}>
+        <Card.Body pt={3}>
           <Table.Root size="sm">
             <Table.Header>
               <Table.Row>
@@ -338,7 +356,7 @@ export default function UsagePage() {
             last 50 requests{isSuperadmin ? " across all users" : ""}
           </Text>
         </Card.Header>
-        <Card.Body pt={0}>
+        <Card.Body pt={3}>
           <Table.Root size="sm">
             <Table.Header>
               <Table.Row>

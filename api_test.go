@@ -1012,3 +1012,51 @@ func TestChangeMyPassword(t *testing.T) {
 	// the new password logs in
 	loginAs(t, g, "pw@example.com", "brand-new-pass-1")
 }
+
+func TestUsageTimeseries(t *testing.T) {
+	st := openTestStore(t)
+	admin := &User{Name: "a", Email: "a@x.test", PasswordHash: "h", Role: "superadmin"}
+	if err := st.InsertUser(admin); err != nil {
+		t.Fatalf("seed user: %v", err)
+	}
+	day0 := int64(1790000000) // arbitrary midnight-aligned-ish base
+	day0 = day0 - day0%86400  // snap to UTC midnight
+	events := []usageEvent{
+		{TS: day0 + 3600, UserID: admin.ID, ClientKeyID: 1, Provider: "zen", Model: "m", InputTokens: 10, OutputTokens: 5, Status: 200},
+		{TS: day0 + 7200, UserID: admin.ID, ClientKeyID: 1, Provider: "kilo", Model: "m", InputTokens: 20, OutputTokens: 8, Status: 200},
+		{TS: day0 + 86400 + 60, UserID: admin.ID, ClientKeyID: 1, Provider: "zen", Model: "m", InputTokens: 100, OutputTokens: 50, Status: 200},
+	}
+	if err := st.InsertUsageEvents(events); err != nil {
+		t.Fatalf("insert: %v", err)
+	}
+
+	pts, err := st.UsageTimeseries(day0, day0+2*86400, 86400, 0, nil)
+	if err != nil {
+		t.Fatalf("timeseries: %v", err)
+	}
+	if len(pts) != 2 {
+		t.Fatalf("got %d points, want 2 daily buckets: %+v", len(pts), pts)
+	}
+	if pts[0].TS != day0 || pts[0].Requests != 2 || pts[0].InputTokens != 30 || pts[0].OutputTokens != 13 {
+		t.Fatalf("bucket 1 wrong: %+v", pts[0])
+	}
+	if pts[1].TS != day0+86400 || pts[1].Requests != 1 {
+		t.Fatalf("bucket 2 wrong: %+v", pts[1])
+	}
+
+	pp, err := st.UsageProviderTimeseries(day0, day0+2*86400, 86400, 0, nil)
+	if err != nil || len(pp) != 3 {
+		t.Fatalf("provider series: %d points err=%v, want 3", len(pp), err)
+	}
+
+	// tz shift moves the bucket boundary: +1h offset pulls the 00:00+1h event
+	// of day 2 back into day 1's late bucket? No — it moves boundaries east;
+	// the day0+3600 event lands in the previous local day when tz=+7200.
+	shifted, err := st.UsageTimeseries(day0-7200, day0+2*86400, 86400, 7200, nil)
+	if err != nil {
+		t.Fatalf("shifted: %v", err)
+	}
+	if len(shifted) < 2 {
+		t.Fatalf("shifted buckets = %d, want >= 2", len(shifted))
+	}
+}

@@ -122,6 +122,7 @@ func main() {
 	mux.HandleFunc("GET /api/dashboard", g.requireSession(g.handleDashboard))
 
 	mux.HandleFunc("GET /api/usage/summary", g.requireSession(g.handleUsageSummary))
+	mux.HandleFunc("GET /api/usage/timeseries", g.requireSession(g.handleUsageTimeseries))
 	mux.HandleFunc("GET /api/usage/users", g.requireSession(g.requireSuperadmin(g.handleUsageUsers)))
 	mux.HandleFunc("GET /api/usage/keys", g.requireSession(g.handleUsageKeys))
 	mux.HandleFunc("GET /api/usage/activity", g.requireSession(g.handleUsageActivity))

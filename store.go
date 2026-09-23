@@ -1096,6 +1096,70 @@ func scanUsageRows[T any](rows *sql.Rows, err error) ([]T, error) {
 	return out, rows.Err()
 }
 
+// --- usage time series (dashboard charts) ---
+
+type UsagePoint struct {
+	TS           int64 `json:"ts"`
+	Requests     int64 `json:"requests"`
+	InputTokens  int64 `json:"inputTokens"`
+	OutputTokens int64 `json:"outputTokens"`
+}
+
+type UsageProviderPoint struct {
+	TS       int64  `json:"ts"`
+	Provider string `json:"provider"`
+	Requests int64  `json:"requests"`
+}
+
+// usageBucketExpr buckets a unix-second column into fixed-size buckets
+// aligned to a timezone offset (seconds east of UTC), all in SQL.
+func usageBucketExpr(bucket, tz int64) string {
+	return fmt.Sprintf("((ts - %d) / %d) * %d + %d", tz, bucket, bucket, tz)
+}
+
+func (s *Store) UsageTimeseries(from, to, bucket, tz int64, userID *int64) ([]UsagePoint, error) {
+	where, args := usageScope(from, to, userID)
+	expr := usageBucketExpr(bucket, tz)
+	rows, err := s.db.Query(`SELECT `+expr+` AS b, COUNT(*),
+			COALESCE(SUM(input_tokens), 0), COALESCE(SUM(output_tokens), 0)
+		FROM usage_events WHERE `+where+` GROUP BY `+expr+` ORDER BY b`,
+		args...)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var out []UsagePoint
+	for rows.Next() {
+		var p UsagePoint
+		if err := rows.Scan(&p.TS, &p.Requests, &p.InputTokens, &p.OutputTokens); err != nil {
+			return nil, err
+		}
+		out = append(out, p)
+	}
+	return out, rows.Err()
+}
+
+func (s *Store) UsageProviderTimeseries(from, to, bucket, tz int64, userID *int64) ([]UsageProviderPoint, error) {
+	where, args := usageScope(from, to, userID)
+	expr := usageBucketExpr(bucket, tz)
+	rows, err := s.db.Query(`SELECT `+expr+` AS b, provider, COUNT(*)
+		FROM usage_events WHERE `+where+` GROUP BY `+expr+`, provider ORDER BY b`,
+		args...)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var out []UsageProviderPoint
+	for rows.Next() {
+		var p UsageProviderPoint
+		if err := rows.Scan(&p.TS, &p.Provider, &p.Requests); err != nil {
+			return nil, err
+		}
+		out = append(out, p)
+	}
+	return out, rows.Err()
+}
+
 // --- helpers ---
 
 // hashSecret is the storage form of every bearer-worthy secret (client keys,

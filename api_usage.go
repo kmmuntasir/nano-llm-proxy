@@ -127,3 +127,45 @@ func (g *gateway) handleUsageActivity(w http.ResponseWriter, r *http.Request) {
 	}
 	writeJSON(w, http.StatusOK, map[string]any{"activity": rows})
 }
+
+// handleUsageTimeseries serves GET /api/usage/timeseries — per-bucket request
+// and token counts for the dashboard charts. bucket=hour|day (default: auto —
+// hour when the range is ≤48h, day otherwise); tz is the client's offset from
+// UTC in seconds so buckets land on the viewer's local midnights.
+func (g *gateway) handleUsageTimeseries(w http.ResponseWriter, r *http.Request) {
+	from, to, ok := usageRange(r)
+	if !ok {
+		apiErr(w, http.StatusBadRequest, "invalid range")
+		return
+	}
+	bucket := int64(86400)
+	if to-from <= 48*3600 {
+		bucket = 3600
+	}
+	switch r.URL.Query().Get("bucket") {
+	case "hour":
+		bucket = 3600
+	case "day":
+		bucket = 86400
+	}
+	tz := int64(0)
+	if v := r.URL.Query().Get("tz"); v != "" {
+		if n, err := strconv.ParseInt(v, 10, 64); err == nil && n > -86400 && n < 86400 {
+			tz = n
+		}
+	}
+	scope := scopedUser(contextUser(r))
+	points, err := g.store.UsageTimeseries(from, to, bucket, tz, scope)
+	if err != nil {
+		apiErr(w, http.StatusInternalServerError, err.Error())
+		return
+	}
+	providers, err := g.store.UsageProviderTimeseries(from, to, bucket, tz, scope)
+	if err != nil {
+		apiErr(w, http.StatusInternalServerError, err.Error())
+		return
+	}
+	writeJSON(w, http.StatusOK, map[string]any{
+		"bucket": bucket, "points": points, "providers": providers,
+	})
+}

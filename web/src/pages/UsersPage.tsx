@@ -391,7 +391,7 @@ export default function UsersPage() {
         </Button>
       </HStack>
       <Card.Root>
-        <Card.Body pt={0}>
+        <Card.Body pt={3}>
           {isLoading ? (
             <Text>Loading…</Text>
           ) : error ? (
