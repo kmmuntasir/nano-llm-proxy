@@ -53,6 +53,7 @@ function AddUserModal({ open, onOpenChange }: { open: boolean; onOpenChange: (o:
   const [name, setName] = useState("")
   const [email, setEmail] = useState("")
   const [password, setPassword] = useState("")
+  const [confirm, setConfirm] = useState("")
   const [role, setRole] = useState("user")
   const [error, setError] = useState("")
 
@@ -62,30 +63,45 @@ function AddUserModal({ open, onOpenChange }: { open: boolean; onOpenChange: (o:
       setName("")
       setEmail("")
       setPassword("")
+      setConfirm("")
       setRole("user")
       setError("")
       onOpenChange(false)
       await qc.invalidateQueries({ queryKey: ["users"] })
       toaster.create({ title: "User created", type: "success" })
     },
-    onError: (e) => setError(e instanceof ApiError ? e.message : "create failed"),
+    onError: (e) => {
+      const msg = e instanceof ApiError ? e.message : "create failed"
+      setError(msg)
+      toaster.create({ title: msg, type: "error" })
+    },
   })
+
+  const submit = () => {
+    setError("")
+    if (password !== confirm) {
+      setError("passwords don't match")
+      return
+    }
+    create.mutate()
+  }
 
   return (
     <Dialog.Root open={open} onOpenChange={(e) => onOpenChange(e.open)}>
       <Dialog.Backdrop />
       <Dialog.Positioner>
-        <Dialog.Content as="form" maxW="440px">
+        <Dialog.Content
+          as="form"
+          maxW="440px"
+          onSubmit={(e) => {
+            e.preventDefault()
+            submit()
+          }}
+        >
           <Dialog.Header>
             <Dialog.Title>Add user</Dialog.Title>
           </Dialog.Header>
-          <Dialog.Body
-            as="form"
-            onSubmit={(e) => {
-              e.preventDefault()
-              create.mutate()
-            }}
-          >
+          <Dialog.Body>
             <VStack align="stretch" gap={3}>
               <Field.Root required>
                 <Field.Label>Name</Field.Label>
@@ -96,13 +112,21 @@ function AddUserModal({ open, onOpenChange }: { open: boolean; onOpenChange: (o:
                 <Input type="email" value={email} onChange={(e) => setEmail(e.target.value)} />
               </Field.Root>
               <Field.Root required>
-                <Field.Label>Password</Field.Label>
+                <Field.Label>New password</Field.Label>
                 <PasswordInput
                   value={password}
                   onChange={(e) => setPassword(e.target.value)}
                   autoComplete="new-password"
                 />
                 <Field.HelperText>min 10 chars</Field.HelperText>
+              </Field.Root>
+              <Field.Root required>
+                <Field.Label>Confirm password</Field.Label>
+                <PasswordInput
+                  value={confirm}
+                  onChange={(e) => setConfirm(e.target.value)}
+                  autoComplete="new-password"
+                />
               </Field.Root>
               <RoleField value={role} onChange={setRole} />
               {error && (
@@ -114,9 +138,11 @@ function AddUserModal({ open, onOpenChange }: { open: boolean; onOpenChange: (o:
           </Dialog.Body>
           <Dialog.Footer>
             <Dialog.ActionTrigger asChild>
-              <Button variant="outline">Cancel</Button>
+              <Button type="button" variant="outline">
+                Cancel
+              </Button>
             </Dialog.ActionTrigger>
-            <Button colorPalette="blue" loading={create.isPending} onClick={() => create.mutate()}>
+            <Button type="submit" colorPalette="blue" loading={create.isPending}>
               Create
             </Button>
           </Dialog.Footer>
@@ -139,12 +165,14 @@ function ResetPasswordModal({
 }) {
   const qc = useQueryClient()
   const [password, setPassword] = useState("")
+  const [confirm, setConfirm] = useState("")
   const [error, setError] = useState("")
 
   const reset = useMutation({
     mutationFn: () => patch(`/api/users/${user.id}`, { password }),
     onSuccess: async () => {
       setPassword("")
+      setConfirm("")
       setError("")
       onOpenChange(false)
       await qc.invalidateQueries({ queryKey: ["users"] })
@@ -153,14 +181,34 @@ function ResetPasswordModal({
         type: "success",
       })
     },
-    onError: (e) => setError(e instanceof ApiError ? e.message : "reset failed"),
+    onError: (e) => {
+      const msg = e instanceof ApiError ? e.message : "reset failed"
+      setError(msg)
+      toaster.create({ title: msg, type: "error" })
+    },
   })
+
+  const submit = () => {
+    setError("")
+    if (password !== confirm) {
+      setError("passwords don't match")
+      return
+    }
+    reset.mutate()
+  }
 
   return (
     <Dialog.Root open={open} onOpenChange={(e) => onOpenChange(e.open)}>
       <Dialog.Backdrop />
       <Dialog.Positioner>
-        <Dialog.Content as="form" maxW="420px">
+        <Dialog.Content
+          as="form"
+          maxW="420px"
+          onSubmit={(e) => {
+            e.preventDefault()
+            submit()
+          }}
+        >
           <Dialog.Header>
             <Dialog.Title>Reset password — {user.email}</Dialog.Title>
           </Dialog.Header>
@@ -177,6 +225,14 @@ function ResetPasswordModal({
                   min 10 chars; all their sessions are logged out
                 </Field.HelperText>
               </Field.Root>
+              <Field.Root required>
+                <Field.Label>Confirm password</Field.Label>
+                <PasswordInput
+                  value={confirm}
+                  onChange={(e) => setConfirm(e.target.value)}
+                  autoComplete="new-password"
+                />
+              </Field.Root>
               {error && (
                 <Text color="red.fg" fontSize="sm">
                   {error}
@@ -186,13 +242,11 @@ function ResetPasswordModal({
           </Dialog.Body>
           <Dialog.Footer>
             <Dialog.ActionTrigger asChild>
-              <Button variant="outline">Cancel</Button>
+              <Button type="button" variant="outline">
+                Cancel
+              </Button>
             </Dialog.ActionTrigger>
-            <Button
-              colorPalette="blue"
-              loading={reset.isPending}
-              onClick={() => reset.mutate()}
-            >
+            <Button type="submit" colorPalette="blue" loading={reset.isPending}>
               Reset password
             </Button>
           </Dialog.Footer>
@@ -287,7 +341,10 @@ function UserRow({ u, isSelf }: { u: UserView; isSelf: boolean }) {
 
   const patchU = useMutation({
     mutationFn: (body: Record<string, unknown>) => patch(`/api/users/${u.id}`, body),
-    onSuccess: () => void qc.invalidateQueries({ queryKey: ["users"] }),
+    onSuccess: async () => {
+      await qc.invalidateQueries({ queryKey: ["users"] })
+      toaster.create({ title: "User updated", type: "success" })
+    },
     onError: (e) =>
       toaster.create({ title: e instanceof ApiError ? e.message : "update failed", type: "error" }),
   })

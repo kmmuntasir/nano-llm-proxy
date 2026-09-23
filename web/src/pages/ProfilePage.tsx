@@ -4,6 +4,7 @@ import {
   Badge,
   Button,
   Card,
+  Dialog,
   Field,
   Heading,
   HStack,
@@ -11,14 +12,16 @@ import {
   VStack,
 } from "@chakra-ui/react"
 import { useNavigate } from "react-router-dom"
+import { KeyRound } from "lucide-react"
 import { post, ApiError } from "../api/client"
 import { PasswordInput } from "../components/ui/password-input"
+import { toaster } from "../components/ui/toaster"
 import { useSession } from "../App"
 import MyKeysPage from "./MyKeysPage"
 
-// ChangePasswordCard: self-service reset gated on the current password. The
+// ChangePasswordModal: self-service reset gated on the current password. The
 // server wipes every session on success, so the client bounces to login.
-function ChangePasswordCard() {
+function ChangePasswordModal({ open, onOpenChange }: { open: boolean; onOpenChange: (o: boolean) => void }) {
   const qc = useQueryClient()
   const navigate = useNavigate()
   const [current, setCurrent] = useState("")
@@ -29,10 +32,20 @@ function ChangePasswordCard() {
   const change = useMutation({
     mutationFn: () => post("/api/me/password", { currentPassword: current, newPassword: next }),
     onSuccess: async () => {
+      onOpenChange(false)
+      toaster.create({
+        title: "Password changed",
+        description: "Sign in again with your new password",
+        type: "success",
+      })
       qc.clear()
       navigate("/login")
     },
-    onError: (e) => setError(e instanceof ApiError ? e.message : "change failed"),
+    onError: (e) => {
+      const msg = e instanceof ApiError ? e.message : "change failed"
+      setError(msg)
+      toaster.create({ title: msg, type: "error" })
+    },
   })
 
   const submit = () => {
@@ -45,63 +58,78 @@ function ChangePasswordCard() {
   }
 
   return (
-    <Card.Root>
-      <Card.Header>
-        <Heading size="sm">Change password</Heading>
-        <Text fontSize="xs" color="fg.muted">
-          Changing your password logs out every session, including this one.
-        </Text>
-      </Card.Header>
-      <Card.Body>
-        <form
+    <Dialog.Root open={open} onOpenChange={(e) => onOpenChange(e.open)}>
+      <Dialog.Backdrop />
+      <Dialog.Positioner>
+        <Dialog.Content
+          as="form"
+          maxW="420px"
           onSubmit={(e) => {
             e.preventDefault()
             submit()
           }}
         >
-          <VStack align="stretch" gap={3} maxW="360px">
-            <Field.Root required>
-              <Field.Label>Current password</Field.Label>
-              <PasswordInput
-                value={current}
-                onChange={(e) => setCurrent(e.target.value)}
-                autoComplete="current-password"
-              />
-            </Field.Root>
-            <Field.Root required>
-              <Field.Label>New password</Field.Label>
-              <PasswordInput
-                value={next}
-                onChange={(e) => setNext(e.target.value)}
-                autoComplete="new-password"
-              />
-              <Field.HelperText>min 10 chars</Field.HelperText>
-            </Field.Root>
-            <Field.Root required>
-              <Field.Label>Confirm new password</Field.Label>
-              <PasswordInput
-                value={confirm}
-                onChange={(e) => setConfirm(e.target.value)}
-                autoComplete="new-password"
-              />
-            </Field.Root>
-            {error && (
-              <Text color="red.fg" fontSize="sm">
-                {error}
+          <Dialog.Header>
+            <Dialog.Title>Change password</Dialog.Title>
+          </Dialog.Header>
+          <Dialog.Body>
+            <VStack align="stretch" gap={3}>
+              <Field.Root required>
+                <Field.Label>Current password</Field.Label>
+                <PasswordInput
+                  value={current}
+                  onChange={(e) => setCurrent(e.target.value)}
+                  autoComplete="current-password"
+                />
+              </Field.Root>
+              <Field.Root required>
+                <Field.Label>New password</Field.Label>
+                <PasswordInput
+                  value={next}
+                  onChange={(e) => setNext(e.target.value)}
+                  autoComplete="new-password"
+                />
+                <Field.HelperText>min 10 chars</Field.HelperText>
+              </Field.Root>
+              <Field.Root required>
+                <Field.Label>Confirm new password</Field.Label>
+                <PasswordInput
+                  value={confirm}
+                  onChange={(e) => setConfirm(e.target.value)}
+                  autoComplete="new-password"
+                />
+              </Field.Root>
+              {error && (
+                <Text color="red.fg" fontSize="sm">
+                  {error}
+                </Text>
+              )}
+              <Text fontSize="xs" color="fg.muted">
+                Changing your password logs out every session, including this
+                one.
               </Text>
-            )}
-            <Button type="submit" colorPalette="blue" loading={change.isPending} w="fit-content">
+            </VStack>
+          </Dialog.Body>
+          <Dialog.Footer>
+            <Dialog.ActionTrigger asChild>
+              <Button type="button" variant="outline">
+                Cancel
+              </Button>
+            </Dialog.ActionTrigger>
+            <Button type="submit" colorPalette="blue" loading={change.isPending}>
               Change password
             </Button>
-          </VStack>
-        </form>
-      </Card.Body>
-    </Card.Root>
+          </Dialog.Footer>
+          <Dialog.CloseTrigger />
+        </Dialog.Content>
+      </Dialog.Positioner>
+    </Dialog.Root>
   )
 }
 
 export default function ProfilePage() {
   const { data } = useSession()
+  const [changing, setChanging] = useState(false)
 
   return (
     <VStack align="stretch" gap={6}>
@@ -109,9 +137,19 @@ export default function ProfilePage() {
 
       <Card.Root>
         <Card.Header>
-          <Heading size="sm">Account</Heading>
+          <HStack justify="space-between" flexWrap="wrap" gap={2}>
+            <Heading size="sm">Account</Heading>
+            <Button
+              size="xs"
+              variant="outline"
+              onClick={() => setChanging(true)}
+              aria-label="change password"
+            >
+              <KeyRound /> Change password
+            </Button>
+          </HStack>
         </Card.Header>
-        <Card.Body>
+        <Card.Body pt={3}>
           <HStack gap={6} flexWrap="wrap">
             <VStack align="start" gap={0}>
               <Text fontSize="xs" color="fg.muted">
@@ -137,7 +175,7 @@ export default function ProfilePage() {
         </Card.Body>
       </Card.Root>
 
-      <ChangePasswordCard />
+      <ChangePasswordModal open={changing} onOpenChange={setChanging} />
 
       <MyKeysPage />
     </VStack>
