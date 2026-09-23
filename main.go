@@ -91,6 +91,7 @@ func main() {
 	mux.HandleFunc("POST /api/auth/login", g.handleLogin)
 	mux.HandleFunc("POST /api/auth/logout", g.requireSession(g.handleLogout))
 	mux.HandleFunc("GET /api/auth/me", g.requireSession(g.handleMe))
+	mux.HandleFunc("POST /api/me/password", g.requireSession(g.handleChangeMyPassword))
 
 	mux.HandleFunc("GET /api/me/keys", g.requireSession(g.handleListMyKeys))
 	mux.HandleFunc("POST /api/me/keys", g.requireSession(g.handleCreateMyKey))
@@ -119,6 +120,12 @@ func main() {
 	mux.HandleFunc("POST /api/settings/model-meta/sync", g.requireSession(g.requireSuperadmin(g.handleSyncModelMeta)))
 
 	mux.HandleFunc("GET /api/dashboard", g.requireSession(g.handleDashboard))
+
+	mux.HandleFunc("GET /api/usage/summary", g.requireSession(g.handleUsageSummary))
+	mux.HandleFunc("GET /api/usage/users", g.requireSession(g.requireSuperadmin(g.handleUsageUsers)))
+	mux.HandleFunc("GET /api/usage/keys", g.requireSession(g.handleUsageKeys))
+	mux.HandleFunc("GET /api/usage/activity", g.requireSession(g.handleUsageActivity))
+
 	mux.Handle("/", g.serveWeb())
 
 	addr := fmt.Sprintf("%s:%d", cfg.Bind, cfg.Port)
@@ -139,10 +146,16 @@ func (g *gateway) maintenanceLoop() {
 	defer prune.Stop()
 	for range flush.C {
 		g.usage.flush(g.store)
+		if events := g.usageBuf.drain(); len(events) > 0 {
+			if err := g.store.InsertUsageEvents(events); err != nil {
+				log.Printf("usage flush: %v", err)
+			}
+		}
 		g.maybeSyncModelMeta() // 24h-gated, async, at most one in flight
 		// prune piggybacks on the flush tick, roughly hourly
 		if time.Since(startTime)%time.Hour < 30*time.Second {
 			g.store.DeleteExpiredSessions() //nolint:errcheck
+			g.store.PruneUsageEvents(usageCutoff())
 		}
 	}
 }

@@ -1,4 +1,4 @@
-import { useEffect, useState } from "react"
+import { Suspense, lazy, useEffect, useState } from "react"
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query"
 import {
   Button,
@@ -6,36 +6,34 @@ import {
   Field,
   Heading,
   HStack,
-  IconButton,
   Input,
   NativeSelect,
   Switch,
   Text,
-  Textarea,
   VStack,
 } from "@chakra-ui/react"
-import { FiPlus, FiRefreshCw, FiTrash2 } from "react-icons/fi"
+import { RefreshCw } from "lucide-react"
 import { api, post, put, ApiError } from "../api/client"
 import type { ModelMetaSyncStatusView, RuntimeSettingsView } from "../api/types"
 import { toaster } from "../components/ui/toaster"
 
-// Editing form for the runtime settings document. responsesModels and
-// modelMeta are kept as raw text while editing and parsed on save; everything
-// else round-trips as-is. modelMetaSyncStatus is server-owned and never sent.
+// CodeMirror is heavy — only the Settings page needs it, so it loads on
+// demand and stays out of the initial bundle everyone else downloads.
+const JsonEditor = lazy(() => import("../components/JsonEditor"))
 
-interface AliasRow {
-  from: string
-  to: string
-}
+// Editing form for the runtime settings document. responsesModels and
+// modelMeta are kept as JSON text while editing (CodeMirror editors) and
+// parsed on save; everything else round-trips as-is. modelMetaSyncStatus is
+// server-owned and never sent.
 
 interface SettingsForm {
   rotation: "priority" | "lru"
   retry: RuntimeSettingsView["retry"]
-  aliases: AliasRow[]
+  fallbackModel: string
   userAgent: string
   injectTools: boolean
   zenFreeOnly: boolean
-  responsesModelsText: string
+  responsesModelsJSON: string
   modelMetaAutoSync: boolean
   modelMetaJSON: string
   kiloFreeOnly: boolean
@@ -45,11 +43,11 @@ function hydrate(s: RuntimeSettingsView): SettingsForm {
   return {
     rotation: s.rotation,
     retry: { ...s.retry },
-    aliases: Object.entries(s.anthropic.aliases ?? {}).map(([from, to]) => ({ from, to })),
+    fallbackModel: s.anthropic.fallbackModel ?? "",
     userAgent: s.zen.userAgent,
     injectTools: s.zen.injectTools,
     zenFreeOnly: s.zen.freeOnly,
-    responsesModelsText: (s.zen.responsesModels ?? []).join(", "),
+    responsesModelsJSON: JSON.stringify(s.zen.responsesModels ?? [], null, 2),
     modelMetaAutoSync: s.zen.modelMetaAutoSync,
     modelMetaJSON: JSON.stringify(s.zen.modelMeta ?? {}, null, 2),
     kiloFreeOnly: s.kilo.freeOnly,
@@ -60,29 +58,31 @@ function buildPayload(
   f: SettingsForm,
 ): { ok: true; value: RuntimeSettingsView } | { ok: false; error: string } {
   let modelMeta: RuntimeSettingsView["zen"]["modelMeta"]
+  let responsesModels: string[]
   try {
     modelMeta = JSON.parse(f.modelMetaJSON || "{}")
   } catch (e) {
     return { ok: false, error: `modelMeta is not valid JSON: ${e instanceof Error ? e.message : "parse error"}` }
   }
-  const aliases: Record<string, string> = {}
-  for (const { from, to } of f.aliases) {
-    if (from.trim() === "") continue
-    aliases[from.trim()] = to.trim()
+  try {
+    const parsed = JSON.parse(f.responsesModelsJSON || "[]")
+    if (!Array.isArray(parsed) || parsed.some((m) => typeof m !== "string")) {
+      return { ok: false, error: "responsesModels must be a JSON array of strings" }
+    }
+    responsesModels = parsed
+  } catch (e) {
+    return { ok: false, error: `responsesModels is not valid JSON: ${e instanceof Error ? e.message : "parse error"}` }
   }
   return {
     ok: true,
     value: {
       rotation: f.rotation,
       retry: { ...f.retry },
-      anthropic: { aliases },
+      anthropic: { fallbackModel: f.fallbackModel.trim() },
       zen: {
         userAgent: f.userAgent,
         injectTools: f.injectTools,
-        responsesModels: f.responsesModelsText
-          .split(",")
-          .map((s) => s.trim())
-          .filter(Boolean),
+        responsesModels,
         freeOnly: f.zenFreeOnly,
         modelMeta,
         modelMetaAutoSync: f.modelMetaAutoSync,
@@ -127,7 +127,7 @@ function SyncCard({ status }: { status?: ModelMetaSyncStatusView }) {
       <Card.Body>
         <HStack gap={3} align="center">
           <Button colorPalette="blue" size="sm" loading={sync.isPending} onClick={() => sync.mutate()}>
-            <FiRefreshCw /> Sync now
+            <RefreshCw /> Sync now
           </Button>
           {status ? (
             status.ok ? (
@@ -203,16 +203,17 @@ export default function SettingsPage() {
           <Heading size="sm">Routing</Heading>
         </Card.Header>
         <Card.Body>
-          <Field.Root w="280px">
+          <Field.Root w="380px">
             <Field.Label>Rotation strategy</Field.Label>
             <NativeSelect.Root size="sm">
               <NativeSelect.Field
                 value={form.rotation}
                 onChange={(e) => set({ rotation: e.target.value as SettingsForm["rotation"] })}
               >
-                <option value="priority">priority — stick to the first healthy key</option>
-                <option value="lru">lru — spread load evenly</option>
+                <option value="priority">Priority — stick to the first healthy key</option>
+                <option value="lru">LRU — spread load evenly</option>
               </NativeSelect.Field>
+              <NativeSelect.Indicator />
             </NativeSelect.Root>
             <Field.HelperText>
               Applies to every provider pool the moment you save.
@@ -276,64 +277,32 @@ export default function SettingsPage() {
         </Card.Body>
       </Card.Root>
 
-      {/* anthropic aliases */}
+      {/* anthropic fallback */}
       <Card.Root>
         <Card.Header>
-          <Heading size="sm">Anthropic aliases</Heading>
+          <Heading size="sm">Anthropic fallback</Heading>
           <Text fontSize="xs" color="fg.muted">
-            Rewrites model names on /v1/messages — e.g. Claude Code asking for{" "}
-            <code>claude-sonnet-5</code> can be routed to any provider/model.
+            Clients configure their main models verbatim (Claude Code env slots
+            in <code>~/.claude/settings.json</code>). This target catches the
+            literal <code>claude-*</code> names clients still send for
+            background tasks — titling, summarization. Point it at a cheap
+            model; leave empty to pass such requests through untouched.
           </Text>
         </Card.Header>
         <Card.Body>
-          <VStack align="stretch" gap={2}>
-            {form.aliases.map((row, i) => (
-              <HStack key={i} gap={2}>
-                <Input
-                  placeholder="claude-sonnet-5"
-                  value={row.from}
-                  fontFamily="mono"
-                  size="sm"
-                  onChange={(e) => {
-                    const aliases = [...form.aliases]
-                    aliases[i] = { ...aliases[i], from: e.target.value }
-                    set({ aliases })
-                  }}
-                />
-                <Text fontSize="sm" color="fg.muted">
-                  →
-                </Text>
-                <Input
-                  placeholder="zen/glm-5"
-                  value={row.to}
-                  fontFamily="mono"
-                  size="sm"
-                  onChange={(e) => {
-                    const aliases = [...form.aliases]
-                    aliases[i] = { ...aliases[i], to: e.target.value }
-                    set({ aliases })
-                  }}
-                />
-                <IconButton
-                  variant="ghost"
-                  size="xs"
-                  aria-label="remove alias"
-                  colorPalette="red"
-                  onClick={() => set({ aliases: form.aliases.filter((_, j) => j !== i) })}
-                >
-                  <FiTrash2 />
-                </IconButton>
-              </HStack>
-            ))}
-          </VStack>
-          <Button
-            size="2xs"
-            variant="outline"
-            mt={3}
-            onClick={() => set({ aliases: [...form.aliases, { from: "", to: "" }] })}
-          >
-            <FiPlus /> Add alias
-          </Button>
+          <Field.Root w="380px">
+            <Field.Label>Fallback target</Field.Label>
+            <Input
+              placeholder="zen/mimo-v2.6-flash-free"
+              value={form.fallbackModel}
+              fontFamily="mono"
+              onChange={(e) => set({ fallbackModel: e.target.value })}
+            />
+            <Field.HelperText>
+              Any model starting with <code>claude-</code> (without an explicit{" "}
+              <code>provider/</code> prefix) routes here.
+            </Field.HelperText>
+          </Field.Root>
         </Card.Body>
       </Card.Root>
 
@@ -344,7 +313,7 @@ export default function SettingsPage() {
         </Card.Header>
         <Card.Body>
           <VStack align="stretch" gap={4}>
-            <Field.Root w="320px">
+            <Field.Root w="380px">
               <Field.Label>User agent</Field.Label>
               <Input
                 value={form.userAgent}
@@ -355,15 +324,6 @@ export default function SettingsPage() {
                 Must be <code>opencode/1.18.0</code> or newer — the whole pool
                 would get 426s otherwise.
               </Field.HelperText>
-            </Field.Root>
-            <Field.Root w="320px">
-              <Field.Label>Responses-API models</Field.Label>
-              <Input
-                value={form.responsesModelsText}
-                placeholder="comma-separated model ids"
-                onChange={(e) => set({ responsesModelsText: e.target.value })}
-              />
-              <Field.HelperText>Which zen models speak /v1/responses.</Field.HelperText>
             </Field.Root>
             <HStack gap={6} flexWrap="wrap">
               <Switch.Root
@@ -398,18 +358,33 @@ export default function SettingsPage() {
               </Switch.Root>
             </HStack>
             <Field.Root>
+              <Field.Label>Responses-API models (JSON array)</Field.Label>
+              <Text fontSize="xs" color="fg.muted" mb={1}>
+                Which zen models speak /v1/responses.
+              </Text>
+              <Suspense fallback={<Text fontSize="sm" color="fg.muted">Loading editor…</Text>}>
+                <JsonEditor
+                  value={form.responsesModelsJSON}
+                  onChange={(v) => set({ responsesModelsJSON: v })}
+                  label="Zen Responses-API models"
+                  height="160px"
+                />
+              </Suspense>
+            </Field.Root>
+            <Field.Root>
               <Field.Label>modelMeta (JSON)</Field.Label>
-              <Textarea
-                value={form.modelMetaJSON}
-                fontFamily="mono"
-                fontSize="sm"
-                rows={12}
-                onChange={(e) => set({ modelMetaJSON: e.target.value })}
-              />
-              <Field.HelperText>
+              <Text fontSize="xs" color="fg.muted" mb={1}>
                 Per-model corrections over the catalog defaults; validated on
                 save.
-              </Field.HelperText>
+              </Text>
+              <Suspense fallback={<Text fontSize="sm" color="fg.muted">Loading editor…</Text>}>
+                <JsonEditor
+                  value={form.modelMetaJSON}
+                  onChange={(v) => set({ modelMetaJSON: v })}
+                  label="Zen modelMeta"
+                  height="260px"
+                />
+              </Suspense>
             </Field.Root>
           </VStack>
         </Card.Body>

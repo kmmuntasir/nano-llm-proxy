@@ -5,6 +5,7 @@ import {
   Button,
   Card,
   Code,
+  Collapsible,
   Field,
   Heading,
   HStack,
@@ -15,7 +16,7 @@ import {
   Text,
   VStack,
 } from "@chakra-ui/react"
-import { FiPlus, FiTrash2 } from "react-icons/fi"
+import { ChevronDown, ChevronUp, Plus, Trash2 } from "lucide-react"
 import { api, del, patch, post, ApiError } from "../api/client"
 import type { ProviderKeyView, ProviderView } from "../api/types"
 import ConfirmDialog from "../components/ConfirmDialog"
@@ -90,7 +91,7 @@ function AddProviderCard() {
               />
             </Field.Root>
             <Button type="submit" colorPalette="blue" loading={create.isPending}>
-              <FiPlus /> Add
+              <Plus /> Add
             </Button>
           </HStack>
           {error && (
@@ -158,7 +159,7 @@ function ProviderKeyRow({ provider, k }: { provider: ProviderView; k: ProviderKe
           colorPalette="red"
           onClick={() => setToDelete(true)}
         >
-          <FiTrash2 />
+          <Trash2 />
         </IconButton>
       </HStack>
       <ConfirmDialog
@@ -180,6 +181,7 @@ function ProviderCard({ p }: { p: ProviderView }) {
   const [newKey, setNewKey] = useState("")
   const [toDelete, setToDelete] = useState(false)
   const [editURL, setEditURL] = useState<string | null>(null)
+  const [keysOpen, setKeysOpen] = useState(false)
   const invalidate = () => void qc.invalidateQueries({ queryKey: ["providers"] })
 
   const patchP = useMutation({
@@ -233,7 +235,7 @@ function ProviderCard({ p }: { p: ProviderView }) {
                 colorPalette="red"
                 onClick={() => setToDelete(true)}
               >
-                <FiTrash2 />
+                <Trash2 />
               </IconButton>
             )}
             <Switch.Root
@@ -277,33 +279,69 @@ function ProviderCard({ p }: { p: ProviderView }) {
           )}
         </HStack>
 
-        <Stack gap={0}>
-          {p.keys.map((k) => (
-            <ProviderKeyRow key={k.id} provider={p} k={k} />
-          ))}
-        </Stack>
-
-        <form
-          onSubmit={(e) => {
-            e.preventDefault()
-            addKey.mutate()
-          }}
+        {/* keys live in their own collapsed sub-card: builtin providers carry
+            long key lists that would otherwise dwarf the card header */}
+        <Collapsible.Root
+          open={keysOpen}
+          onOpenChange={(e) => setKeysOpen(e.open)}
         >
-          <HStack gap={2}>
-            <Input
-              size="xs"
-              type="password"
-              placeholder="add upstream API key"
-              value={newKey}
-              onChange={(e) => setNewKey(e.target.value)}
-              fontFamily="mono"
-              maxW="280px"
-            />
-            <Button size="2xs" type="submit" loading={addKey.isPending}>
-              <FiPlus /> Add key
-            </Button>
-          </HStack>
-        </form>
+          <Card.Root variant="subtle" bg="bg.subtle">
+            <Collapsible.Trigger asChild>
+              <HStack
+                as="button"
+                px={4}
+                py={3}
+                justify="space-between"
+                width="full"
+                cursor="pointer"
+                _hover={{ bg: "bg.emphasized" }}
+              >
+                <HStack gap={2}>
+                  {keysOpen ? <ChevronUp size="14" /> : <ChevronDown size="14" />}
+                  <Text fontSize="sm" fontWeight="medium">
+                    Upstream keys ({p.keys.length})
+                  </Text>
+                </HStack>
+                <Badge colorPalette={p.healthy > 0 ? "green" : "red"} variant="subtle">
+                  {p.healthy}/{p.total} healthy
+                </Badge>
+              </HStack>
+            </Collapsible.Trigger>
+            <Collapsible.Content>
+              <Stack gap={0} px={4} pb={4}>
+                {p.keys.map((k) => (
+                  <ProviderKeyRow key={k.id} provider={p} k={k} />
+                ))}
+                {p.keys.length === 0 && (
+                  <Text fontSize="sm" color="fg.muted">
+                    No keys yet — add one below.
+                  </Text>
+                )}
+                <form
+                  onSubmit={(e) => {
+                    e.preventDefault()
+                    addKey.mutate()
+                  }}
+                >
+                  <HStack gap={2} mt={2}>
+                    <Input
+                      size="xs"
+                      type="password"
+                      placeholder="add upstream API key"
+                      value={newKey}
+                      onChange={(e) => setNewKey(e.target.value)}
+                      fontFamily="mono"
+                      maxW="280px"
+                    />
+                    <Button size="2xs" type="submit" loading={addKey.isPending}>
+                      <Plus /> Add key
+                    </Button>
+                  </HStack>
+                </form>
+              </Stack>
+            </Collapsible.Content>
+          </Card.Root>
+        </Collapsible.Root>
       </Card.Body>
 
       <ConfirmDialog

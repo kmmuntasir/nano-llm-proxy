@@ -13,16 +13,17 @@ import {
   VStack,
 } from "@chakra-ui/react"
 import {
-  FiActivity,
-  FiLogOut,
-  FiMenu,
-  FiMoon,
-  FiServer,
-  FiSliders,
-  FiSun,
-  FiUsers,
-  FiKey,
-} from "react-icons/fi"
+  Activity,
+  BarChart3,
+  LogOut,
+  Menu as MenuIcon,
+  Moon,
+  Server,
+  Settings,
+  Sun,
+  User,
+  Users,
+} from "lucide-react"
 import { useColorMode } from "./ui/color-mode"
 import { useTheme } from "next-themes"
 import { post } from "../api/client"
@@ -36,11 +37,12 @@ interface NavItem {
 }
 
 const navItems: NavItem[] = [
-  { to: "/", label: "Dashboard", icon: FiActivity },
-  { to: "/keys", label: "My API Keys", icon: FiKey },
-  { to: "/users", label: "Users", icon: FiUsers, superadminOnly: true },
-  { to: "/providers", label: "Providers", icon: FiServer, superadminOnly: true },
-  { to: "/settings", label: "Settings", icon: FiSliders, superadminOnly: true },
+  { to: "/", label: "Dashboard", icon: Activity },
+  { to: "/usage", label: "Usage", icon: BarChart3 },
+  { to: "/profile", label: "Profile", icon: User },
+  { to: "/users", label: "Users", icon: Users, superadminOnly: true },
+  { to: "/providers", label: "Providers", icon: Server, superadminOnly: true },
+  { to: "/settings", label: "Settings", icon: Settings, superadminOnly: true },
 ]
 
 function ColorModeMenu() {
@@ -50,20 +52,20 @@ function ColorModeMenu() {
     <Menu.Root>
       <Menu.Trigger asChild>
         <IconButton variant="ghost" size="sm" aria-label="color mode">
-          {colorMode === "dark" ? <FiMoon /> : <FiSun />}
+          {colorMode === "dark" ? <Moon /> : <Sun />}
         </IconButton>
       </Menu.Trigger>
       <Portal>
         <Menu.Positioner>
           <Menu.Content>
             <Menu.Item value="light" onClick={() => setTheme("light")}>
-              <FiSun /> Light
+              <Sun /> Light
             </Menu.Item>
             <Menu.Item value="dark" onClick={() => setTheme("dark")}>
-              <FiMoon /> Dark
+              <Moon /> Dark
             </Menu.Item>
             <Menu.Item value="system" onClick={() => setTheme("system")}>
-              <FiMenu /> System
+              <MenuIcon /> System
             </Menu.Item>
           </Menu.Content>
         </Menu.Positioner>
@@ -89,7 +91,7 @@ export default function AppLayout({ children }: { children: ReactNode }) {
 
   return (
     <Flex minH="100vh">
-      {/* sidebar (desktop) */}
+      {/* sidebar (desktop) — fixed to the viewport, scrolls independently */}
       <VStack
         as="aside"
         align="stretch"
@@ -98,6 +100,11 @@ export default function AppLayout({ children }: { children: ReactNode }) {
         p={4}
         borderRightWidth="1px"
         display={{ base: "none", md: "flex" }}
+        position="sticky"
+        top={0}
+        h="100vh"
+        overflowY="auto"
+        flexShrink={0}
       >
         <Heading size="md" mb={6} px={2}>
           nano-llm-proxy
@@ -136,7 +143,7 @@ export default function AppLayout({ children }: { children: ReactNode }) {
               title="log out"
               onClick={() => logout.mutate()}
             >
-              <FiLogOut />
+              <LogOut />
             </IconButton>
           </HStack>
         </Box>
@@ -147,7 +154,7 @@ export default function AppLayout({ children }: { children: ReactNode }) {
         <Menu.Root>
           <Menu.Trigger asChild>
             <IconButton variant="outline" aria-label="menu">
-              <FiMenu />
+              <MenuIcon />
             </IconButton>
           </Menu.Trigger>
           <Portal>
@@ -165,7 +172,7 @@ export default function AppLayout({ children }: { children: ReactNode }) {
                     logout.mutate()
                   }}
                 >
-                  <FiLogOut /> Log out
+                  <LogOut /> Log out
                 </Menu.Item>
               </Menu.Content>
             </Menu.Positioner>
@@ -173,7 +180,7 @@ export default function AppLayout({ children }: { children: ReactNode }) {
         </Menu.Root>
       </Box>
 
-      <Box as="main" flex={1} p={6} maxW="1100px">
+      <Box as="main" flex={1} p={6} minW={0}>
         {children}
       </Box>
     </Flex>

@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"io"
 	"net/http"
+	"strings"
 )
 
 // sseLines reads an SSE body, invoking fn for each `data:` payload.
@@ -41,34 +42,87 @@ func startSSE(w http.ResponseWriter) {
 	w.WriteHeader(http.StatusOK)
 }
 
+// usageChunk is the usage block OpenAI-compatible streams/attachments carry
+// (field names vary across providers, so both spellings are accepted).
+type usageChunk struct {
+	Usage *struct {
+		PromptTokens     int64 `json:"prompt_tokens"`
+		CompletionTokens int64 `json:"completion_tokens"`
+		InputTokens      int64 `json:"input_tokens"`
+		OutputTokens     int64 `json:"output_tokens"`
+	} `json:"usage"`
+}
+
+func (u *usageChunk) into(t *tokenUsage) {
+	if u.Usage == nil {
+		return
+	}
+	in, out := u.Usage.PromptTokens, u.Usage.CompletionTokens
+	if in == 0 {
+		in = u.Usage.InputTokens
+	}
+	if out == 0 {
+		out = u.Usage.OutputTokens
+	}
+	t.add(in, out)
+}
+
 // streamKilo passes a kilo 200-response through verbatim (both stream and
-// non-stream bodies; the upstream shape already matches the client's request).
-func streamKilo(w http.ResponseWriter, resp *http.Response, _ bool) {
+// non-stream bodies; the upstream shape already matches the client's request)
+// while tapping the usage block for the usage log.
+func streamKilo(w http.ResponseWriter, resp *http.Response) tokenUsage {
 	ct := resp.Header.Get("Content-Type")
+	tu := tokenUsage{}
+
+	if strings.Contains(ct, "text/event-stream") {
+		startSSE(w)
+		flush(w)
+		sseLines(resp.Body, func(payload []byte) {
+			var uc usageChunk
+			if json.Unmarshal(payload, &uc) == nil {
+				uc.into(&tu)
+			}
+			w.Write([]byte("data: "))
+			w.Write(payload)
+			w.Write([]byte("\n\n"))
+			flush(w)
+		})
+		w.Write([]byte("data: [DONE]\n\n"))
+		flush(w)
+		return tu
+	}
+
+	// non-streaming JSON: buffer (bounded), tap usage, pass through verbatim
+	body, err := io.ReadAll(io.LimitReader(resp.Body, 20<<20))
 	if ct == "" {
 		ct = "application/json"
 	}
 	w.Header().Set("Content-Type", ct)
 	w.WriteHeader(http.StatusOK)
 	flush(w)
-	buf := make([]byte, 32*1024)
-	for {
-		n, err := resp.Body.Read(buf)
-		if n > 0 {
-			w.Write(buf[:n])
-			flush(w)
-		}
-		if err != nil {
-			break
-		}
+	if err != nil {
+		return tu
 	}
+	w.Write(body)
+	flush(w)
+	var uc usageChunk
+	if json.Unmarshal(body, &uc) == nil {
+		uc.into(&tu)
+	}
+	return tu
 }
 
-// passthroughSSE copies a zen chat-surface SSE stream to the client.
-func passthroughSSE(w http.ResponseWriter, resp *http.Response) {
+// passthroughSSE copies a zen chat-surface SSE stream to the client, tapping
+// the usage block on the way past.
+func passthroughSSE(w http.ResponseWriter, resp *http.Response) tokenUsage {
 	startSSE(w)
 	flush(w)
+	tu := tokenUsage{}
 	sseLines(resp.Body, func(payload []byte) {
+		var uc usageChunk
+		if json.Unmarshal(payload, &uc) == nil {
+			uc.into(&tu)
+		}
 		w.Write([]byte("data: "))
 		w.Write(payload)
 		w.Write([]byte("\n\n"))
@@ -76,6 +130,7 @@ func passthroughSSE(w http.ResponseWriter, resp *http.Response) {
 	})
 	w.Write([]byte("data: [DONE]\n\n"))
 	flush(w)
+	return tu
 }
 
 // chatChunk builds one chat.completion.chunk SSE payload.
@@ -98,10 +153,11 @@ func writeChunk(w http.ResponseWriter, payload []byte) {
 
 // aggregateChatSSE consumes a zen chat-surface SSE stream and emits one
 // non-streaming chat.completion JSON to the client.
-func aggregateChatSSE(w http.ResponseWriter, resp *http.Response, model string) {
+func aggregateChatSSE(w http.ResponseWriter, resp *http.Response, model string) tokenUsage {
 	var content []byte
 	var usage map[string]any
 	var id string
+	tu := tokenUsage{}
 	sseLines(resp.Body, func(payload []byte) {
 		var chunk struct {
 			ID      string `json:"id"`
@@ -125,6 +181,14 @@ func aggregateChatSSE(w http.ResponseWriter, resp *http.Response, model string) 
 			usage = chunk.Usage
 		}
 	})
+	if usage != nil {
+		if v, ok := usage["prompt_tokens"].(float64); ok {
+			tu.in = int64(v)
+		}
+		if v, ok := usage["completion_tokens"].(float64); ok {
+			tu.out = int64(v)
+		}
+	}
 	out := map[string]any{
 		"id":     id,
 		"object": "chat.completion",
@@ -141,4 +205,5 @@ func aggregateChatSSE(w http.ResponseWriter, resp *http.Response, model string) 
 	w.Header().Set("Content-Type", "application/json")
 	w.WriteHeader(http.StatusOK)
 	json.NewEncoder(w).Encode(out)
+	return tu
 }

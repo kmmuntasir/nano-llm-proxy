@@ -49,7 +49,7 @@ func (g *gateway) handleResponses(w http.ResponseWriter, r *http.Request) {
 	clientWantsStream := bodyStreamFlag(body)
 
 	if out := g.proxyZenResponses(ref, w, r, body, upstreamModel, clientWantsStream, start); out != "" {
-		g.recordActivity(r, ref, upstreamModel, "", start, http.StatusBadGateway, out)
+		g.recordActivity(r, ref, upstreamModel, "", start, http.StatusBadGateway, out, tokenUsage{})
 		writeErr(w, http.StatusBadGateway, out)
 	}
 }
@@ -123,13 +123,14 @@ func (g *gateway) proxyZenResponses(ref providerRef, w http.ResponseWriter, r *h
 			continue
 		}
 
+		var tu tokenUsage
 		if clientWantsStream {
 			// native SSE verbatim — full fidelity passthrough
-			streamKilo(w, resp, true)
+			tu = streamKilo(w, resp)
 		} else {
-			aggregateResponsesSSE(w, resp, model)
+			tu = aggregateResponsesSSE(w, resp, model)
 		}
-		g.recordActivity(r, ref, model, k.Hash, start, http.StatusOK, "")
+		g.recordActivity(r, ref, model, k.Hash, start, http.StatusOK, "", tu)
 		return ""
 	}
 	if lastHint == "" {
@@ -141,7 +142,7 @@ func (g *gateway) proxyZenResponses(ref providerRef, w http.ResponseWriter, r *h
 // aggregateResponsesSSE buffers a streamed Responses result into a single
 // non-streaming response object (for clients that sent stream:false — the
 // upstream is always streamed because the gate requires it).
-func aggregateResponsesSSE(w http.ResponseWriter, resp *http.Response, model string) {
+func aggregateResponsesSSE(w http.ResponseWriter, resp *http.Response, model string) tokenUsage {
 	var (
 		text       bytes.Buffer
 		id         string
@@ -216,4 +217,5 @@ func aggregateResponsesSSE(w http.ResponseWriter, resp *http.Response, model str
 	w.Header().Set("Content-Type", "application/json")
 	w.WriteHeader(http.StatusOK)
 	json.NewEncoder(w).Encode(out)
+	return tokenUsage{in: inTok, out: outTok}
 }

@@ -12,6 +12,7 @@ import (
 	"log"
 	"math/big"
 	"os"
+	"reflect"
 	"strings"
 	"time"
 
@@ -133,6 +134,11 @@ func (s *Store) Migrate() error {
 			return err
 		}
 	}
+	if !version.Valid || version.Int64 < 2 {
+		if err := s.migrateV2(); err != nil {
+			return err
+		}
+	}
 	return nil
 }
 
@@ -197,6 +203,41 @@ func (s *Store) migrateV1() error {
 	}
 	_, err = tx.Exec(`INSERT INTO schema_migrations (version, applied_at) VALUES (1, ?)`, time.Now().Unix())
 	if err != nil {
+		return err
+	}
+	return tx.Commit()
+}
+
+// migrateV2 adds the persisted usage log (per-request token accounting for
+// the Usage page and dashboard metrics).
+func (s *Store) migrateV2() error {
+	tx, err := s.db.Begin()
+	if err != nil {
+		return err
+	}
+	defer tx.Rollback()
+	stmts := []string{
+		`CREATE TABLE usage_events (
+			id INTEGER PRIMARY KEY AUTOINCREMENT,
+			ts INTEGER NOT NULL,
+			user_id INTEGER NOT NULL,
+			client_key_id INTEGER NOT NULL,
+			provider TEXT NOT NULL,
+			model TEXT NOT NULL,
+			input_tokens INTEGER NOT NULL DEFAULT 0,
+			output_tokens INTEGER NOT NULL DEFAULT 0,
+			status INTEGER NOT NULL,
+			duration_ms INTEGER NOT NULL)`,
+		`CREATE INDEX idx_usage_ts ON usage_events(ts)`,
+		`CREATE INDEX idx_usage_user_ts ON usage_events(user_id, ts)`,
+		`CREATE INDEX idx_usage_key_ts ON usage_events(client_key_id, ts)`,
+	}
+	for _, q := range stmts {
+		if _, err := tx.Exec(q); err != nil {
+			return err
+		}
+	}
+	if _, err := tx.Exec(`INSERT INTO schema_migrations (version, applied_at) VALUES (2, ?)`, time.Now().Unix()); err != nil {
 		return err
 	}
 	return tx.Commit()
@@ -882,6 +923,177 @@ func (s *Store) DeleteExpiredSessions() error {
 func (s *Store) DeleteUserSessions(userID int64) error {
 	_, err := s.db.Exec(`DELETE FROM sessions WHERE user_id=?`, userID)
 	return err
+}
+
+// --- usage events ---
+
+// InsertUsageEvents persists one flushed batch in a single transaction.
+func (s *Store) InsertUsageEvents(events []usageEvent) error {
+	if len(events) == 0 {
+		return nil
+	}
+	tx, err := s.db.Begin()
+	if err != nil {
+		return err
+	}
+	defer tx.Rollback()
+	for _, e := range events {
+		if _, err := tx.Exec(`INSERT INTO usage_events
+			(ts, user_id, client_key_id, provider, model, input_tokens, output_tokens, status, duration_ms)
+			VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+			e.TS, e.UserID, e.ClientKeyID, e.Provider, e.Model,
+			e.InputTokens, e.OutputTokens, e.Status, e.DurationMs); err != nil {
+			return err
+		}
+	}
+	return tx.Commit()
+}
+
+// PruneUsageEvents drops rows older than the retention window.
+func (s *Store) PruneUsageEvents(before int64) error {
+	_, err := s.db.Exec(`DELETE FROM usage_events WHERE ts < ?`, before)
+	return err
+}
+
+type UsageTotals struct {
+	Requests     int64 `json:"requests"`
+	Errors       int64 `json:"errors"`
+	InputTokens  int64 `json:"inputTokens"`
+	OutputTokens int64 `json:"outputTokens"`
+}
+
+type UsageModelRow struct {
+	Key          string `json:"key"` // model or provider name
+	Requests     int64  `json:"requests"`
+	InputTokens  int64  `json:"inputTokens"`
+	OutputTokens int64  `json:"outputTokens"`
+}
+
+type UsageUserRow struct {
+	UserID       int64  `json:"userId"`
+	Email        string `json:"email"`
+	Requests     int64  `json:"requests"`
+	InputTokens  int64  `json:"inputTokens"`
+	OutputTokens int64  `json:"outputTokens"`
+}
+
+type UsageKeyRow struct {
+	KeyID        int64  `json:"keyId"`
+	Alias        string `json:"alias"`
+	UserID       int64  `json:"userId"`
+	Email        string `json:"email"`
+	Requests     int64  `json:"requests"`
+	InputTokens  int64  `json:"inputTokens"`
+	OutputTokens int64  `json:"outputTokens"`
+}
+
+type UsageActivityRow struct {
+	TS          int64  `json:"ts"`
+	Email       string `json:"email"`
+	Alias       string `json:"alias"`
+	Provider    string `json:"provider"`
+	Model       string `json:"model"`
+	InputTokens int64  `json:"inputTokens"`
+	OutputTokens int64 `json:"outputTokens"`
+	Status      int    `json:"status"`
+	DurationMs  int64  `json:"durationMs"`
+}
+
+// usageScope builds the WHERE clause + args for a ts range with an optional
+// per-user filter (nil = all users, superadmin views).
+func usageScope(from, to int64, userID *int64) (string, []any) {
+	where := "ts BETWEEN ? AND ?"
+	args := []any{from, to}
+	if userID != nil {
+		where += " AND user_id = ?"
+		args = append(args, *userID)
+	}
+	return where, args
+}
+
+func (s *Store) UsageTotals(from, to int64, userID *int64) (*UsageTotals, error) {
+	where, args := usageScope(from, to, userID)
+	t := &UsageTotals{}
+	err := s.db.QueryRow(`SELECT COUNT(*),
+			COALESCE(SUM(CASE WHEN status >= 400 THEN 1 ELSE 0 END), 0),
+			COALESCE(SUM(input_tokens), 0), COALESCE(SUM(output_tokens), 0)
+		FROM usage_events WHERE `+where, args...).
+		Scan(&t.Requests, &t.Errors, &t.InputTokens, &t.OutputTokens)
+	return t, err
+}
+
+func (s *Store) UsageByModel(from, to int64, userID *int64, limit int) ([]UsageModelRow, error) {
+	where, args := usageScope(from, to, userID)
+	rows, err := s.db.Query(`SELECT model, COUNT(*), COALESCE(SUM(input_tokens), 0), COALESCE(SUM(output_tokens), 0)
+		FROM usage_events WHERE `+where+` GROUP BY model
+		ORDER BY SUM(input_tokens + output_tokens) DESC LIMIT ?`, append(args, limit)...)
+	return scanUsageRows[UsageModelRow](rows, err)
+}
+
+func (s *Store) UsageByProvider(from, to int64, userID *int64) ([]UsageModelRow, error) {
+	where, args := usageScope(from, to, userID)
+	rows, err := s.db.Query(`SELECT provider, COUNT(*), COALESCE(SUM(input_tokens), 0), COALESCE(SUM(output_tokens), 0)
+		FROM usage_events WHERE `+where+` GROUP BY provider
+		ORDER BY SUM(input_tokens + output_tokens) DESC`, args...)
+	return scanUsageRows[UsageModelRow](rows, err)
+}
+
+func (s *Store) UsageByUser(from, to int64) ([]UsageUserRow, error) {
+	rows, err := s.db.Query(`SELECT u.id, u.email, COUNT(*), COALESCE(SUM(e.input_tokens), 0), COALESCE(SUM(e.output_tokens), 0)
+		FROM usage_events e JOIN users u ON u.id = e.user_id
+		WHERE e.ts BETWEEN ? AND ? GROUP BY u.id, u.email
+		ORDER BY SUM(e.input_tokens + e.output_tokens) DESC`, from, to)
+	return scanUsageRows[UsageUserRow](rows, err)
+}
+
+func (s *Store) UsageByKey(from, to int64, userID *int64) ([]UsageKeyRow, error) {
+	where, args := usageScope(from, to, userID)
+	rows, err := s.db.Query(`SELECT k.id, k.alias, u.id, u.email, COUNT(*),
+			COALESCE(SUM(e.input_tokens), 0), COALESCE(SUM(e.output_tokens), 0)
+		FROM usage_events e
+		JOIN api_keys k ON k.id = e.client_key_id
+		JOIN users u ON u.id = e.user_id
+		WHERE `+where+` GROUP BY k.id, k.alias, u.id, u.email
+		ORDER BY SUM(e.input_tokens + e.output_tokens) DESC`, args...)
+	return scanUsageRows[UsageKeyRow](rows, err)
+}
+
+func (s *Store) UsageActivity(limit int, userID *int64) ([]UsageActivityRow, error) {
+	where := ""
+	args := []any{}
+	if userID != nil {
+		where = "WHERE e.user_id = ?"
+		args = append(args, *userID)
+	}
+	rows, err := s.db.Query(`SELECT e.ts, u.email, k.alias, e.provider, e.model,
+			e.input_tokens, e.output_tokens, e.status, e.duration_ms
+		FROM usage_events e
+		JOIN users u ON u.id = e.user_id
+		JOIN api_keys k ON k.id = e.client_key_id
+		`+where+` ORDER BY e.ts DESC, e.id DESC LIMIT ?`, append(args, limit)...)
+	return scanUsageRows[UsageActivityRow](rows, err)
+}
+
+// scanUsageRows folds the Scan-rows-error dance for the usage queries.
+func scanUsageRows[T any](rows *sql.Rows, err error) ([]T, error) {
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var out []T
+	for rows.Next() {
+		var r T
+		v := reflect.ValueOf(&r).Elem()
+		fields := make([]any, v.NumField())
+		for i := range fields {
+			fields[i] = v.Field(i).Addr().Interface()
+		}
+		if err := rows.Scan(fields...); err != nil {
+			return nil, err
+		}
+		out = append(out, r)
+	}
+	return out, rows.Err()
 }
 
 // --- helpers ---

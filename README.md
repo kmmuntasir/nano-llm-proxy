@@ -43,8 +43,11 @@ control plane around just to front a few API keys.
   mutation rebuilds the pools in the same request
 - Self-describing model catalog: entries carry context window, max output,
   input modalities, and reasoning flags; model IDs embed the same facts
-- Claude Code support: model aliases, `[1m]` context-suffix handling, and a
-  documented `ANTHROPIC_DEFAULT_*_MODEL` integration
+- Claude Code support: a configurable `claude-*` fallback model,
+  `[1m]` context-suffix handling, and a documented
+  `ANTHROPIC_DEFAULT_*_MODEL` integration
+- Usage monitoring: per-request token capture, per-user/key/model/provider
+  aggregations over date ranges (90-day retention), persisted recent activity
 - Runtime settings live in the database and are editable in the GUI with no
   restart: rotation mode, retry/cooldown knobs, an optional per-key daily cap,
   Anthropic aliases, adapter knobs, and a models.dev-backed Zen model catalog
@@ -177,8 +180,9 @@ integration uses env slots plus the gateway's model aliases:
 ```
 
 - `--model opus|sonnet|haiku` substitutes the matching slot value.
-- Literal `claude-*` model names hit the gateway's alias map
-  (Settings → Anthropic aliases) and get rewritten server-side.
+- Literal `claude-*` model names (background tasks Claude Code self-issues)
+  hit the gateway's fallback model (Settings → Anthropic fallback) and get
+  rewritten server-side.
 - Append `[1m]` to a slot value to opt into 1M-context accounting; the
   gateway strips the suffix before the upstream call.
 
@@ -192,11 +196,12 @@ Served by the same binary at `/`.
 
 | Page | Who | What |
 | --- | --- | --- |
-| Dashboard | everyone | Uptime, per-provider pool health, per-key status and counters, last 100 requests |
-| My Keys | everyone | Create/disable/delete own client keys; plaintext shown exactly once |
-| Users | superadmin | User CRUD, roles, per-user key management |
+| Dashboard | everyone | Uptime, 24h requests/tokens/errors, busiest models, per-provider pool health, recent requests |
+| Usage | everyone | Date-range usage: totals, top models, providers, per-key (admins also get per-user), recent activity — scoped to the signed-in user |
+| Profile | everyone | Account info, self-service password reset, own client keys (create/disable/delete) |
+| Users | superadmin | User CRUD, roles, password resets, per-user key management |
 | Providers | superadmin | Add generic providers, edit base URLs, add/remove/toggle upstream keys |
-| Settings | superadmin | Rotation, retries/cooldowns, daily cap, Anthropic aliases, adapter knobs, Zen model-catalog sync |
+| Settings | superadmin | Rotation, retries/cooldowns, daily cap, Claude fallback, adapter knobs, Zen model-catalog sync |
 
 First boot requires `ADMIN_EMAIL` and `ADMIN_PASSWORD` (environment variables
 or an env file); the superadmin is created once and never overwritten.

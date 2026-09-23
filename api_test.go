@@ -511,7 +511,7 @@ func TestSettingsPutValidation(t *testing.T) {
 		`{"retry":{"maxKeysPerRequest":101}}`,
 		`{"retry":{"cooldownSeconds":-1}}`,
 		`{"retry":{"maxRequestsPerKeyPerDay":-5}}`,
-		`{"anthropic":{"aliases":{"a":"noslash"}}}`,
+		`{"anthropic":{"fallbackModel":"noslash"}}`,
 		`{"zen":{"userAgent":"opencode/1.0.0"}}`,
 		`{"zen":{"responsesModels":[" "]}}`,
 		`{"zen":{"modelMeta":{"m":{"contextWindow":0}}}}`,
@@ -807,4 +807,208 @@ func TestSyncModelMetaFailureKeepsMeta(t *testing.T) {
 	if got.Zen.ModelMetaSyncStatus == nil || got.Zen.ModelMetaSyncStatus.OK {
 		t.Fatalf("failure status not persisted: %+v", got.Zen.ModelMetaSyncStatus)
 	}
+}
+
+func TestAnthropicFallbackModel(t *testing.T) {
+	var mu sync.Mutex
+	var seenModels []string
+	up := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		var body struct {
+			Model string `json:"model"`
+		}
+		json.NewDecoder(r.Body).Decode(&body)
+		mu.Lock()
+		seenModels = append(seenModels, body.Model)
+		mu.Unlock()
+		sseOK(w)
+	}))
+	g, st := testStoreGateway(t, up.URL)
+	admin, _ := st.UserByEmail("admin@example.com")
+	adminCookie := loginAs(t, g, "admin@example.com", "super-secret-pass")
+	ck := newClientKey(t, g, st, admin.ID, "fallback-test")
+
+	// configure the fallback through the settings API
+	rec := httptest.NewRecorder()
+	req := httptest.NewRequest("PUT", "/api/settings",
+		strings.NewReader(`{"anthropic":{"fallbackModel":"zen/mimo-v2.6-flash-free"}}`))
+	req.AddCookie(adminCookie)
+	req.Header.Set("Origin", "https://gateway.example.com")
+	req.RemoteAddr = "10.9.9.9:5555"
+	g.requireSession(g.requireSuperadmin(g.handlePutSettings))(rec, req)
+	if rec.Code != 200 {
+		t.Fatalf("PUT: got %d: %s", rec.Code, rec.Body.String())
+	}
+
+	msg := func(model string) {
+		t.Helper()
+		rec := httptest.NewRecorder()
+		r := httptest.NewRequest("POST", "/v1/messages",
+			strings.NewReader(fmt.Sprintf(`{"model":%q,"max_tokens":50,"messages":[{"role":"user","content":"hi"}]}`, model)))
+		r.Header.Set("Authorization", "Bearer "+ck)
+		g.clientOnly(g.handleMessages)(rec, r)
+		if rec.Code != 200 {
+			t.Fatalf("messages %q: got %d: %s", model, rec.Code, rec.Body.String())
+		}
+	}
+
+	// a literal claude-* name (no provider prefix) hits the fallback target
+	msg("claude-haiku-4-5")
+	// an explicit provider/model passes through untouched
+	msg("zen/mimo-test-free")
+
+	mu.Lock()
+	defer mu.Unlock()
+	if len(seenModels) != 2 || seenModels[0] != "mimo-v2.6-flash-free" || seenModels[1] != "mimo-test-free" {
+		t.Fatalf("upstream models = %v, want [mimo-v2.6-flash-free mimo-test-free]", seenModels)
+	}
+}
+
+// --- usage tracking ---
+
+func TestUsageEventCaptureAndAggregation(t *testing.T) {
+	up := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "text/event-stream")
+		w.Write([]byte("data: {\"id\":\"x\",\"choices\":[{\"delta\":{\"content\":\"ok\"}}]}\n\n"))
+		w.Write([]byte("data: {\"id\":\"x\",\"choices\":[{\"delta\":{},\"finish_reason\":\"stop\"}],\"usage\":{\"prompt_tokens\":11,\"completion_tokens\":7}}\n\n"))
+		w.Write([]byte("data: [DONE]\n\n"))
+	}))
+	g, st := testStoreGateway(t, up.URL)
+	admin, _ := st.UserByEmail("admin@example.com")
+	ck := newClientKey(t, g, st, admin.ID, "usage-test")
+
+	rec := httptest.NewRecorder()
+	req := chatReq("zen", "mimo-test-free")
+	req.Header.Set("Authorization", "Bearer "+ck)
+	g.clientOnly(g.handleChat)(rec, req)
+	if rec.Code != 200 {
+		t.Fatalf("chat: got %d: %s", rec.Code, rec.Body.String())
+	}
+
+	// the request streamed through passthroughSSE, which taps the usage chunk
+	events := g.usageBuf.drain()
+	if len(events) != 1 {
+		t.Fatalf("drained %d events, want 1", len(events))
+	}
+	e := events[0]
+	if e.UserID != admin.ID || e.Provider != "zen" || e.Model != "mimo-test-free" {
+		t.Fatalf("event attribution wrong: %+v", e)
+	}
+	if e.InputTokens != 11 || e.OutputTokens != 7 || e.Status != 200 {
+		t.Fatalf("tokens/status wrong: %+v", e)
+	}
+
+	now := time.Now().Unix()
+	if err := st.InsertUsageEvents(events); err != nil {
+		t.Fatalf("insert: %v", err)
+	}
+	totals, err := st.UsageTotals(now-60, now+60, nil)
+	if err != nil || totals.Requests != 1 || totals.InputTokens != 11 || totals.OutputTokens != 7 {
+		t.Fatalf("totals = %+v err=%v", totals, err)
+	}
+	models, _ := st.UsageByModel(now-60, now+60, nil, 5)
+	if len(models) != 1 || models[0].Key != "mimo-test-free" || models[0].Requests != 1 {
+		t.Fatalf("by-model = %+v", models)
+	}
+	// per-user scoping: another user sees nothing
+	other := int64(admin.ID + 999)
+	scoped, _ := st.UsageTotals(now-60, now+60, &other)
+	if scoped.Requests != 0 {
+		t.Fatalf("scoping leaked: %+v", scoped)
+	}
+}
+
+func TestUsageAPIScoping(t *testing.T) {
+	up := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) { sseOK(w) }))
+	g, st := testStoreGateway(t, up.URL)
+	admin, _ := st.UserByEmail("admin@example.com")
+	insertPlainUser(t, st, "pi@example.com", "pi-password-123", "user")
+	pi, _ := st.UserByEmail("pi@example.com")
+	ckAdmin := newClientKey(t, g, st, admin.ID, "admin-key")
+	ckPi := newClientKey(t, g, st, pi.ID, "pi-key")
+
+	// one request per user
+	for _, ck := range []string{ckAdmin, ckPi} {
+		rec := httptest.NewRecorder()
+		req := chatReq("zen", "mimo-test-free")
+		req.Header.Set("Authorization", "Bearer "+ck)
+		g.clientOnly(g.handleChat)(rec, req)
+	}
+	events := g.usageBuf.drain()
+	if len(events) != 2 {
+		t.Fatalf("drained %d events, want 2", len(events))
+	}
+	if err := st.InsertUsageEvents(events); err != nil {
+		t.Fatalf("insert: %v", err)
+	}
+
+	// superadmin sees both, pi sees only their own
+	adminCookie := loginAs(t, g, "admin@example.com", "super-secret-pass")
+	piCookie := loginAs(t, g, "pi@example.com", "pi-password-123")
+	get := func(cookie *http.Cookie) string {
+		t.Helper()
+		rec := httptest.NewRecorder()
+		req := httptest.NewRequest("GET", "/api/usage/activity?limit=10", nil)
+		req.AddCookie(cookie)
+		g.requireSession(g.handleUsageActivity)(rec, req)
+		if rec.Code != 200 {
+			t.Fatalf("activity: got %d: %s", rec.Code, rec.Body.String())
+		}
+		return rec.Body.String()
+	}
+	all := get(adminCookie)
+	if !strings.Contains(all, "admin@example.com") || !strings.Contains(all, "pi@example.com") {
+		t.Fatalf("superadmin should see all users: %s", all)
+	}
+	own := get(piCookie)
+	if strings.Contains(own, "admin@example.com") || !strings.Contains(own, "pi@example.com") {
+		t.Fatalf("user scoping broken: %s", own)
+	}
+
+	// superadmin-only per-user breakdown
+	rec := httptest.NewRecorder()
+	req := httptest.NewRequest("GET", "/api/usage/users", nil)
+	req.AddCookie(piCookie)
+	g.requireSession(g.requireSuperadmin(g.handleUsageUsers))(rec, req)
+	if rec.Code != 403 {
+		t.Fatalf("plain user /usage/users: got %d, want 403", rec.Code)
+	}
+}
+
+func TestChangeMyPassword(t *testing.T) {
+	g, st := testStoreGateway(t, "http://127.0.0.1:1")
+	insertPlainUser(t, st, "pw@example.com", "current-pass-123", "user")
+	piCookie := loginAs(t, g, "pw@example.com", "current-pass-123")
+
+	change := func(current, next string) int {
+		t.Helper()
+		rec := httptest.NewRecorder()
+		req := httptest.NewRequest("POST", "/api/me/password",
+			strings.NewReader(fmt.Sprintf(`{"currentPassword":%q,"newPassword":%q}`, current, next)))
+		req.AddCookie(piCookie)
+		req.RemoteAddr = "10.9.9.9:5555"
+		g.requireSession(g.handleChangeMyPassword)(rec, req)
+		return rec.Code
+	}
+
+	// wrong current password -> 403
+	if code := change("wrong-pass-1234", "brand-new-pass-1"); code != 403 {
+		t.Fatalf("wrong current: got %d, want 403", code)
+	}
+	// too-short new password -> 400
+	if code := change("current-pass-123", "short"); code != 400 {
+		t.Fatalf("short new: got %d, want 400", code)
+	}
+	// happy path -> 200 and the old session is wiped
+	if code := change("current-pass-123", "brand-new-pass-1"); code != 200 {
+		t.Fatalf("happy path: got %d", code)
+	}
+	rec := httptest.NewRecorder()
+	me := httptest.NewRequest("GET", "/api/auth/me", nil)
+	me.AddCookie(piCookie)
+	g.requireSession(g.handleMe)(rec, me)
+	if rec.Code != 401 {
+		t.Fatalf("old session survived password change: got %d", rec.Code)
+	}
+	// the new password logs in
+	loginAs(t, g, "pw@example.com", "brand-new-pass-1")
 }

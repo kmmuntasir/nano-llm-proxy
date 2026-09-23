@@ -252,3 +252,50 @@ func resetAdminPassword(st *Store) {
 	}
 	log.Printf("password reset for %s; all their sessions were killed", email)
 }
+
+// handleChangeMyPassword serves POST /api/me/password: self-service reset
+// gated on the current password. All sessions are wiped afterwards, so the
+// user (and anyone holding a stolen session cookie) logs in again.
+func (g *gateway) handleChangeMyPassword(w http.ResponseWriter, r *http.Request) {
+	u := contextUser(r)
+	var req struct {
+		CurrentPassword string `json:"currentPassword"`
+		NewPassword     string `json:"newPassword"`
+	}
+	if !readJSON(w, r, &req) {
+		return
+	}
+	if len(req.NewPassword) < 10 {
+		apiErr(w, http.StatusBadRequest, "new password must be at least 10 characters")
+		return
+	}
+	fresh, err := g.store.User(u.ID)
+	if err != nil || fresh == nil {
+		apiErr(w, http.StatusInternalServerError, "user lookup failed")
+		return
+	}
+	if fresh.Disabled {
+		apiErr(w, http.StatusForbidden, "account disabled")
+		return
+	}
+	if bcrypt.CompareHashAndPassword([]byte(fresh.PasswordHash), []byte(req.CurrentPassword)) != nil {
+		apiErr(w, http.StatusForbidden, "current password is incorrect")
+		return
+	}
+	hash, err := bcrypt.GenerateFromPassword([]byte(req.NewPassword), 10)
+	if err != nil {
+		apiErr(w, http.StatusInternalServerError, err.Error())
+		return
+	}
+	hs := string(hash)
+	if err := g.store.UpdateUser(u.ID, nil, nil, &hs, nil, nil); err != nil {
+		apiErr(w, http.StatusInternalServerError, err.Error())
+		return
+	}
+	if err := g.store.DeleteUserSessions(u.ID); err != nil {
+		apiErr(w, http.StatusInternalServerError, err.Error())
+		return
+	}
+	log.Printf("admin user=%s action=password.self", u.Email)
+	writeJSON(w, http.StatusOK, map[string]any{"ok": true})
+}

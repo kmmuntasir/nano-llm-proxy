@@ -8,7 +8,7 @@ import (
 // translateResponses consumes a Responses-API SSE stream and re-emits it as
 // chat.completion chunks (streaming client) or one chat.completion JSON
 // (non-streaming client). Handles text deltas, function calls, finish, usage.
-func translateResponses(w http.ResponseWriter, resp *http.Response, model string, clientWantsStream bool) {
+func translateResponses(w http.ResponseWriter, resp *http.Response, model string, clientWantsStream bool) tokenUsage {
 	type usage_t struct {
 		InputTokens  int64 `json:"input_tokens"`
 		OutputTokens int64 `json:"output_tokens"`
@@ -111,7 +111,7 @@ func translateResponses(w http.ResponseWriter, resp *http.Response, model string
 
 	if clientWantsStream {
 		writeFinish(finish, usage)
-		return
+		return tokenUsage{in: inTok, out: outTok}
 	}
 
 	msg := map[string]any{"role": "assistant", "content": string(agg)}
@@ -128,6 +128,7 @@ func translateResponses(w http.ResponseWriter, resp *http.Response, model string
 	w.Header().Set("Content-Type", "application/json")
 	w.WriteHeader(http.StatusOK)
 	json.NewEncoder(w).Encode(out)
+	return tokenUsage{in: inTok, out: outTok}
 }
 
 func finishReason(incomplete bool) string {

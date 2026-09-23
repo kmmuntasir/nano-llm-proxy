@@ -44,7 +44,7 @@ block is server-owned).
 | `retry.cooldownSeconds` | 30 | Default 429 cooldown (0 = only honor `Retry-After`) |
 | `retry.respectRetryAfter` | true | Prefer the upstream `Retry-After` duration |
 | `retry.maxRequestsPerKeyPerDay` | 0 (off) | Optional per-key daily cap; an exhausted key cools until midnight |
-| `anthropic.aliases` | empty | Map of `claude-*` model names to `provider/model` values, applied on `/v1/messages` |
+| `anthropic.fallbackModel` | empty | Target for literal `claude-*` requests (background tasks clients self-issue) on `/v1/messages`; empty = pass through untouched |
 | `zen.userAgent` | `opencode/1.18.32` | Client user agent; must satisfy the upstream's 1.18.0 floor. Validated on save (HTTP 400) and at boot (fatal) |
 | `zen.injectTools` | true | Append the client-shape tool stubs to every zen request |
 | `zen.responsesModels` | empty | Model IDs served on the Responses surface. The surface selection also self-corrects: a signature 503 flips it for subsequent requests |
@@ -54,7 +54,7 @@ block is server-owned).
 | `kilo.freeOnly` | false | Same catalog restriction as `zen.freeOnly` |
 
 Ranges enforced on save: `maxKeysPerRequest` 1–100, `cooldownSeconds`
-0–86400, `maxRequestsPerKeyPerDay` 0 or 1–1000000, alias values shaped
+0–86400, `maxRequestsPerKeyPerDay` 0 or 1–1000000, `fallbackModel` shaped
 `provider/model`, every `modelMeta` limit a positive integer.
 
 Base URLs are **not** part of this document — providers (and their base

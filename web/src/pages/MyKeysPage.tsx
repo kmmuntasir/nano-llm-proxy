@@ -14,7 +14,7 @@ import {
   Text,
   VStack,
 } from "@chakra-ui/react"
-import { FiPlus, FiTrash2 } from "react-icons/fi"
+import { Plus, Trash2 } from "lucide-react"
 import { api, del, patch, post, ApiError } from "../api/client"
 import type { ClientKeyView } from "../api/types"
 import ConfirmDialog from "../components/ConfirmDialog"
@@ -93,7 +93,7 @@ export default function MyKeysPage() {
                 />
               </Field.Root>
               <Button type="submit" colorPalette="blue" loading={create.isPending}>
-                <FiPlus /> Generate key
+                <Plus /> Generate key
               </Button>
             </HStack>
           </form>
@@ -156,7 +156,7 @@ export default function MyKeysPage() {
                         colorPalette="red"
                         onClick={() => setToDelete(k)}
                       >
-                        <FiTrash2 />
+                        <Trash2 />
                       </IconButton>
                     </Table.Cell>
                   </Table.Row>

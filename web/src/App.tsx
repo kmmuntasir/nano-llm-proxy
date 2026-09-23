@@ -7,7 +7,8 @@ import type { UserView } from "./api/types"
 import AppLayout from "./components/AppLayout"
 import LoginPage from "./pages/LoginPage"
 import DashboardPage from "./pages/DashboardPage"
-import MyKeysPage from "./pages/MyKeysPage"
+import ProfilePage from "./pages/ProfilePage"
+import UsagePage from "./pages/UsagePage"
 import UsersPage from "./pages/UsersPage"
 import ProvidersPage from "./pages/ProvidersPage"
 import SettingsPage from "./pages/SettingsPage"
@@ -56,7 +57,9 @@ export default function App() {
     <AppLayout>
       <Routes>
         <Route path="/" element={<DashboardPage />} />
-        <Route path="/keys" element={<MyKeysPage />} />
+        <Route path="/usage" element={<UsagePage />} />
+        <Route path="/profile" element={<ProfilePage />} />
+        <Route path="/keys" element={<Navigate to="/profile" replace />} />
         {isSuperadmin && (
           <>
             <Route path="/users" element={<UsersPage />} />
