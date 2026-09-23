@@ -13,6 +13,7 @@ import {
 } from "@chakra-ui/react"
 import { post, ApiError } from "../api/client"
 import { PasswordInput } from "../components/ui/password-input"
+import { toaster } from "../components/ui/toaster"
 import type { UserView } from "../api/types"
 
 export default function LoginPage() {
@@ -32,7 +33,9 @@ export default function LoginPage() {
       await qc.invalidateQueries()
       navigate("/")
     } catch (err) {
-      setError(err instanceof ApiError ? err.message : "login failed")
+      const msg = err instanceof ApiError ? err.message : "login failed"
+      setError(msg)
+      toaster.create({ title: msg, type: "error" })
     } finally {
       setBusy(false)
     }
