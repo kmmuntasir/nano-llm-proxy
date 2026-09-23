@@ -175,8 +175,11 @@ export default function SettingsPage() {
       await qc.invalidateQueries({ queryKey: ["settings"] })
       toaster.create({ title: "Settings saved — live immediately", type: "success" })
     },
-    onError: (e) =>
-      setSaveError(e instanceof ApiError ? e.message : "save failed"),
+    onError: (e) => {
+      const msg = e instanceof ApiError ? e.message : "save failed"
+      setSaveError(msg)
+      toaster.create({ title: msg, type: "error" })
+    },
   })
 
   if (isLoading || (!form && !error)) return <Text>Loading…</Text>

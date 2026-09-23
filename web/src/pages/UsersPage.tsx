@@ -271,16 +271,29 @@ function UserKeysRow({ userID, onClose }: { userID: number; onClose: () => void 
     onSuccess: async (res) => {
       setRevealed(res.key)
       await qc.invalidateQueries({ queryKey: ["userKeys", userID] })
+      toaster.create({ title: "Key created", type: "success" })
     },
+    onError: (e) =>
+      toaster.create({ title: e instanceof ApiError ? e.message : "create failed", type: "error" }),
   })
   const remove = useMutation({
     mutationFn: (id: number) => del(`/api/users/${userID}/keys/${id}`),
-    onSuccess: () => void qc.invalidateQueries({ queryKey: ["userKeys", userID] }),
+    onSuccess: async () => {
+      await qc.invalidateQueries({ queryKey: ["userKeys", userID] })
+      toaster.create({ title: "Key deleted", type: "success" })
+    },
+    onError: (e) =>
+      toaster.create({ title: e instanceof ApiError ? e.message : "delete failed", type: "error" }),
   })
   const toggle = useMutation({
     mutationFn: ({ id, disabled }: { id: number; disabled: boolean }) =>
       patch(`/api/users/${userID}/keys/${id}`, { disabled }),
-    onSuccess: () => void qc.invalidateQueries({ queryKey: ["userKeys", userID] }),
+    onSuccess: async () => {
+      await qc.invalidateQueries({ queryKey: ["userKeys", userID] })
+      toaster.create({ title: "Key updated", type: "success" })
+    },
+    onError: (e) =>
+      toaster.create({ title: e instanceof ApiError ? e.message : "update failed", type: "error" }),
   })
 
   return (
@@ -351,9 +364,10 @@ function UserRow({ u, isSelf }: { u: UserView; isSelf: boolean }) {
 
   const removeU = useMutation({
     mutationFn: () => del(`/api/users/${u.id}`),
-    onSuccess: () => {
+    onSuccess: async () => {
       setToDelete(false)
-      void qc.invalidateQueries({ queryKey: ["users"] })
+      await qc.invalidateQueries({ queryKey: ["users"] })
+      toaster.create({ title: "User deleted", type: "success" })
     },
     onError: (e) =>
       toaster.create({ title: e instanceof ApiError ? e.message : "delete failed", type: "error" }),

@@ -42,6 +42,7 @@ export default function MyKeysPage() {
       setAlias("")
       setRevealed(res.key)
       await qc.invalidateQueries({ queryKey: ["myKeys"] })
+      toaster.create({ title: "Key created", type: "success" })
     },
     onError: (e) =>
       toaster.create({ title: e instanceof ApiError ? e.message : "create failed", type: "error" }),
@@ -50,16 +51,20 @@ export default function MyKeysPage() {
   const toggle = useMutation({
     mutationFn: ({ id, disabled }: { id: number; disabled: boolean }) =>
       patch(`/api/me/keys/${id}`, { disabled }),
-    onSuccess: () => qc.invalidateQueries({ queryKey: ["myKeys"] }),
+    onSuccess: async () => {
+      await qc.invalidateQueries({ queryKey: ["myKeys"] })
+      toaster.create({ title: "Key updated", type: "success" })
+    },
     onError: (e) =>
       toaster.create({ title: e instanceof ApiError ? e.message : "update failed", type: "error" }),
   })
 
   const remove = useMutation({
     mutationFn: (id: number) => del(`/api/me/keys/${id}`),
-    onSuccess: () => {
+    onSuccess: async () => {
       setToDelete(null)
-      void qc.invalidateQueries({ queryKey: ["myKeys"] })
+      await qc.invalidateQueries({ queryKey: ["myKeys"] })
+      toaster.create({ title: "Key deleted", type: "success" })
     },
     onError: (e) =>
       toaster.create({ title: e instanceof ApiError ? e.message : "delete failed", type: "error" }),
