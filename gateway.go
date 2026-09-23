@@ -9,6 +9,7 @@ import (
 	"net/http"
 	"strings"
 	"sync"
+	"sync/atomic"
 	"time"
 )
 
@@ -16,7 +17,7 @@ const freeTierHint = "upstream FreeTierError: the request failed the provider's 
 	"check the provider's client emulation settings (userAgent, headers, body shape)"
 
 const upgradeHint = "upstream UpgradeRequired: the configured zen.userAgent is below the " +
-	"1.18.0 floor; bump it in config.json"
+	"1.18.0 floor; raise it in the admin GUI (Settings → Zen)"
 
 // providerRef is the runtime handle for one enabled provider: its routing
 // prefix, proxy behavior type, key pool, and upstream base URL. Built by
@@ -30,7 +31,12 @@ type providerRef struct {
 }
 
 type gateway struct {
-	cfg   *Config
+	// cfgPtr holds the bootstrap config (set once, never swapped); rsPtr
+	// holds the runtime settings and is atomically swapped by the settings
+	// API so the lock-free hot path always sees a coherent snapshot.
+	cfgPtr atomic.Pointer[Config]
+	rsPtr  atomic.Pointer[RuntimeSettings]
+
 	store *Store
 	zen   *Pool // builtin pools — swapped wholesale by rebuildPools
 	kilo  *Pool
@@ -38,9 +44,9 @@ type gateway struct {
 	regMu    sync.RWMutex
 	registry []providerRef // every enabled provider, sort_order first
 
-	ck    clientKeyCache  // client API keys, hot path
-	usage *usageTracker   // per-client-key counters + activity ring
-	backoff loginBackoff  // login rate limiting
+	ck      clientKeyCache // client API keys, hot path
+	usage   *usageTracker  // per-client-key counters + activity ring
+	backoff loginBackoff   // login rate limiting
 
 	client *http.Client
 
@@ -52,26 +58,34 @@ type gateway struct {
 	catalogAt time.Time
 }
 
+// conf returns the bootstrap config; never nil after either constructor.
+func (g *gateway) conf() *Config { return g.cfgPtr.Load() }
+
+// rs returns the current runtime settings snapshot; never nil after either
+// constructor, and freshly swapped values are visible to subsequent reads.
+func (g *gateway) rs() *RuntimeSettings { return g.rsPtr.Load() }
+
 // newGateway is the store-less constructor used by tests: pools come from the
 // keyFile, provider resolution falls back to config builtins, and auth uses
 // cfg.APIKeys. Signature and behavior are load-bearing for existing tests.
-func newGateway(cfg *Config, kf *keyFile) *gateway {
+func newGateway(cfg *Config, rs *RuntimeSettings, kf *keyFile) *gateway {
 	g := &gateway{
-		cfg:         cfg,
-		zen:         newPool("zen", cfg.Rotation, kf.Zen),
-		kilo:        newPool("kilo", cfg.Rotation, kf.Kilo),
+		zen:         newPool("zen", rs.Rotation, rs.Retry.MaxRequestsPerKeyDay, kf.Zen),
+		kilo:        newPool("kilo", rs.Rotation, rs.Retry.MaxRequestsPerKeyDay, kf.Kilo),
 		usage:       newUsageTracker(),
 		backoff:     newLoginBackoff(),
 		surfaceOver: map[string]string{},
 	}
+	g.cfgPtr.Store(cfg)
+	g.rsPtr.Store(rs)
 	g.initHTTPClient()
 	return g
 }
 
 // newGatewayFromStore is the production constructor: the DB is source of
 // truth. Migrate+Bootstrap must already have run.
-func newGatewayFromStore(cfg *Config, st *Store) (*gateway, error) {
-	g := newGateway(cfg, &keyFile{})
+func newGatewayFromStore(cfg *Config, rs *RuntimeSettings, st *Store) (*gateway, error) {
+	g := newGateway(cfg, rs, &keyFile{})
 	g.store = st
 	if err := g.rebuildPools(); err != nil {
 		return nil, err
@@ -130,7 +144,7 @@ func (g *gateway) rebuildPools() error {
 			}
 			entries = append(entries, keyFileEntry{Label: k.Label, Key: k.Key})
 		}
-		pool := newPoolPreserving(row.Name, g.cfg.Rotation, entries, prev)
+		pool := newPoolPreserving(row.Name, g.rs().Rotation, g.rs().Retry.MaxRequestsPerKeyDay, entries, prev)
 		switch {
 		case row.Builtin && row.Name == "zen":
 			zenP = pool
@@ -159,10 +173,17 @@ func (g *gateway) rebuildPools() error {
 	if err := g.ck.reload(g.store); err != nil {
 		return err
 	}
-	g.catMu.Lock()
-	g.catalog = nil // provider CRUD invalidates the /v1/models cache
-	g.catMu.Unlock()
+	g.invalidateCatalog()
 	return nil
+}
+
+// invalidateCatalog drops the cached merged /v1/models body so the next
+// catalog request re-fetches with current settings (provider CRUD, modelMeta
+// sync, and settings writes all call this).
+func (g *gateway) invalidateCatalog() {
+	g.catMu.Lock()
+	g.catalog = nil
+	g.catMu.Unlock()
 }
 
 // provider resolves a routing prefix against the registry. In store==nil
@@ -171,9 +192,9 @@ func (g *gateway) provider(prefix string) (providerRef, bool) {
 	if g.store == nil {
 		switch prefix {
 		case "zen":
-			return providerRef{name: "zen", typ: "opencode", pool: g.zen, baseURL: g.cfg.Zen.BaseURL, builtin: true}, true
+			return providerRef{name: "zen", typ: "opencode", pool: g.zen, baseURL: g.conf().Zen.BaseURL, builtin: true}, true
 		case "kilo":
-			return providerRef{name: "kilo", typ: "openai", pool: g.kilo, baseURL: g.cfg.Kilo.BaseURL, builtin: true}, true
+			return providerRef{name: "kilo", typ: "openai", pool: g.kilo, baseURL: g.conf().Kilo.BaseURL, builtin: true}, true
 		}
 		return providerRef{}, false
 	}
@@ -203,7 +224,7 @@ type verdict struct {
 	action   string // "nextkey", "failfast", "flipsurface"
 	cooldown time.Duration
 	hint     string
-	status   int  // client status for failfast
+	status   int // client status for failfast
 	body     []byte
 }
 
@@ -214,14 +235,14 @@ func (g *gateway) classify(pool *Pool, k *KeyState, resp *http.Response) verdict
 	switch resp.StatusCode {
 	case 429:
 		pool.recordRateLimit(k)
-		if ra := resp.Header.Get("Retry-After"); ra != "" && g.cfg.Retry.RespectRetryAfter {
+		if ra := resp.Header.Get("Retry-After"); ra != "" && g.rs().Retry.RespectRetryAfter {
 			var secs int
 			if _, err := fmt.Sscanf(ra, "%d", &secs); err == nil && secs > 0 && secs < 3600 {
 				v.cooldown = time.Duration(secs) * time.Second
 			}
 		}
 		if v.cooldown == 0 {
-			v.cooldown = time.Duration(g.cfg.Retry.CooldownSeconds) * time.Second
+			v.cooldown = time.Duration(g.rs().Retry.CooldownSeconds) * time.Second
 		}
 	case 401:
 		// zen occasionally wraps upstream flakes as 401 server_error — only a

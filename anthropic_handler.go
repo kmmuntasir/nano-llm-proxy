@@ -23,7 +23,7 @@ func (g *gateway) handleMessages(w http.ResponseWriter, r *http.Request) {
 	model, _ := req["model"].(string)
 	// Claude-model aliases let Anthropic-protocol clients (which enforce a
 	// known-model catalog) target upstream models by familiar names.
-	if mapped, ok := g.cfg.Anthropic.Aliases[model]; ok {
+	if mapped, ok := g.rs().Anthropic.Aliases[model]; ok {
 		log.Printf("anthropic alias %s -> %s", model, mapped)
 		model = mapped
 	}
@@ -78,7 +78,7 @@ func (g *gateway) messagesViaOpenAI(ref providerRef, w http.ResponseWriter, r *h
 	exclude := map[string]bool{}
 	var lastHint string
 
-	for attempt := 0; attempt < g.cfg.Retry.MaxKeysPerRequest; attempt++ {
+	for attempt := 0; attempt < g.rs().Retry.MaxKeysPerRequest; attempt++ {
 		k := ref.pool.pick(exclude)
 		if k == nil {
 			break
@@ -127,7 +127,7 @@ func (g *gateway) messagesViaZen(ref providerRef, w http.ResponseWriter, r *http
 	surface := g.surfaceFor(model)
 	var lastHint string
 
-	for attempt := 0; attempt < g.cfg.Retry.MaxKeysPerRequest; attempt++ {
+	for attempt := 0; attempt < g.rs().Retry.MaxKeysPerRequest; attempt++ {
 		k := ref.pool.pick(exclude)
 		if k == nil {
 			break
@@ -143,7 +143,7 @@ func (g *gateway) messagesViaZen(ref providerRef, w http.ResponseWriter, r *http
 			cp := make(map[string]any, len(chat))
 			maps.Copy(cp, chat)
 			upBody = cp
-			injectChatFingerprint(upBody, g.cfg.Zen.InjectTools)
+			injectChatFingerprint(upBody, g.rs().Zen.InjectTools)
 			upBody["stream"] = true // gate requires streaming
 		}
 		raw, _ := json.Marshal(upBody)
@@ -211,7 +211,7 @@ func (g *gateway) postUpstream(r *http.Request, url, key string, body []byte, ze
 	req.Header.Set("Authorization", "Bearer "+key)
 	req.Header.Set("Content-Type", "application/json")
 	if zenFingerprint {
-		req.Header.Set("User-Agent", g.cfg.Zen.UserAgent)
+		req.Header.Set("User-Agent", g.rs().Zen.UserAgent)
 		req.Header.Set("x-opencode-session", newZenSessionID())
 	}
 	resp, err := g.client.Do(req)
@@ -220,7 +220,6 @@ func (g *gateway) postUpstream(r *http.Request, url, key string, body []byte, ze
 	}
 	return resp, true
 }
-
 
 func writeAnthropicJSON(w http.ResponseWriter, msg map[string]any) {
 	w.Header().Set("Content-Type", "application/json")
@@ -237,7 +236,7 @@ func chatSSEToAnthropicMessage(body io.Reader, model string) map[string]any {
 	var inTok, outTok int64
 	sseLines(body, func(payload []byte) {
 		var chunk struct {
-			ID     string `json:"id"`
+			ID      string `json:"id"`
 			Choices []struct {
 				Delta struct {
 					Content   string `json:"content"`

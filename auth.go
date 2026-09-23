@@ -88,7 +88,7 @@ func (g *gateway) originAllowed(r *http.Request) bool {
 	if subtle.ConstantTimeCompare([]byte(u.Host), []byte(r.Host)) == 1 {
 		return true
 	}
-	for _, trusted := range g.cfg.TrustedOrigins {
+	for _, trusted := range g.conf().TrustedOrigins {
 		if strings.EqualFold(u.Host, trusted) || strings.EqualFold(origin, "https://"+trusted) {
 			return true
 		}
@@ -203,7 +203,7 @@ func (g *gateway) handleLogin(w http.ResponseWriter, r *http.Request) {
 		Expires:  exp,
 		HttpOnly: true,
 		SameSite: http.SameSiteLaxMode,
-		Secure:   g.cfg.secureCookies(),
+		Secure:   g.conf().secureCookies(),
 	})
 	log.Printf("gui login user=%s ip=%s", user.Email, r.RemoteAddr)
 	writeJSON(w, http.StatusOK, map[string]any{"user": userView(user)})
@@ -215,7 +215,7 @@ func (g *gateway) handleLogout(w http.ResponseWriter, r *http.Request) {
 	}
 	http.SetCookie(w, &http.Cookie{
 		Name: sessionCookie, Value: "", Path: "/", MaxAge: -1,
-		HttpOnly: true, SameSite: http.SameSiteLaxMode, Secure: g.cfg.secureCookies(),
+		HttpOnly: true, SameSite: http.SameSiteLaxMode, Secure: g.conf().secureCookies(),
 	})
 	writeJSON(w, http.StatusOK, map[string]any{"ok": true})
 }

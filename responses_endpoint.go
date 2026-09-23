@@ -78,7 +78,7 @@ func (g *gateway) proxyZenResponses(ref providerRef, w http.ResponseWriter, r *h
 	exclude := map[string]bool{}
 	var lastHint string
 
-	for attempt := 0; attempt < g.cfg.Retry.MaxKeysPerRequest; attempt++ {
+	for attempt := 0; attempt < g.rs().Retry.MaxKeysPerRequest; attempt++ {
 		k := ref.pool.pick(exclude)
 		if k == nil {
 			break
@@ -98,7 +98,7 @@ func (g *gateway) proxyZenResponses(ref providerRef, w http.ResponseWriter, r *h
 		}
 		req.Header.Set("Authorization", "Bearer "+k.Key)
 		req.Header.Set("Content-Type", "application/json")
-		req.Header.Set("User-Agent", g.cfg.Zen.UserAgent)
+		req.Header.Set("User-Agent", g.rs().Zen.UserAgent)
 		req.Header.Set("x-opencode-session", newZenSessionID())
 
 		resp, err := g.client.Do(req)

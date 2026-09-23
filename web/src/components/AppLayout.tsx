@@ -18,6 +18,7 @@ import {
   FiMenu,
   FiMoon,
   FiServer,
+  FiSliders,
   FiSun,
   FiUsers,
   FiKey,
@@ -39,6 +40,7 @@ const navItems: NavItem[] = [
   { to: "/keys", label: "My API Keys", icon: FiKey },
   { to: "/users", label: "Users", icon: FiUsers, superadminOnly: true },
   { to: "/providers", label: "Providers", icon: FiServer, superadminOnly: true },
+  { to: "/settings", label: "Settings", icon: FiSliders, superadminOnly: true },
 ]
 
 function ColorModeMenu() {

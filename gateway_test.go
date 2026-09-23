@@ -10,6 +10,10 @@ import (
 	"time"
 )
 
+// testRuntime returns the runtime settings the gateway boots with when the
+// database holds no document; individual tests tweak fields on it.
+func testRuntime() *RuntimeSettings { return DefaultRuntimeSettings() }
+
 // testGateway wires a gateway at a mock upstream for one provider.
 func testGateway(t *testing.T, handler http.Handler) *gateway {
 	t.Helper()
@@ -17,20 +21,16 @@ func testGateway(t *testing.T, handler http.Handler) *gateway {
 	t.Cleanup(up.Close)
 	cfg := &Config{
 		Port: 0, Bind: "127.0.0.1",
-		Zen: ZenProviderConfig{
-			BaseURL: up.URL, UserAgent: "opencode/1.18.32", InjectTools: true,
-			ResponsesModels: []string{"muse-test-free"},
-		},
+		Zen:  ZenProviderConfig{BaseURL: up.URL},
 		Kilo: KiloProviderConfig{BaseURL: up.URL},
-		Retry: RetryConfig{
-			MaxKeysPerRequest: 3, CooldownSeconds: 30, RespectRetryAfter: true,
-		},
 	}
+	rs := testRuntime()
+	rs.Zen.ResponsesModels = []string{"muse-test-free"}
 	kf := &keyFile{
 		Zen:  []keyFileEntry{{"a", "sk-zen-a"}, {"b", "sk-zen-b"}, {"c", "sk-zen-c"}},
 		Kilo: []keyFileEntry{{"a", "sk-kilo-a"}, {"b", "sk-kilo-b"}},
 	}
-	return newGateway(cfg, kf)
+	return newGateway(cfg, rs, kf)
 }
 
 func chatReq(provider, model string) *http.Request {
@@ -64,14 +64,14 @@ func TestRotation429FallsBackToNextKey(t *testing.T) {
 	}))
 	_ = mu
 	cfg := &Config{
-		Zen:  ZenProviderConfig{BaseURL: up.URL, UserAgent: "opencode/1.18.32", InjectTools: true},
+		Zen:  ZenProviderConfig{BaseURL: up.URL},
 		Kilo: KiloProviderConfig{BaseURL: up.URL},
-		Retry: RetryConfig{MaxKeysPerRequest: 3, CooldownSeconds: 30, RespectRetryAfter: true},
 	}
+	rs := testRuntime()
 	kf := &keyFile{Zen: []keyFileEntry{
 		{"a", "sk-zen-a"}, {"b", "sk-zen-b"},
 	}}
-	g = newGateway(cfg, kf)
+	g = newGateway(cfg, rs, kf)
 
 	rec := httptest.NewRecorder()
 	g.handleChat(rec, chatReq("zen", "mimo-test-free"))
@@ -92,12 +92,12 @@ func TestAuthErrorDisablesKey(t *testing.T) {
 		w.Write([]byte(`{"error":{"type":"AuthError","message":"Invalid API key."}}`))
 	}))
 	cfg := &Config{
-		Zen:  ZenProviderConfig{BaseURL: up.URL, UserAgent: "opencode/1.18.32"},
+		Zen:  ZenProviderConfig{BaseURL: up.URL},
 		Kilo: KiloProviderConfig{BaseURL: up.URL},
-		Retry: RetryConfig{MaxKeysPerRequest: 3, CooldownSeconds: 30, RespectRetryAfter: true},
 	}
+	rs := testRuntime()
 	kf := &keyFile{Kilo: []keyFileEntry{{"a", "sk-a"}, {"b", "sk-b"}}}
-	g := newGateway(cfg, kf)
+	g := newGateway(cfg, rs, kf)
 	rec := httptest.NewRecorder()
 	g.handleChat(rec, chatReq("kilo", "some-model"))
 	// both keys get disabled -> no healthy keys -> 502
@@ -120,12 +120,12 @@ func TestFreeTierErrorFailsFastWithoutBurningPool(t *testing.T) {
 		w.Write([]byte(`{"type":"error","error":{"type":"FreeTierError","message":"nope"}}`))
 	}))
 	cfg := &Config{
-		Zen:  ZenProviderConfig{BaseURL: up.URL, UserAgent: "opencode/1.18.32", InjectTools: true},
+		Zen:  ZenProviderConfig{BaseURL: up.URL},
 		Kilo: KiloProviderConfig{BaseURL: up.URL},
-		Retry: RetryConfig{MaxKeysPerRequest: 3, CooldownSeconds: 30, RespectRetryAfter: true},
 	}
+	rs := testRuntime()
 	kf := &keyFile{Zen: []keyFileEntry{{"a", "sk-a"}, {"b", "sk-b"}, {"c", "sk-c"}}}
-	g := newGateway(cfg, kf)
+	g := newGateway(cfg, rs, kf)
 	rec := httptest.NewRecorder()
 	g.handleChat(rec, chatReq("zen", "mimo-test-free"))
 	if rec.Code != 502 {
@@ -150,12 +150,12 @@ func TestZenFingerprintInjection(t *testing.T) {
 		w.Write([]byte("data: {\"id\":\"1\",\"choices\":[{\"delta\":{\"content\":\"hi\"}}]}\n\ndata: [DONE]\n\n"))
 	}))
 	cfg := &Config{
-		Zen:  ZenProviderConfig{BaseURL: up.URL, UserAgent: "opencode/1.18.32", InjectTools: true},
+		Zen:  ZenProviderConfig{BaseURL: up.URL},
 		Kilo: KiloProviderConfig{BaseURL: up.URL},
-		Retry: RetryConfig{MaxKeysPerRequest: 3, CooldownSeconds: 30, RespectRetryAfter: true},
 	}
+	rs := testRuntime()
 	kf := &keyFile{Zen: []keyFileEntry{{"a", "sk-a"}}}
-	g := newGateway(cfg, kf)
+	g := newGateway(cfg, rs, kf)
 	rec := httptest.NewRecorder()
 	g.handleChat(rec, chatReq("zen", "mimo-test-free"))
 	if rec.Code != 200 {
@@ -212,12 +212,12 @@ func TestSurfaceFlipOn503(t *testing.T) {
 		w.WriteHeader(404)
 	}))
 	cfg := &Config{
-		Zen:  ZenProviderConfig{BaseURL: up.URL, UserAgent: "opencode/1.18.32", InjectTools: true},
+		Zen:  ZenProviderConfig{BaseURL: up.URL},
 		Kilo: KiloProviderConfig{BaseURL: up.URL},
-		Retry: RetryConfig{MaxKeysPerRequest: 3, CooldownSeconds: 30, RespectRetryAfter: true},
 	}
+	rs := testRuntime()
 	kf := &keyFile{Zen: []keyFileEntry{{"a", "sk-a"}}}
-	g := newGateway(cfg, kf)
+	g := newGateway(cfg, rs, kf)
 
 	// model NOT in responsesModels — must still flip and succeed
 	rec := httptest.NewRecorder()
@@ -260,12 +260,13 @@ func TestResponsesTranslationNonStream(t *testing.T) {
 		w.Write([]byte("data: {\"type\":\"response.completed\",\"response\":{\"usage\":{\"input_tokens\":5,\"output_tokens\":7}}}\n\n"))
 	}))
 	cfg := &Config{
-		Zen:  ZenProviderConfig{BaseURL: up.URL, UserAgent: "opencode/1.18.32", InjectTools: true, ResponsesModels: []string{"muse-test-free"}},
+		Zen:  ZenProviderConfig{BaseURL: up.URL},
 		Kilo: KiloProviderConfig{BaseURL: up.URL},
-		Retry: RetryConfig{MaxKeysPerRequest: 3, CooldownSeconds: 30, RespectRetryAfter: true},
 	}
+	rs := testRuntime()
+	rs.Zen.ResponsesModels = []string{"muse-test-free"}
 	kf := &keyFile{Zen: []keyFileEntry{{"a", "sk-a"}}}
-	g := newGateway(cfg, kf)
+	g := newGateway(cfg, rs, kf)
 
 	// client asks non-stream; upstream forced to stream; response aggregated
 	r := httptest.NewRequest("POST", "/v1/chat/completions",
@@ -310,12 +311,13 @@ func TestResponsesEndpointAggregation(t *testing.T) {
 		w.Write([]byte("data: {\"type\":\"response.completed\",\"response\":{\"id\":\"resp_x\",\"status\":\"completed\",\"usage\":{\"input_tokens\":4,\"output_tokens\":2}}}\n\n"))
 	}))
 	cfg := &Config{
-		Zen:  ZenProviderConfig{BaseURL: up.URL, UserAgent: "opencode/1.18.32", ResponsesModels: []string{"muse-test-free"}},
+		Zen:  ZenProviderConfig{BaseURL: up.URL},
 		Kilo: KiloProviderConfig{BaseURL: up.URL},
-		Retry: RetryConfig{MaxKeysPerRequest: 3, CooldownSeconds: 30, RespectRetryAfter: true},
 	}
+	rs := testRuntime()
+	rs.Zen.ResponsesModels = []string{"muse-test-free"}
 	kf := &keyFile{Zen: []keyFileEntry{{"a", "sk-a"}}}
-	g := newGateway(cfg, kf)
+	g := newGateway(cfg, rs, kf)
 
 	r := httptest.NewRequest("POST", "/v1/responses",
 		strings.NewReader(`{"model":"zen/muse-test-free","input":"hi","stream":false,"max_output_tokens":50}`))
@@ -361,12 +363,12 @@ func TestResponsesEndpointRejectsChatSurfaceModel(t *testing.T) {
 		t.Errorf("upstream must not be called for chat-surface models")
 	}))
 	cfg := &Config{
-		Zen:  ZenProviderConfig{BaseURL: up.URL, UserAgent: "opencode/1.18.32"},
+		Zen:  ZenProviderConfig{BaseURL: up.URL},
 		Kilo: KiloProviderConfig{BaseURL: up.URL},
-		Retry: RetryConfig{MaxKeysPerRequest: 3, CooldownSeconds: 30, RespectRetryAfter: true},
 	}
+	rs := testRuntime()
 	kf := &keyFile{Zen: []keyFileEntry{{"a", "sk-a"}}}
-	g := newGateway(cfg, kf)
+	g := newGateway(cfg, rs, kf)
 
 	// chat-surface zen model (not in ResponsesModels)
 	r := httptest.NewRequest("POST", "/v1/responses",
@@ -398,12 +400,13 @@ func TestResponsesToolCallTranslation(t *testing.T) {
 		w.Write([]byte("data: {\"type\":\"response.completed\",\"response\":{\"id\":\"resp_t\",\"status\":\"completed\",\"usage\":{\"input_tokens\":9,\"output_tokens\":5}}}\n\n"))
 	}))
 	cfg := &Config{
-		Zen:  ZenProviderConfig{BaseURL: up.URL, UserAgent: "opencode/1.18.32", ResponsesModels: []string{"muse-test-free"}},
+		Zen:  ZenProviderConfig{BaseURL: up.URL},
 		Kilo: KiloProviderConfig{BaseURL: up.URL},
-		Retry: RetryConfig{MaxKeysPerRequest: 3, CooldownSeconds: 30, RespectRetryAfter: true},
 	}
+	rs := testRuntime()
+	rs.Zen.ResponsesModels = []string{"muse-test-free"}
 	kf := &keyFile{Zen: []keyFileEntry{{"a", "sk-a"}}}
-	g := newGateway(cfg, kf)
+	g := newGateway(cfg, rs, kf)
 
 	r := httptest.NewRequest("POST", "/v1/chat/completions",
 		strings.NewReader(`{"model":"zen/muse-test-free","messages":[{"role":"user","content":"ls"}],"stream":false}`))
@@ -484,13 +487,12 @@ func TestPriorityModeSticksToFirstKey(t *testing.T) {
 	}))
 	_ = mu
 	cfg := &Config{
-		Rotation: "priority",
-		Zen:      ZenProviderConfig{BaseURL: up.URL, UserAgent: "opencode/1.18.32", InjectTools: true},
-		Kilo:     KiloProviderConfig{BaseURL: up.URL},
-		Retry:    RetryConfig{MaxKeysPerRequest: 3, CooldownSeconds: 30, RespectRetryAfter: true},
+		Zen:  ZenProviderConfig{BaseURL: up.URL},
+		Kilo: KiloProviderConfig{BaseURL: up.URL},
 	}
+	rs := testRuntime()
 	kf := &keyFile{Zen: []keyFileEntry{{"a", "sk-zen-a"}, {"b", "sk-zen-b"}}}
-	g := newGateway(cfg, kf)
+	g := newGateway(cfg, rs, kf)
 
 	// request 1: a 429s, fails over to b
 	rec := httptest.NewRecorder()
@@ -526,12 +528,12 @@ func TestClientAuth(t *testing.T) {
 	}))
 	cfg := &Config{
 		APIKeys: []string{"sk-good"},
-		Zen:     ZenProviderConfig{BaseURL: up.URL, UserAgent: "opencode/1.18.32"},
+		Zen:     ZenProviderConfig{BaseURL: up.URL},
 		Kilo:    KiloProviderConfig{BaseURL: up.URL},
-		Retry:   RetryConfig{MaxKeysPerRequest: 3, CooldownSeconds: 30, RespectRetryAfter: true},
 	}
+	rs := testRuntime()
 	kf := &keyFile{Zen: []keyFileEntry{{"a", "sk-a"}}}
-	g := newGateway(cfg, kf)
+	g := newGateway(cfg, rs, kf)
 	handler := g.clientOnly(g.handleChat)
 
 	// missing key
@@ -624,13 +626,12 @@ func TestRoutingWithSuffixedID(t *testing.T) {
 		w.Write([]byte("data: {\"id\":\"1\",\"choices\":[{\"delta\":{\"content\":\"ok\"}}]}\n\ndata: [DONE]\n\n"))
 	}))
 	cfg := &Config{
-		Rotation: "priority",
-		Zen:      ZenProviderConfig{BaseURL: up.URL, UserAgent: "opencode/1.18.32", InjectTools: true},
-		Kilo:     KiloProviderConfig{BaseURL: up.URL},
-		Retry:    RetryConfig{MaxKeysPerRequest: 3, CooldownSeconds: 30, RespectRetryAfter: true},
+		Zen:  ZenProviderConfig{BaseURL: up.URL},
+		Kilo: KiloProviderConfig{BaseURL: up.URL},
 	}
+	rs := testRuntime()
 	kf := &keyFile{Zen: []keyFileEntry{{"a", "sk-a"}}}
-	g := newGateway(cfg, kf)
+	g := newGateway(cfg, rs, kf)
 
 	rec := httptest.NewRecorder()
 	g.handleChat(rec, chatReq("zen", "mimo-v2.6-flash-free-200K-txt-img-aud-vid"))
@@ -698,13 +699,12 @@ func TestAnthropicSSEShape(t *testing.T) {
 		w.Write([]byte("data: [DONE]\n\n"))
 	}))
 	cfg := &Config{
-		Rotation: "priority",
-		Zen:      ZenProviderConfig{BaseURL: up.URL, UserAgent: "opencode/1.18.32", InjectTools: true},
-		Kilo:     KiloProviderConfig{BaseURL: up.URL},
-		Retry:    RetryConfig{MaxKeysPerRequest: 3, CooldownSeconds: 30, RespectRetryAfter: true},
+		Zen:  ZenProviderConfig{BaseURL: up.URL},
+		Kilo: KiloProviderConfig{BaseURL: up.URL},
 	}
+	rs := testRuntime()
 	kf := &keyFile{Zen: []keyFileEntry{{"a", "sk-a"}}}
-	g := newGateway(cfg, kf)
+	g := newGateway(cfg, rs, kf)
 
 	r := httptest.NewRequest("POST", "/v1/messages",
 		strings.NewReader(`{"model":"zen/x-free","max_tokens":100,"stream":true,
@@ -733,12 +733,12 @@ func TestAnthropicXApiKeyAuth(t *testing.T) {
 	}))
 	cfg := &Config{
 		APIKeys: []string{"sk-good"},
-		Zen:     ZenProviderConfig{BaseURL: up.URL, UserAgent: "opencode/1.18.32"},
+		Zen:     ZenProviderConfig{BaseURL: up.URL},
 		Kilo:    KiloProviderConfig{BaseURL: up.URL},
-		Retry:   RetryConfig{MaxKeysPerRequest: 3, CooldownSeconds: 30, RespectRetryAfter: true},
 	}
+	rs := testRuntime()
 	kf := &keyFile{Kilo: []keyFileEntry{{"a", "sk-a"}}}
-	g := newGateway(cfg, kf)
+	g := newGateway(cfg, rs, kf)
 
 	r := httptest.NewRequest("POST", "/v1/messages",
 		strings.NewReader(`{"model":"kilo/m","max_tokens":10,"messages":[{"role":"user","content":"hi"}]}`))
@@ -766,13 +766,12 @@ func TestAnthropicToolCallFragmentsMerged(t *testing.T) {
 		w.Write([]byte("data: [DONE]\n\n"))
 	}))
 	cfg := &Config{
-		Rotation: "priority",
-		Zen:      ZenProviderConfig{BaseURL: up.URL, UserAgent: "opencode/1.18.32", InjectTools: true},
-		Kilo:     KiloProviderConfig{BaseURL: up.URL},
-		Retry:    RetryConfig{MaxKeysPerRequest: 3, CooldownSeconds: 30, RespectRetryAfter: true},
+		Zen:  ZenProviderConfig{BaseURL: up.URL},
+		Kilo: KiloProviderConfig{BaseURL: up.URL},
 	}
+	rs := testRuntime()
 	kf := &keyFile{Zen: []keyFileEntry{{"a", "sk-a"}}}
-	g := newGateway(cfg, kf)
+	g := newGateway(cfg, rs, kf)
 
 	r := httptest.NewRequest("POST", "/v1/messages",
 		strings.NewReader(`{"model":"zen/x-free","max_tokens":100,"stream":true,

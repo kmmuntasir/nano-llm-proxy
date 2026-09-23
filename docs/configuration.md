@@ -1,87 +1,124 @@
 # Configuration
 
-`nano-llm-proxy` runs without a config file — every field has a default. A
-`config.json` (next to the binary, or given as the first CLI argument)
-overrides individual fields. Secrets come from the environment, not the file.
-User accounts, client keys, providers, and upstream keys live in the SQLite
-database and are managed through the admin GUI.
+`nano-llm-proxy` has two configuration layers, deliberately split:
 
-A minimal local config (this is `config.example.json`):
+1. **Bootstrap** — the handful of values needed before the database opens.
+   Environment variables, optionally seeded from a `.env` file in the working
+   directory. There is no config file.
+2. **Runtime** — everything you tune while it runs (rotation, retries,
+   aliases, adapter knobs, the model catalog). A single JSON document in the
+   SQLite `settings` table, edited in the admin GUI under **Settings** (or via
+   `PUT /api/settings`). Every change applies in-request — no restarts.
 
-```json
-{
-  "port": 8787,
-  "bind": "127.0.0.1",
-  "dbPath": "gateway.db",
-  "cookieSecure": false,
-  "trustedOrigins": [],
-  "rotation": "priority",
-  "retry": {
-    "maxKeysPerRequest": 3,
-    "cooldownSeconds": 30,
-    "respectRetryAfter": true,
-    "maxRequestsPerKeyPerDay": null
-  },
-  "anthropic": {
-    "aliases": {
-      "claude-sonnet-5": "openai/gpt-4o-mini"
-    }
-  }
-}
-```
+## Bootstrap (environment)
 
-## Fields
+`.env` is parsed by the binary itself: `KEY=VALUE` per line, `#` comments,
+optional quotes, and it **never overrides variables already present in the
+real environment**. Precedence: built-in defaults < `.env` < process
+environment (so `systemd EnvironmentFile=` and `docker -e` work unchanged).
 
-| Field | Default | Meaning |
+| Variable | Default | Meaning |
 | --- | --- | --- |
-| `port` | 8787 | HTTP listen port |
-| `bind` | `127.0.0.1` | Listen address. Use `0.0.0.0` inside a container or VM |
-| `dbPath` | `gateway.db` | SQLite database (created and migrated at boot, 0600) |
-| `cookieSecure` | true | `Secure` flag on GUI session cookies. Set false for plain-HTTP local use |
-| `trustedOrigins` | empty | Extra Origin hosts accepted on state-changing `/api` requests. Same-host is always allowed. Set your public host here when serving the GUI behind a reverse proxy |
-| `rotation` | `priority` | `priority` (stick with failover) or `lru` (spread) |
-| `apiKeys` | — | Deprecated: legacy first-boot migration input, ignored afterwards |
-| `anthropic.aliases` | empty | Map of `claude-*` model names to `provider/model` values, applied on `/v1/messages` |
-| `zen.baseUrl` | `https://opencode.ai/zen/v1` | zen adapter upstream |
-| `zen.userAgent` | `opencode/1.18.32` | Client user agent; must satisfy the upstream's 1.18.0 floor (validated at startup) |
-| `zen.injectTools` | true | Append the client-shape tool stubs to every zen request |
-| `zen.responsesModels` | empty | Model IDs served on the Responses surface. The map also self-corrects: a signature 503 flips the surface for subsequent requests |
-| `zen.freeOnly` | false | Restrict the zen catalog in `/v1/models` to models flagged as free upstream |
-| `zen.modelMeta` | empty | Per-model metadata (context window, max output, modalities, reasoning) shown in `/v1/models`; unknown models get conservative defaults |
-| `kilo.baseUrl` | `https://api.kilo.ai/api/gateway/v1` | kilo adapter upstream |
-| `kilo.freeOnly` | false | Same catalog restriction as `zen.freeOnly` |
-| `retry.maxKeysPerRequest` | 3 | Failover attempts per request |
-| `retry.cooldownSeconds` | 30 | Default 429 cooldown |
+| `ADMIN_EMAIL` / `ADMIN_PASSWORD` | — | First superadmin's credentials. Required at first boot (bootstrap fails fast without them), create-if-absent on later boots; also used by `-reset-admin-password` |
+| `NANO_PORT` | 8787 | HTTP listen port (1–65535) |
+| `NANO_BIND` | `127.0.0.1` | Listen address. Use `0.0.0.0` in a VM |
+| `NANO_DB_PATH` | `gateway.db` | SQLite database (created and migrated at boot, 0600) |
+| `NANO_COOKIE_SECURE` | true | `Secure` flag on GUI session cookies. Set false only for plain-HTTP local use |
+| `NANO_TRUSTED_ORIGINS` | empty | Comma-separated extra Origin hosts accepted on state-changing `/api` requests. Same-host is always allowed. Set your public host here when serving the GUI behind a reverse proxy |
+
+Malformed values are fatal at boot (`invalid NANO_PORT "…"`), never silently
+ignored. See `.env.example` for a commented template.
+
+## Runtime settings (database + GUI)
+
+The document lives in the `settings` table under the key `runtime_settings`.
+A missing row means "all defaults". `GET /api/settings` returns the effective
+document; `PUT /api/settings` validates and replaces it (omitted fields fall
+back to their defaults, explicit `false`/`0` are honored; the sync-status
+block is server-owned).
+
+| Path | Default | Meaning |
+| --- | --- | --- |
+| `rotation` | `priority` | `priority` (stick with failover, prompt-cache friendly) or `lru` (spread load). Rebuilds every pool on save |
+| `retry.maxKeysPerRequest` | 3 | Failover attempts per request (1–100) |
+| `retry.cooldownSeconds` | 30 | Default 429 cooldown (0 = only honor `Retry-After`) |
 | `retry.respectRetryAfter` | true | Prefer the upstream `Retry-After` duration |
-| `retry.maxRequestsPerKeyPerDay` | null (off) | Optional per-key daily cap; an exhausted key cools until midnight |
+| `retry.maxRequestsPerKeyPerDay` | 0 (off) | Optional per-key daily cap; an exhausted key cools until midnight |
+| `anthropic.aliases` | empty | Map of `claude-*` model names to `provider/model` values, applied on `/v1/messages` |
+| `zen.userAgent` | `opencode/1.18.32` | Client user agent; must satisfy the upstream's 1.18.0 floor. Validated on save (HTTP 400) and at boot (fatal) |
+| `zen.injectTools` | true | Append the client-shape tool stubs to every zen request |
+| `zen.responsesModels` | empty | Model IDs served on the Responses surface. The surface selection also self-corrects: a signature 503 flips it for subsequent requests |
+| `zen.freeOnly` | false | Restrict the zen catalog in `/v1/models` to models flagged as free upstream |
+| `zen.modelMeta` | empty | Per-model metadata (context window, max output, modalities, reasoning, description) shown in `/v1/models`; unknown models get conservative defaults |
+| `zen.modelMetaAutoSync` | false | Refresh `modelMeta` from models.dev once a day in the background |
+| `kilo.freeOnly` | false | Same catalog restriction as `zen.freeOnly` |
 
-## Environment
+Ranges enforced on save: `maxKeysPerRequest` 1–100, `cooldownSeconds`
+0–86400, `maxRequestsPerKeyPerDay` 0 or 1–1000000, alias values shaped
+`provider/model`, every `modelMeta` limit a positive integer.
 
-| Variable | Meaning |
-| --- | --- |
-| `ADMIN_EMAIL` / `ADMIN_PASSWORD` | First superadmin's credentials. Required at first boot (bootstrap fails fast without them), create-if-absent on later boots; also used by `-reset-admin-password` |
+Base URLs are **not** part of this document — providers (and their base
+URLs) live in their own database table and are edited on the GUI Providers
+page, including for the built-in `zen` and `kilo`.
 
-For systemd, put them in an env file (for example
-`/etc/nano-llm-proxy/gateway.env`, chmod 600) and load it with
-`EnvironmentFile=`.
+## Zen model catalog sync
+
+Zen's `/models` endpoint advertises ids only, so the context windows, output
+limits, reasoning flags, and descriptions shown in `/v1/models` come from
+[`models.dev`](https://models.dev) — the model directory the opencode
+ecosystem publishes. The sync (Settings → Zen → *Sync now*, or daily when
+`modelMetaAutoSync` is on):
+
+- fetches `https://models.dev/api.json` and keeps only the `opencode`
+  provider's models,
+- overwrites `modelMeta` for live zen ids that models.dev knows (manual
+  curation of those ids is overwritten),
+- leaves manual entries for ids models.dev doesn't know untouched,
+- prunes meta whose model no longer appears in zen's live catalog (a
+  re-added model comes back on the next sync),
+- never touches `zen.responsesModels`,
+- on any fetch/parse/persist failure changes nothing and records the error in
+  the sync status shown in the GUI.
 
 ## CLI
 
 ```text
-nano-llm-proxy [config.json [keys.json]] [-reset-admin-password]
+nano-llm-proxy [keys.json] [-reset-admin-password]
 ```
 
-- The config path defaults to `./config.json`; a missing file is fine, a
-  malformed one is fatal.
 - `keys.json` is a legacy first-boot seeding source
   (`{"zen":[{"label","key"}...],"kilo":[...]}`). Once imported into the
   database it is ignored — new deployments manage upstream keys in the GUI.
 - `-reset-admin-password` resets the superadmin's password from
   `ADMIN_PASSWORD` and exits; restart the service afterwards.
 
+## Resetting settings
+
+To discard every runtime setting and return to defaults:
+
+```bash
+sqlite3 gateway.db "DELETE FROM settings WHERE key='runtime_settings'"
+```
+
+then restart. The same command is the escape hatch if a hand-edited user
+agent ever blocks boot.
+
 ## Deployment
 
-### systemd
+### The short way
+
+On a systemd host (any 512 MB VPS will do):
+
+```bash
+cp .env.example .env      # fill in ADMIN_EMAIL / ADMIN_PASSWORD
+sudo ./deploy.sh
+```
+
+The script builds the GUI and binary, installs to `/opt/nano-llm-proxy`,
+creates an unprivileged service user, installs a hardened unit, and starts
+the service. Re-running it upgrades in place.
+
+### systemd, hand-rolled
 
 Build on any machine (Go 1.26+ and, for the GUI, Node 22+):
 
@@ -91,7 +128,7 @@ CGO_ENABLED=0 go build -tags prod -o nano-llm-proxy .
 scp nano-llm-proxy root@server:/usr/local/bin/
 ```
 
-`/etc/nano-llm-proxy/gateway.env`:
+`/etc/nano-llm-proxy/nano.env` (chmod 600):
 
 ```text
 ADMIN_EMAIL=admin@example.com
@@ -109,7 +146,7 @@ After=network-online.target
 DynamicUser=yes
 StateDirectory=nano-llm-proxy
 WorkingDirectory=/var/lib/nano-llm-proxy
-EnvironmentFile=/etc/nano-llm-proxy/gateway.env
+EnvironmentFile=/etc/nano-llm-proxy/nano.env
 ExecStart=/usr/local/bin/nano-llm-proxy
 Restart=on-failure
 ProtectSystem=strict
@@ -122,27 +159,13 @@ WantedBy=multi-user.target
 `ReadWritePaths` matters: without it, `ProtectSystem=strict` makes every
 SQLite write fail. Logs go to journald: `journalctl -u nano-llm-proxy -f`.
 
-### Docker
-
-```bash
-docker build -t nano-llm-proxy .
-docker run -d --name nano-llm-proxy -p 8787:8787 \
-  -v nano-llm-proxy-data:/data \
-  -e ADMIN_EMAIL=admin@example.com -e ADMIN_PASSWORD=change-me \
-  nano-llm-proxy
-```
-
-The image ships container-friendly defaults (`0.0.0.0` bind, plain-HTTP
-cookies); the database lives in the `/data` volume. When fronting the
-container with TLS, mount a config that sets `"cookieSecure": true`.
-
 ### Behind a reverse proxy
 
 The GUI needs one of two things to accept state-changing requests:
 
 - the browser's `Origin` host equals the backend `Host` (typical for Caddy
   and correctly configured nginx), or
-- the host is listed in `trustedOrigins`.
+- the host is listed in `NANO_TRUSTED_ORIGINS`.
 
 nginx snippet (streaming-safe):
 
@@ -158,7 +181,7 @@ location / {
 
 Caddy needs nothing beyond `reverse_proxy 127.0.0.1:8787`.
 
-Serve over TLS and set `cookieSecure: true` in production.
+Serve over TLS and keep `NANO_COOKIE_SECURE=true` in production.
 
 ## Operations
 
@@ -167,8 +190,8 @@ Serve over TLS and set `cookieSecure: true` in production.
   provider; disable the busy one in the GUI to push traffic down the pool.
 - **Re-enable / disable an upstream key:** GUI → Providers → key switch;
   effective immediately (pools rebuild in-request).
-- **Cooldowns and pool counters are in-memory:** a restart clears them.
-  Users, keys, and providers persist in SQLite; startup takes about two
-  seconds.
+- **Cooldowns, daily-cap state, and pool counters are in-memory:** a restart
+  clears them. Users, keys, providers, and settings persist in SQLite;
+  startup takes about two seconds.
 - **Health:** `GET /health` is open and reports uptime and per-provider
   healthy-key counts.

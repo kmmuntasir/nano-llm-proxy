@@ -17,7 +17,7 @@ func (g *gateway) proxyOpenAI(ref providerRef, w http.ResponseWriter, r *http.Re
 	exclude := map[string]bool{}
 	var lastHint string
 
-	for attempt := 0; attempt < g.cfg.Retry.MaxKeysPerRequest; attempt++ {
+	for attempt := 0; attempt < g.rs().Retry.MaxKeysPerRequest; attempt++ {
 		k := ref.pool.pick(exclude)
 		if k == nil {
 			break
