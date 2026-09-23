@@ -1,0 +1,370 @@
+package main
+
+import (
+	"context"
+	"encoding/json"
+	"fmt"
+	"io"
+	"io/fs"
+	"log"
+	"net/http"
+	"os"
+	"path"
+	"slices"
+	"strings"
+	"time"
+)
+
+func main() {
+	cfgPath, keysPath := "config.json", "keys.json"
+	var sawCfg, sawKeys bool
+	resetPassword := false
+	for _, arg := range os.Args[1:] {
+		switch {
+		case arg == "-reset-admin-password":
+			resetPassword = true
+		case !sawCfg && !strings.HasPrefix(arg, "-"):
+			cfgPath, sawCfg = arg, true
+		case !sawKeys && !strings.HasPrefix(arg, "-"):
+			keysPath, sawKeys = arg, true
+		}
+	}
+
+	cfg, err := loadConfig(cfgPath)
+	if err != nil {
+		log.Fatalf("config: %v", err)
+	}
+	if !uaVersionOK(cfg.Zen.UserAgent) {
+		log.Fatalf("zen.userAgent %q fails the 1.18.0 floor — the whole pool would 426", cfg.Zen.UserAgent)
+	}
+	st, err := OpenStore(cfg.DBPath)
+	if err != nil {
+		log.Fatalf("store: %v", err)
+	}
+	defer st.Close()
+
+	// keys.json is only needed for first-boot seeding; later boots run fine
+	// without it (the store holds the keys).
+	kf, kfErr := loadKeys(keysPath)
+	if kfErr != nil {
+		kf = nil
+	}
+	if err := st.Bootstrap(cfg, kf, os.Getenv("ADMIN_EMAIL"), os.Getenv("ADMIN_PASSWORD")); err != nil {
+		log.Fatalf("bootstrap: %v", err)
+	}
+	if resetPassword {
+		resetAdminPassword(st)
+		return
+	}
+
+	g, err := newGatewayFromStore(cfg, st)
+	if err != nil {
+		log.Fatalf("gateway: %v", err)
+	}
+	healthy := 0
+	for _, ref := range g.allProviders() {
+		healthy += ref.pool.healthyCount()
+	}
+	log.Printf("nano-llm-proxy starting: providers=%d upstream_keys_healthy=%d ua=%s bind=%s:%d db=%s",
+		len(g.allProviders()), healthy, cfg.Zen.UserAgent, cfg.Bind, cfg.Port, cfg.DBPath)
+	go g.maintenanceLoop()
+
+	mux := http.NewServeMux()
+	mux.HandleFunc("POST /v1/chat/completions", g.clientOnly(g.handleChat))
+	mux.HandleFunc("POST /v1/responses", g.clientOnly(g.handleResponses))
+	mux.HandleFunc("POST /v1/messages", g.clientOnly(g.handleMessages))
+	mux.HandleFunc("GET /v1/models", g.clientOnly(g.handleModels))
+	mux.HandleFunc("GET /health", g.handleHealth)
+
+	// GUI backend — session-cookie auth
+	mux.HandleFunc("POST /api/auth/login", g.handleLogin)
+	mux.HandleFunc("POST /api/auth/logout", g.requireSession(g.handleLogout))
+	mux.HandleFunc("GET /api/auth/me", g.requireSession(g.handleMe))
+
+	mux.HandleFunc("GET /api/me/keys", g.requireSession(g.handleListMyKeys))
+	mux.HandleFunc("POST /api/me/keys", g.requireSession(g.handleCreateMyKey))
+	mux.HandleFunc("PATCH /api/me/keys/{keyId}", g.requireSession(g.handlePatchMyKey))
+	mux.HandleFunc("DELETE /api/me/keys/{keyId}", g.requireSession(g.handleDeleteMyKey))
+
+	mux.HandleFunc("GET /api/users", g.requireSession(g.requireSuperadmin(g.handleListUsers)))
+	mux.HandleFunc("POST /api/users", g.requireSession(g.requireSuperadmin(g.handleCreateUser)))
+	mux.HandleFunc("PATCH /api/users/{id}", g.requireSession(g.requireSuperadmin(g.handlePatchUser)))
+	mux.HandleFunc("DELETE /api/users/{id}", g.requireSession(g.requireSuperadmin(g.handleDeleteUser)))
+	mux.HandleFunc("GET /api/users/{id}/keys", g.requireSession(g.requireSuperadmin(g.handleListUserKeys)))
+	mux.HandleFunc("POST /api/users/{id}/keys", g.requireSession(g.requireSuperadmin(g.handleCreateUserKey)))
+	mux.HandleFunc("PATCH /api/users/{id}/keys/{keyId}", g.requireSession(g.requireSuperadmin(g.handlePatchUserKey)))
+	mux.HandleFunc("DELETE /api/users/{id}/keys/{keyId}", g.requireSession(g.requireSuperadmin(g.handleDeleteUserKey)))
+
+	mux.HandleFunc("GET /api/providers", g.requireSession(g.requireSuperadmin(g.handleListProviders)))
+	mux.HandleFunc("POST /api/providers", g.requireSession(g.requireSuperadmin(g.handleCreateProvider)))
+	mux.HandleFunc("PATCH /api/providers/{id}", g.requireSession(g.requireSuperadmin(g.handlePatchProvider)))
+	mux.HandleFunc("DELETE /api/providers/{id}", g.requireSession(g.requireSuperadmin(g.handleDeleteProvider)))
+	mux.HandleFunc("POST /api/providers/{id}/keys", g.requireSession(g.requireSuperadmin(g.handleAddProviderKey)))
+	mux.HandleFunc("PATCH /api/providers/{id}/keys/{keyId}", g.requireSession(g.requireSuperadmin(g.handlePatchProviderKey)))
+	mux.HandleFunc("DELETE /api/providers/{id}/keys/{keyId}", g.requireSession(g.requireSuperadmin(g.handleDeleteProviderKey)))
+
+	mux.HandleFunc("GET /api/dashboard", g.requireSession(g.handleDashboard))
+	mux.Handle("/", g.serveWeb())
+
+	addr := fmt.Sprintf("%s:%d", cfg.Bind, cfg.Port)
+	srv := &http.Server{
+		Addr:              addr,
+		Handler:           mux,
+		ReadHeaderTimeout: 15 * time.Second,
+	}
+	log.Fatal(srv.ListenAndServe())
+}
+
+// maintenanceLoop flushes in-memory usage counters to the store and prunes
+// expired sessions. Only runs with a store (production mode).
+func (g *gateway) maintenanceLoop() {
+	flush := time.NewTicker(30 * time.Second)
+	defer flush.Stop()
+	prune := time.NewTicker(time.Hour)
+	defer prune.Stop()
+	for range flush.C {
+		g.usage.flush(g.store)
+		// prune piggybacks on the flush tick, roughly hourly
+		if time.Since(startTime)%time.Hour < 30*time.Second {
+			g.store.DeleteExpiredSessions() //nolint:errcheck
+		}
+	}
+}
+
+// clientOnly enforces client authentication on /v1/*. With a store it checks
+// the in-memory DB-backed key cache (and attributes usage); the legacy
+// config.APIKeys allowlist still works for store==nil (tests).
+// Accepts both OpenAI-style Bearer and Anthropic-style x-api-key headers.
+func (g *gateway) clientOnly(next http.HandlerFunc) http.HandlerFunc {
+	return func(w http.ResponseWriter, r *http.Request) {
+		key := strings.TrimPrefix(r.Header.Get("Authorization"), "Bearer ")
+		if key == "" {
+			key = r.Header.Get("x-api-key")
+		}
+		if g.store != nil {
+			if key == "" {
+				g.rejectClient(w)
+				return
+			}
+			ck, ok := g.ck.lookup(key)
+			if !ok {
+				g.rejectClient(w)
+				return
+			}
+			g.usage.record(ck.ID)
+			next(w, withClientKey(r, ck))
+			return
+		}
+		// legacy path (store==nil tests): static allowlist
+		if len(g.cfg.APIKeys) > 0 && (key == "" || !slices.Contains(g.cfg.APIKeys, key)) {
+			g.rejectClient(w)
+			return
+		}
+		next(w, r)
+	}
+}
+
+func (g *gateway) rejectClient(w http.ResponseWriter) {
+	w.Header().Set("WWW-Authenticate", `Bearer realm="nano-llm-proxy"`)
+	writeErr(w, http.StatusUnauthorized, "invalid or missing API key")
+}
+
+func (g *gateway) handleHealth(w http.ResponseWriter, r *http.Request) {
+	provs := map[string]int{}
+	for _, ref := range g.allProviders() {
+		provs[ref.name] = ref.pool.healthyCount()
+	}
+	w.Header().Set("Content-Type", "application/json")
+	json.NewEncoder(w).Encode(map[string]any{
+		"status":       "ok",
+		"uptime_s":     int(time.Since(startTime).Seconds()),
+		"zen_healthy":  provs["zen"],
+		"kilo_healthy": provs["kilo"],
+		"providers":    provs,
+	})
+}
+
+var startTime = time.Now()
+
+// fetchUpstreamModels GETs one provider's catalog with the first healthy key.
+// Builtin providers get the self-describing suffix treatment; generic
+// openai providers pass through raw under their prefix.
+func (g *gateway) fetchUpstreamModels(ref providerRef) ([]any, error) {
+	key := ref.pool.pick(nil)
+	if key == nil {
+		return nil, fmt.Errorf("no healthy %s keys", ref.name)
+	}
+	req, err := http.NewRequestWithContext(context.Background(), http.MethodGet, ref.baseURL+"/models", nil)
+	if err != nil {
+		return nil, err
+	}
+	req.Header.Set("Authorization", "Bearer "+key.Key)
+	resp, err := g.client.Do(req)
+	if err != nil {
+		return nil, err
+	}
+	defer resp.Body.Close()
+	if resp.StatusCode != http.StatusOK {
+		return nil, fmt.Errorf("%s /models HTTP %d", ref.name, resp.StatusCode)
+	}
+	var parsed struct {
+		Data []map[string]any `json:"data"`
+	}
+	if err := json.NewDecoder(io.LimitReader(resp.Body, 10<<20)).Decode(&parsed); err != nil {
+		return nil, err
+	}
+	out := make([]any, 0, len(parsed.Data))
+	for _, m := range parsed.Data {
+		id, _ := m["id"].(string)
+		if id == "" {
+			continue
+		}
+		if ref.typ == "opencode" && g.cfg.Zen.FreeOnly && !hasFreeSuffix(id) {
+			continue
+		}
+		entry := map[string]any{
+			"id":       ref.name + "/" + id,
+			"object":   "model",
+			"owned_by": ref.name,
+			"free":     true,
+		}
+		switch {
+		case ref.typ == "opencode":
+			// Zen advertises ids only — enrich from config meta + defaults.
+			const defCtx, defOut = int64(262144), int64(8192)
+			meta, known := g.cfg.Zen.ModelMeta[id]
+			if !known {
+				meta = ModelMeta{ContextWindow: defCtx, MaxOutputTokens: defOut, Reasoning: true}
+			}
+			ctx := meta.ContextWindow
+			if ctx == 0 {
+				ctx = defCtx
+			}
+			mo := meta.MaxOutputTokens
+			if mo == 0 {
+				mo = defOut
+			}
+			entry["context_window"] = ctx
+			entry["max_output_tokens"] = mo
+			entry["reasoning"] = meta.Reasoning
+			entry["responses_api"] = meta.ResponsesAPI || slices.Contains(g.cfg.Zen.ResponsesModels, id)
+			if len(meta.InputModalities) > 0 {
+				entry["input_modalities"] = meta.InputModalities
+			}
+			if meta.Description != "" {
+				entry["description"] = meta.Description
+			}
+			entry["id"] = ref.name + "/" + buildSuffixedID(id, ctx, meta.InputModalities)
+		case ref.builtin: // kilo
+			// Kilo's catalog is rich — map the fields agents read.
+			if g.cfg.Kilo.FreeOnly {
+				if free, _ := m["isFree"].(bool); !free {
+					continue
+				}
+			}
+			var mods []string
+			if cw, ok := m["context_length"].(float64); ok {
+				entry["context_window"] = int64(cw)
+			}
+			if tp, ok := m["top_provider"].(map[string]any); ok {
+				if mc, ok := tp["max_completion_tokens"].(float64); ok {
+					entry["max_output_tokens"] = int64(mc)
+				}
+			}
+			if arch, ok := m["architecture"].(map[string]any); ok {
+				if in, ok := arch["input_modalities"].([]any); ok {
+					for _, v := range in {
+						if s, ok := v.(string); ok {
+							mods = append(mods, s)
+						}
+					}
+					entry["input_modalities"] = in
+				}
+				if sp, ok := arch["output_modalities"]; ok {
+					entry["output_modalities"] = sp
+				}
+			}
+			if sp, ok := m["supported_parameters"]; ok {
+				entry["supported_parameters"] = sp
+			}
+			if d, ok := m["description"].(string); ok {
+				entry["description"] = d
+			}
+			if free, ok := m["isFree"].(bool); ok {
+				entry["free"] = free
+			}
+			cw, _ := entry["context_window"].(int64)
+			entry["id"] = ref.name + "/" + buildSuffixedID(id, cw, mods)
+		default:
+			// generic openai provider: passthrough, no enrichment, no suffixes
+			if d, ok := m["context_length"].(float64); ok {
+				entry["context_window"] = int64(d)
+			}
+			if d, ok := m["description"].(string); ok {
+				entry["description"] = d
+			}
+		}
+		out = append(out, entry)
+	}
+	return out, nil
+}
+
+func hasFreeSuffix(id string) bool {
+	return len(id) > 5 && id[len(id)-5:] == "-free"
+}
+
+// handleModels serves the merged, prefixed catalog (10-minute cache,
+// invalidated by provider CRUD).
+func (g *gateway) handleModels(w http.ResponseWriter, r *http.Request) {
+	g.catMu.Lock()
+	defer g.catMu.Unlock()
+	if g.catalog == nil || time.Since(g.catalogAt) > 10*time.Minute {
+		var merged []any
+		var failed []string
+		for _, ref := range g.allProviders() {
+			models, err := g.fetchUpstreamModels(ref)
+			if err != nil {
+				failed = append(failed, fmt.Sprintf("%s=%v", ref.name, err))
+				log.Printf("catalog: %s unavailable: %v", ref.name, err)
+				continue
+			}
+			merged = append(merged, models...)
+		}
+		if len(merged) == 0 && len(failed) > 0 {
+			writeErr(w, http.StatusBadGateway, "catalog fetch failed: "+strings.Join(failed, " "))
+			return
+		}
+		body, _ := json.Marshal(map[string]any{"object": "list", "data": merged})
+		g.catalog = body
+		g.catalogAt = time.Now()
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.Write(g.catalog)
+}
+
+// serveWeb hosts the embedded admin GUI with SPA fallback; untagged builds
+// (go test, go run without -tags prod) get a stub page instead.
+func (g *gateway) serveWeb() http.Handler {
+	fsys, ok := webFS()
+	fileServer := http.FileServerFS(fsys)
+	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if !ok {
+			w.Header().Set("Content-Type", "text/plain; charset=utf-8")
+			w.WriteHeader(http.StatusOK)
+			fmt.Fprintln(w, "nano-llm-proxy: admin GUI not built into this binary (build with -tags prod)")
+			return
+		}
+		p := strings.TrimPrefix(path.Clean(r.URL.Path), "/")
+		if p == "" || p == "." {
+			p = "index.html"
+		}
+		if _, err := fs.Stat(fsys, p); err != nil {
+			// SPA routes (e.g. /users, /providers) fall back to index.html
+			r2 := r.Clone(r.Context())
+			r2.URL.Path = "/"
+			fileServer.ServeHTTP(w, r2)
+			return
+		}
+		fileServer.ServeHTTP(w, r)
+	})
+}
