@@ -1,8 +1,8 @@
+import { Suspense, lazy } from "react"
 import { useQuery } from "@tanstack/react-query"
 import {
   Badge,
   Card,
-  HStack,
   Heading,
   SimpleGrid,
   Stat,
@@ -11,8 +11,10 @@ import {
   VStack,
 } from "@chakra-ui/react"
 import { api } from "../api/client"
-import type { DashboardData, UsageModelRow, UsageTotals } from "../api/types"
-import StatusBadge from "../components/StatusBadge"
+import type { DashboardData, UsageTotals } from "../api/types"
+
+// Recharts is a big chunk and only the dashboard needs it — load on demand.
+const UsageCharts = lazy(() => import("../components/UsageCharts"))
 
 function fmtUptime(s: number) {
   const d = Math.floor(s / 86400)
@@ -34,8 +36,6 @@ function fmtTokens(n: number) {
 
 interface UsageSummary {
   totals: UsageTotals
-  topModels: UsageModelRow[]
-  providers: UsageModelRow[]
 }
 
 export default function DashboardPage() {
@@ -45,7 +45,7 @@ export default function DashboardPage() {
     queryFn: () => api<DashboardData>("/api/dashboard"),
     refetchInterval: 15_000,
   })
-  // 24h usage metrics, scoped to the signed-in user (superadmin sees all)
+  // 24h usage totals for the stat row, scoped to the signed-in user
   const usage = useQuery({
     queryKey: ["dashboard", "usage"],
     queryFn: () => {
@@ -108,136 +108,58 @@ export default function DashboardPage() {
         </Card.Root>
       </SimpleGrid>
 
-      {(t?.requests ?? 0) > 0 && (
-        <Card.Root>
-          <Card.Header>
-            <HStack justify="space-between">
-              <Heading size="sm">Busiest models (24h)</Heading>
-              <Text fontSize="xs" color="fg.muted">
-                {usage.data?.providers?.map((p) => `${p.key}: ${p.requests}`).join(" · ")}
-              </Text>
-            </HStack>
-          </Card.Header>
-          <Card.Body pt={0}>
-            <HStack gap={6} flexWrap="wrap">
-              {(usage.data?.topModels ?? []).slice(0, 5).map((m) => (
-                <VStack align="start" gap={0} key={m.key}>
-                  <Text fontFamily="mono" fontSize="xs" truncate maxW="260px">
-                    {m.key}
-                  </Text>
-                  <Text fontSize="sm" color="fg.muted">
-                    {m.requests} reqs · {fmtTokens(m.inputTokens + m.outputTokens)} tokens
-                  </Text>
-                </VStack>
-              ))}
-              {(usage.data?.topModels ?? []).length === 0 && (
-                <Text fontSize="sm" color="fg.muted">
-                  No usage yet
-                </Text>
-              )}
-            </HStack>
-          </Card.Body>
-        </Card.Root>
-      )}
-
-      <VStack align="stretch" gap={3}>
-        <Heading size="md">Provider pools</Heading>
-        {data.providers.map((p) => (
-          <Card.Root key={p.name}>
-            <Card.Body pt={3} pb={2} px={4}>
-              <HStack justify="space-between" mb={2}>
-                <HStack gap={2}>
-                  <Heading size="sm">{p.name}</Heading>
-                  <Badge variant="outline">{p.type}</Badge>
-                  <Badge colorPalette={p.healthy > 0 ? "green" : "red"}>
-                    {p.healthy}/{p.total} healthy
-                  </Badge>
-                </HStack>
-              </HStack>
-              <Table.Root size="sm">
-                <Table.Header>
-                  <Table.Row>
-                    <Table.ColumnHeader>Key</Table.ColumnHeader>
-                    <Table.ColumnHeader>Status</Table.ColumnHeader>
-                    <Table.ColumnHeader>Requests</Table.ColumnHeader>
-                    <Table.ColumnHeader>429s</Table.ColumnHeader>
-                    <Table.ColumnHeader>Errors</Table.ColumnHeader>
-                  </Table.Row>
-                </Table.Header>
-                <Table.Body>
-                  {p.keys.map((k) => (
-                    <Table.Row key={k.hash}>
-                      <Table.Cell fontFamily="mono" fontSize="xs">
-                        {k.label}
-                      </Table.Cell>
-                      <Table.Cell>
-                        <HStack gap={2}>
-                          <StatusBadge status={k.status} />
-                          {k.cooldown_remaining && (
-                            <Text fontSize="xs" color="fg.muted">
-                              {k.cooldown_remaining}
-                            </Text>
-                          )}
-                        </HStack>
-                      </Table.Cell>
-                      <Table.Cell>{k.requests}</Table.Cell>
-                      <Table.Cell>{k.rate_limited}</Table.Cell>
-                      <Table.Cell>{k.errors}</Table.Cell>
-                    </Table.Row>
-                  ))}
-                </Table.Body>
-              </Table.Root>
-            </Card.Body>
-          </Card.Root>
-        ))}
-      </VStack>
+      <Suspense fallback={<Card.Root><Card.Body><Text>Loading charts…</Text></Card.Body></Card.Root>}>
+        <UsageCharts />
+      </Suspense>
 
       <VStack align="stretch" gap={3}>
         <Heading size="md">Recent activity</Heading>
         <Card.Root>
-          <Table.Root size="sm">
-            <Table.Header>
-              <Table.Row>
-                <Table.ColumnHeader>Time</Table.ColumnHeader>
-                <Table.ColumnHeader>User</Table.ColumnHeader>
-                <Table.ColumnHeader>Key</Table.ColumnHeader>
-                <Table.ColumnHeader>Provider</Table.ColumnHeader>
-                <Table.ColumnHeader>Model</Table.ColumnHeader>
-                <Table.ColumnHeader>Status</Table.ColumnHeader>
-                <Table.ColumnHeader>ms</Table.ColumnHeader>
-              </Table.Row>
-            </Table.Header>
-            <Table.Body>
-              {data.activity.length === 0 && (
+          <Card.Body pt={3}>
+            <Table.Root size="sm">
+              <Table.Header>
                 <Table.Row>
-                  <Table.Cell colSpan={7} color="fg.muted" textAlign="center">
-                    No requests yet
-                  </Table.Cell>
+                  <Table.ColumnHeader>Time</Table.ColumnHeader>
+                  <Table.ColumnHeader>User</Table.ColumnHeader>
+                  <Table.ColumnHeader>Key</Table.ColumnHeader>
+                  <Table.ColumnHeader>Provider</Table.ColumnHeader>
+                  <Table.ColumnHeader>Model</Table.ColumnHeader>
+                  <Table.ColumnHeader>Status</Table.ColumnHeader>
+                  <Table.ColumnHeader>ms</Table.ColumnHeader>
                 </Table.Row>
-              )}
-              {data.activity.map((e, i) => (
-                <Table.Row key={`${e.ts}-${i}`}>
-                  <Table.Cell whiteSpace="nowrap">{fmtTs(e.ts)}</Table.Cell>
-                  <Table.Cell>{e.user || "—"}</Table.Cell>
-                  <Table.Cell>{e.keyAlias || "—"}</Table.Cell>
-                  <Table.Cell>{e.provider}</Table.Cell>
-                  <Table.Cell fontFamily="mono" fontSize="xs" truncate maxW="220px">
-                    {e.model}
-                  </Table.Cell>
-                  <Table.Cell>
-                    <Badge
-                      colorPalette={e.status === 200 ? "green" : "red"}
-                      variant="subtle"
-                    >
-                      {e.status}
-                      {e.failReason ? " failed" : ""}
-                    </Badge>
-                  </Table.Cell>
-                  <Table.Cell>{e.durationMs}</Table.Cell>
-                </Table.Row>
-              ))}
-            </Table.Body>
-          </Table.Root>
+              </Table.Header>
+              <Table.Body>
+                {data.activity.length === 0 && (
+                  <Table.Row>
+                    <Table.Cell colSpan={7} color="fg.muted" textAlign="center">
+                      No requests yet
+                    </Table.Cell>
+                  </Table.Row>
+                )}
+                {data.activity.map((e, i) => (
+                  <Table.Row key={`${e.ts}-${i}`}>
+                    <Table.Cell whiteSpace="nowrap">{fmtTs(e.ts)}</Table.Cell>
+                    <Table.Cell>{e.user || "—"}</Table.Cell>
+                    <Table.Cell>{e.keyAlias || "—"}</Table.Cell>
+                    <Table.Cell>{e.provider}</Table.Cell>
+                    <Table.Cell fontFamily="mono" fontSize="xs" truncate maxW="220px">
+                      {e.model}
+                    </Table.Cell>
+                    <Table.Cell>
+                      <Badge
+                        colorPalette={e.status === 200 ? "green" : "red"}
+                        variant="subtle"
+                      >
+                        {e.status}
+                        {e.failReason ? " failed" : ""}
+                      </Badge>
+                    </Table.Cell>
+                    <Table.Cell>{e.durationMs}</Table.Cell>
+                  </Table.Row>
+                ))}
+              </Table.Body>
+            </Table.Root>
+          </Card.Body>
         </Card.Root>
       </VStack>
     </VStack>

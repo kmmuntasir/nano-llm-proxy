@@ -104,7 +104,7 @@ export default function MyKeysPage() {
         <Card.Header>
           <Heading size="sm">Keys</Heading>
         </Card.Header>
-        <Card.Body pt={0}>
+        <Card.Body pt={3}>
           {isLoading ? (
             <Text>Loading…</Text>
           ) : (
