@@ -1,0 +1,19 @@
+{
+  "port": 8787,
+  "bind": "127.0.0.1",
+  "dbPath": "gateway.db",
+  "cookieSecure": false,
+  "trustedOrigins": [],
+  "rotation": "priority",
+  "retry": {
+    "maxKeysPerRequest": 3,
+    "cooldownSeconds": 30,
+    "respectRetryAfter": true,
+    "maxRequestsPerKeyPerDay": null
+  },
+  "anthropic": {
+    "aliases": {
+      "claude-sonnet-5": "openai/gpt-4o-mini"
+    }
+  }
+}

@@ -1,0 +1,19 @@
+# secrets & runtime state — never commit
+config.json
+keys.json
+gateway.env
+.env
+gateway.db
+gateway.db-wal
+gateway.db-shm
+*.bak
+
+# build outputs
+nano-llm-proxy
+nano-llm-proxy-linux
+*.exe
+
+# web
+web/node_modules/
+web/dist/
+web/tsconfig.tsbuildinfo
