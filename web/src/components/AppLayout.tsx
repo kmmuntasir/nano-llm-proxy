@@ -27,6 +27,7 @@ import {
 import { useColorMode } from "./ui/color-mode"
 import { useTheme } from "next-themes"
 import { post } from "../api/client"
+import { toaster } from "./ui/toaster"
 import { useSession } from "../App"
 
 interface NavItem {
@@ -81,9 +82,11 @@ export default function AppLayout({ children }: { children: ReactNode }) {
   const logout = useMutation({
     mutationFn: () => post("/api/auth/logout"),
     onSuccess: () => {
+      toaster.create({ title: "Logged out", type: "success" })
       qc.clear()
       navigate("/login")
     },
+    onError: () => toaster.create({ title: "Logout failed", type: "error" }),
   })
 
   const isSuperadmin = data?.user.role === "superadmin"

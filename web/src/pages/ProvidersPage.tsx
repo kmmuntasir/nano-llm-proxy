@@ -113,15 +113,19 @@ function ProviderKeyRow({ provider, k }: { provider: ProviderView; k: ProviderKe
   const toggle = useMutation({
     mutationFn: (disabled: boolean) =>
       patch(`/api/providers/${provider.id}/keys/${k.id}`, { disabled }),
-    onSuccess: invalidate,
+    onSuccess: async () => {
+      invalidate()
+      toaster.create({ title: "Key updated", type: "success" })
+    },
     onError: (e) =>
       toaster.create({ title: e instanceof ApiError ? e.message : "update failed", type: "error" }),
   })
   const remove = useMutation({
     mutationFn: () => del(`/api/providers/${provider.id}/keys/${k.id}`),
-    onSuccess: () => {
+    onSuccess: async () => {
       setToDelete(false)
       invalidate()
+      toaster.create({ title: "Key removed", type: "success" })
     },
     onError: (e) =>
       toaster.create({ title: e instanceof ApiError ? e.message : "delete failed", type: "error" }),
@@ -186,27 +190,30 @@ function ProviderCard({ p }: { p: ProviderView }) {
 
   const patchP = useMutation({
     mutationFn: (body: Record<string, unknown>) => patch(`/api/providers/${p.id}`, body),
-    onSuccess: () => {
+    onSuccess: async () => {
       setEditURL(null)
       invalidate()
+      toaster.create({ title: "Provider updated", type: "success" })
     },
     onError: (e) =>
       toaster.create({ title: e instanceof ApiError ? e.message : "update failed", type: "error" }),
   })
   const removeP = useMutation({
     mutationFn: () => del(`/api/providers/${p.id}`),
-    onSuccess: () => {
+    onSuccess: async () => {
       setToDelete(false)
       invalidate()
+      toaster.create({ title: "Provider deleted", type: "success" })
     },
     onError: (e) =>
       toaster.create({ title: e instanceof ApiError ? e.message : "delete failed", type: "error" }),
   })
   const addKey = useMutation({
     mutationFn: () => post(`/api/providers/${p.id}/keys`, { key: newKey, label: "gui" }),
-    onSuccess: () => {
+    onSuccess: async () => {
       setNewKey("")
       invalidate()
+      toaster.create({ title: "Key added", type: "success" })
     },
     onError: (e) =>
       toaster.create({ title: e instanceof ApiError ? e.message : "add failed", type: "error" }),
