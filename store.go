@@ -6,6 +6,7 @@ import (
 	"crypto/subtle"
 	"database/sql"
 	"encoding/hex"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"log"
@@ -24,7 +25,7 @@ import (
 // rebuilt after CRUD writes instead.
 
 var (
-	ErrAdminEnvMissing   = errors.New("ADMIN_EMAIL/ADMIN_PASSWORD required on first boot (set gateway.env, systemd EnvironmentFile)")
+	ErrAdminEnvMissing   = errors.New("ADMIN_EMAIL/ADMIN_PASSWORD required on first boot (set them in the environment or a .env file)")
 	ErrLegacyKeysMissing = errors.New("first boot requires keys.json to seed the provider pools")
 	ErrBuiltinProvider   = errors.New("builtin providers cannot be deleted")
 	ErrNotFound          = errors.New("not found")
@@ -69,13 +70,13 @@ type Provider struct {
 }
 
 type ProviderKey struct {
-	ID        int64
+	ID         int64
 	ProviderID int64
-	Key       string // plaintext upstream key; the DB file is 0600
-	Label     string
-	SortOrder int64
-	Disabled  bool
-	CreatedAt int64
+	Key        string // plaintext upstream key; the DB file is 0600
+	Label      string
+	SortOrder  int64
+	Disabled   bool
+	CreatedAt  int64
 }
 
 type Session struct {
@@ -201,10 +202,9 @@ func (s *Store) migrateV1() error {
 	return tx.Commit()
 }
 
-// Bootstrap seeds a fresh database: superadmin from env, the two builtin
-// providers with keys imported from keys.json, and config apiKeys imported as
-// the superadmin's client keys (once, marker-gated). Later boots with a
-// populated DB are no-ops. Ordered so a mid-tx crash leaves nothing partial.
+// Bootstrap seeds a fresh database: superadmin from env, and the two builtin
+// providers with keys imported from keys.json. Later boots with a populated
+// DB are no-ops. Ordered so a mid-tx crash leaves nothing partial.
 func (s *Store) Bootstrap(cfg *Config, kf *keyFile, adminEmail, adminPassword string) error {
 	tx, err := s.db.Begin()
 	if err != nil {
@@ -279,23 +279,6 @@ func (s *Store) Bootstrap(cfg *Config, kf *keyFile, adminEmail, adminPassword st
 		log.Printf("store: seeded providers zen=%d keys kilo=%d keys", len(kf.Zen), len(kf.Kilo))
 	}
 
-	// 3. legacy client keys from config apiKeys — once only, so GUI deletions
-	// are never resurrected by a later boot
-	done, _ := s.getSettingTx(tx, "legacy_import_done")
-	if done == "" && len(cfg.APIKeys) > 0 {
-		for _, raw := range cfg.APIKeys {
-			_, err := tx.Exec(`INSERT OR IGNORE INTO api_keys (user_id, key_hash, key_hint, alias, disabled, created_at)
-				VALUES (?, ?, ?, 'migrated', 0, ?)`, adminID, hashSecret(raw), keyHint(raw), now)
-			if err != nil {
-				return err
-			}
-		}
-		if _, err := tx.Exec(`INSERT OR REPLACE INTO settings (key, value) VALUES ('legacy_import_done', ?)`, now); err != nil {
-			return err
-		}
-		log.Printf("store: imported %d legacy client key(s) from config", len(cfg.APIKeys))
-	}
-
 	return tx.Commit()
 }
 
@@ -306,6 +289,87 @@ func (s *Store) getSettingTx(tx *sql.Tx, key string) (string, error) {
 		return "", nil
 	}
 	return v, err
+}
+
+func (s *Store) getSetting(key string) (string, error) {
+	var v string
+	err := s.db.QueryRow(`SELECT value FROM settings WHERE key=?`, key).Scan(&v)
+	if errors.Is(err, sql.ErrNoRows) {
+		return "", nil
+	}
+	return v, err
+}
+
+// --- runtime settings ---
+
+const runtimeSettingsKey = "runtime_settings"
+
+// loadSettingsDoc reads and parses the stored document; "" comes back as
+// defaults. Fields absent from stored JSON keep their defaults because the
+// unmarshal targets a defaulted value.
+func (s *Store) loadSettingsDoc(raw string) (*RuntimeSettings, error) {
+	rs := DefaultRuntimeSettings()
+	if raw == "" {
+		return rs, nil
+	}
+	if err := json.Unmarshal([]byte(raw), rs); err != nil {
+		return nil, fmt.Errorf("parse %s: %w", runtimeSettingsKey, err)
+	}
+	return rs.applyDefaults(), nil
+}
+
+// LoadRuntimeSettings returns the effective runtime settings, applying
+// defaults for anything the stored document (or the row itself) leaves out.
+func (s *Store) LoadRuntimeSettings() (*RuntimeSettings, error) {
+	raw, err := s.getSetting(runtimeSettingsKey)
+	if err != nil {
+		return nil, err
+	}
+	return s.loadSettingsDoc(raw)
+}
+
+// SaveRuntimeSettings replaces the stored document wholesale.
+func (s *Store) SaveRuntimeSettings(rs *RuntimeSettings) error {
+	raw, err := json.Marshal(rs)
+	if err != nil {
+		return err
+	}
+	_, err = s.db.Exec(`INSERT INTO settings (key, value) VALUES (?, ?)
+		ON CONFLICT(key) DO UPDATE SET value=excluded.value`, runtimeSettingsKey, string(raw))
+	return err
+}
+
+// UpdateSettings runs read-modify-write against the stored document inside
+// one transaction. SetMaxOpenConns(1) serializes individual statements, not
+// pairs — without the tx a background sync could clobber an admin PUT that
+// lands between its read and write.
+func (s *Store) UpdateSettings(mutate func(*RuntimeSettings) *RuntimeSettings) error {
+	tx, err := s.db.Begin()
+	if err != nil {
+		return err
+	}
+	defer tx.Rollback()
+	raw, err := s.getSettingTx(tx, runtimeSettingsKey)
+	if err != nil {
+		return err
+	}
+	rs, err := s.loadSettingsDoc(raw)
+	if err != nil {
+		return err
+	}
+	updated := mutate(rs)
+	if updated == nil {
+		updated = rs
+	}
+	blob, err := json.Marshal(updated)
+	if err != nil {
+		return err
+	}
+	if _, err := tx.Exec(`INSERT INTO settings (key, value) VALUES (?, ?)
+		ON CONFLICT(key) DO UPDATE SET value=excluded.value`, runtimeSettingsKey, string(blob)); err != nil {
+		return err
+	}
+	return tx.Commit()
 }
 
 // --- users ---

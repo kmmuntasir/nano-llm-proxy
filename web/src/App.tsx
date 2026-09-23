@@ -10,6 +10,7 @@ import DashboardPage from "./pages/DashboardPage"
 import MyKeysPage from "./pages/MyKeysPage"
 import UsersPage from "./pages/UsersPage"
 import ProvidersPage from "./pages/ProvidersPage"
+import SettingsPage from "./pages/SettingsPage"
 
 export interface Session {
   user: UserView
@@ -60,6 +61,7 @@ export default function App() {
           <>
             <Route path="/users" element={<UsersPage />} />
             <Route path="/providers" element={<ProvidersPage />} />
+            <Route path="/settings" element={<SettingsPage />} />
           </>
         )}
         <Route path="*" element={<Navigate to="/" replace />} />

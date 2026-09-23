@@ -45,15 +45,15 @@ func (g *gateway) handleListProviders(w http.ResponseWriter, r *http.Request) {
 		Errors      int64  `json:"errors"`
 	}
 	type provJSON struct {
-		ID        int64   `json:"id"`
-		Name      string  `json:"name"`
-		Type      string  `json:"type"`
-		BaseURL   string  `json:"baseUrl"`
-		Enabled   bool    `json:"enabled"`
-		Builtin   bool    `json:"builtin"`
-		SortOrder int64   `json:"sortOrder"`
-		Healthy   int     `json:"healthy"`
-		Total     int     `json:"total"`
+		ID        int64    `json:"id"`
+		Name      string   `json:"name"`
+		Type      string   `json:"type"`
+		BaseURL   string   `json:"baseUrl"`
+		Enabled   bool     `json:"enabled"`
+		Builtin   bool     `json:"builtin"`
+		SortOrder int64    `json:"sortOrder"`
+		Healthy   int      `json:"healthy"`
+		Total     int      `json:"total"`
 		Keys      []pkJSON `json:"keys"`
 	}
 	out := make([]provJSON, 0, len(provs))
@@ -97,10 +97,10 @@ func upstreamKeyHash(key string) string {
 func (g *gateway) handleCreateProvider(w http.ResponseWriter, r *http.Request) {
 	actor := contextUser(r)
 	var req struct {
-		Name      string   `json:"name"`
-		BaseURL   string   `json:"baseUrl"`
-		Keys      []string `json:"keys"`
-		FirstKey  string   `json:"firstKey"`
+		Name     string   `json:"name"`
+		BaseURL  string   `json:"baseUrl"`
+		Keys     []string `json:"keys"`
+		FirstKey string   `json:"firstKey"`
 	}
 	if !readJSON(w, r, &req) {
 		return

@@ -78,7 +78,8 @@ curl http://localhost:8787/v1/messages \
   }'
 ```
 
-Model resolution order: a `claude-*` name hits the `anthropic.aliases` map;
+Model resolution order: a `claude-*` name hits the alias map
+(Settings → Anthropic aliases, stored in the runtime settings document);
 anything else (including suffixed IDs like `myprovider/my-model-128K`) routes
 directly. A `[1m]` suffix is stripped before the upstream call.
 
@@ -124,6 +125,9 @@ Roles: `superadmin` (everything below) and `user` (own keys + dashboard).
 | `GET/POST /api/users/{id}/keys`, `PATCH/DELETE /api/users/{id}/keys/{keyId}` | superadmin | Per-user client keys |
 | `GET/POST /api/providers`, `PATCH/DELETE /api/providers/{id}` | superadmin | Providers (generic CRUD; built-ins cannot be deleted) |
 | `POST /api/providers/{id}/keys`, `PATCH/DELETE /api/providers/{id}/keys/{keyId}` | superadmin | Upstream keys |
+| `GET /api/settings` | superadmin | Effective runtime settings document (rotation, retries, aliases, adapter knobs, model catalog) |
+| `PUT /api/settings` | superadmin | Validate and replace the document; omitted fields fall back to defaults, the models.dev sync status is server-owned and preserved. Validation failures return 400 and change nothing. Applies in-request — pool mode and the `/v1/models` cache refresh before the response |
+| `POST /api/settings/model-meta/sync` | superadmin | Run the models.dev catalog sync now; returns the sync status (200 even when `ok:false` — the error is in the status block) |
 | `GET /api/dashboard` | user | Pool health, per-key counters, recent activity |
 
 Every mutation writes to SQLite and rebuilds the in-memory pools/key cache
@@ -135,7 +139,7 @@ in the same request.
 | --- | --- |
 | 400 | Unknown provider prefix, or malformed request |
 | 401 | Missing/invalid client key |
-| 502 | All keys cooling/disabled ("no healthy keys"), or an upstream client-shape/version rejection — the body carries an actionable hint (e.g. raise `userAgent`) |
+| 502 | All keys cooling/disabled ("no healthy keys"), or an upstream client-shape/version rejection — the body carries an actionable hint (e.g. raise the Zen user agent in Settings) |
 
 Failover across keys happens until the first response byte reaches the
 client; after that, upstream failures propagate rather than corrupting a

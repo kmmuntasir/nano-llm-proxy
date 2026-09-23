@@ -16,32 +16,43 @@ import (
 )
 
 func main() {
-	cfgPath, keysPath := "config.json", "keys.json"
-	var sawCfg, sawKeys bool
+	keysPath := "keys.json"
+	var sawKeys bool
 	resetPassword := false
 	for _, arg := range os.Args[1:] {
 		switch {
 		case arg == "-reset-admin-password":
 			resetPassword = true
-		case !sawCfg && !strings.HasPrefix(arg, "-"):
-			cfgPath, sawCfg = arg, true
 		case !sawKeys && !strings.HasPrefix(arg, "-"):
 			keysPath, sawKeys = arg, true
 		}
 	}
 
-	cfg, err := loadConfig(cfgPath)
+	if err := loadDotEnv(".env"); err != nil {
+		log.Fatalf("env: %v", err)
+	}
+	cfg, err := loadEnvConfig()
 	if err != nil {
 		log.Fatalf("config: %v", err)
-	}
-	if !uaVersionOK(cfg.Zen.UserAgent) {
-		log.Fatalf("zen.userAgent %q fails the 1.18.0 floor — the whole pool would 426", cfg.Zen.UserAgent)
 	}
 	st, err := OpenStore(cfg.DBPath)
 	if err != nil {
 		log.Fatalf("store: %v", err)
 	}
 	defer st.Close()
+
+	// Runtime settings live in the DB; a corrupted document is fatal rather
+	// than silently running on defaults. The UA floor stays a boot check even
+	// though PUT /api/settings validates it — hand-edited databases exist.
+	rs, err := st.LoadRuntimeSettings()
+	if err != nil {
+		log.Fatalf("settings: %v", err)
+	}
+	if !uaVersionOK(rs.Zen.UserAgent) {
+		log.Fatalf("zen.userAgent %q fails the 1.18.0 floor — the whole pool would 426; "+
+			"reset to defaults with: sqlite3 %s \"DELETE FROM settings WHERE key='%s'\"",
+			rs.Zen.UserAgent, cfg.DBPath, runtimeSettingsKey)
+	}
 
 	// keys.json is only needed for first-boot seeding; later boots run fine
 	// without it (the store holds the keys).
@@ -57,7 +68,7 @@ func main() {
 		return
 	}
 
-	g, err := newGatewayFromStore(cfg, st)
+	g, err := newGatewayFromStore(cfg, rs, st)
 	if err != nil {
 		log.Fatalf("gateway: %v", err)
 	}
@@ -66,7 +77,7 @@ func main() {
 		healthy += ref.pool.healthyCount()
 	}
 	log.Printf("nano-llm-proxy starting: providers=%d upstream_keys_healthy=%d ua=%s bind=%s:%d db=%s",
-		len(g.allProviders()), healthy, cfg.Zen.UserAgent, cfg.Bind, cfg.Port, cfg.DBPath)
+		len(g.allProviders()), healthy, rs.Zen.UserAgent, cfg.Bind, cfg.Port, cfg.DBPath)
 	go g.maintenanceLoop()
 
 	mux := http.NewServeMux()
@@ -103,6 +114,10 @@ func main() {
 	mux.HandleFunc("PATCH /api/providers/{id}/keys/{keyId}", g.requireSession(g.requireSuperadmin(g.handlePatchProviderKey)))
 	mux.HandleFunc("DELETE /api/providers/{id}/keys/{keyId}", g.requireSession(g.requireSuperadmin(g.handleDeleteProviderKey)))
 
+	mux.HandleFunc("GET /api/settings", g.requireSession(g.requireSuperadmin(g.handleGetSettings)))
+	mux.HandleFunc("PUT /api/settings", g.requireSession(g.requireSuperadmin(g.handlePutSettings)))
+	mux.HandleFunc("POST /api/settings/model-meta/sync", g.requireSession(g.requireSuperadmin(g.handleSyncModelMeta)))
+
 	mux.HandleFunc("GET /api/dashboard", g.requireSession(g.handleDashboard))
 	mux.Handle("/", g.serveWeb())
 
@@ -124,6 +139,7 @@ func (g *gateway) maintenanceLoop() {
 	defer prune.Stop()
 	for range flush.C {
 		g.usage.flush(g.store)
+		g.maybeSyncModelMeta() // 24h-gated, async, at most one in flight
 		// prune piggybacks on the flush tick, roughly hourly
 		if time.Since(startTime)%time.Hour < 30*time.Second {
 			g.store.DeleteExpiredSessions() //nolint:errcheck
@@ -156,7 +172,7 @@ func (g *gateway) clientOnly(next http.HandlerFunc) http.HandlerFunc {
 			return
 		}
 		// legacy path (store==nil tests): static allowlist
-		if len(g.cfg.APIKeys) > 0 && (key == "" || !slices.Contains(g.cfg.APIKeys, key)) {
+		if len(g.conf().APIKeys) > 0 && (key == "" || !slices.Contains(g.conf().APIKeys, key)) {
 			g.rejectClient(w)
 			return
 		}
@@ -219,7 +235,7 @@ func (g *gateway) fetchUpstreamModels(ref providerRef) ([]any, error) {
 		if id == "" {
 			continue
 		}
-		if ref.typ == "opencode" && g.cfg.Zen.FreeOnly && !hasFreeSuffix(id) {
+		if ref.typ == "opencode" && g.rs().Zen.FreeOnly && !hasFreeSuffix(id) {
 			continue
 		}
 		entry := map[string]any{
@@ -232,7 +248,7 @@ func (g *gateway) fetchUpstreamModels(ref providerRef) ([]any, error) {
 		case ref.typ == "opencode":
 			// Zen advertises ids only — enrich from config meta + defaults.
 			const defCtx, defOut = int64(262144), int64(8192)
-			meta, known := g.cfg.Zen.ModelMeta[id]
+			meta, known := g.rs().Zen.ModelMeta[id]
 			if !known {
 				meta = ModelMeta{ContextWindow: defCtx, MaxOutputTokens: defOut, Reasoning: true}
 			}
@@ -247,7 +263,7 @@ func (g *gateway) fetchUpstreamModels(ref providerRef) ([]any, error) {
 			entry["context_window"] = ctx
 			entry["max_output_tokens"] = mo
 			entry["reasoning"] = meta.Reasoning
-			entry["responses_api"] = meta.ResponsesAPI || slices.Contains(g.cfg.Zen.ResponsesModels, id)
+			entry["responses_api"] = meta.ResponsesAPI || slices.Contains(g.rs().Zen.ResponsesModels, id)
 			if len(meta.InputModalities) > 0 {
 				entry["input_modalities"] = meta.InputModalities
 			}
@@ -257,7 +273,7 @@ func (g *gateway) fetchUpstreamModels(ref providerRef) ([]any, error) {
 			entry["id"] = ref.name + "/" + buildSuffixedID(id, ctx, meta.InputModalities)
 		case ref.builtin: // kilo
 			// Kilo's catalog is rich — map the fields agents read.
-			if g.cfg.Kilo.FreeOnly {
+			if g.rs().Kilo.FreeOnly {
 				if free, _ := m["isFree"].(bool); !free {
 					continue
 				}

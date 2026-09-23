@@ -45,7 +45,11 @@ control plane around just to front a few API keys.
   input modalities, and reasoning flags; model IDs embed the same facts
 - Claude Code support: model aliases, `[1m]` context-suffix handling, and a
   documented `ANTHROPIC_DEFAULT_*_MODEL` integration
-- 31 tests (`go test -race ./...`) against scripted mock upstreams — no
+- Runtime settings live in the database and are editable in the GUI with no
+  restart: rotation mode, retry/cooldown knobs, an optional per-key daily cap,
+  Anthropic aliases, adapter knobs, and a models.dev-backed Zen model catalog
+  that syncs itself
+- 51 tests (`go test -race ./...`) against scripted mock upstreams — no
   network or Node required
 
 ## Quickstart (from source)
@@ -57,8 +61,8 @@ git clone https://github.com/kmmuntasir/nano-llm-proxy.git
 cd nano-llm-proxy
 (cd web && npm ci && npm run build)   # builds the GUI; it gets embedded into the binary
 CGO_ENABLED=0 go build -tags prod -o nano-llm-proxy .
-cp config.example.json config.json    # sane local defaults (plain-HTTP cookies)
-ADMIN_EMAIL=admin@example.com ADMIN_PASSWORD=change-me ./nano-llm-proxy
+cp .env.example .env                  # then set ADMIN_EMAIL / ADMIN_PASSWORD
+./nano-llm-proxy
 ```
 
 Then:
@@ -77,20 +81,9 @@ curl -N http://localhost:8787/v1/chat/completions \
   -d '{"model":"openai/gpt-4o-mini","stream":true,
        "messages":[{"role":"user","content":"hello"}]}'
 ```
-
-No `config.json`? Fine — the gateway runs on built-in defaults (port 8787,
-loopback bind, `gateway.db` in the working directory). The file only
-overrides.
-
-### Docker
-
-```bash
-docker build -t nano-llm-proxy .
-docker run -d --name nano-llm-proxy -p 8787:8787 \
-  -v nano-llm-proxy-data:/data \
-  -e ADMIN_EMAIL=admin@example.com -e ADMIN_PASSWORD=change-me \
-  nano-llm-proxy
-```
+No `.env`? That works too — the gateway runs on built-in defaults (port
+8787, loopback bind, `gateway.db` in the working directory); only the
+first-boot superadmin credentials are mandatory.
 
 ## Model routing
 
@@ -120,7 +113,7 @@ and bare IDs are accepted everywhere.
 
 ## Key rotation
 
-Each provider's keys form an ordered pool. Two modes (config `rotation`):
+Each provider's keys form an ordered pool. Two modes (Settings → Routing):
 
 | Mode | Behavior | Good for |
 | --- | --- | --- |
@@ -150,8 +143,8 @@ Two structural rules:
   lapses it is simply first-healthy again — one probe request per cycle,
   self-correcting.
 
-Optional `retry.maxRequestsPerKeyPerDay` caps per-key daily use (an exhausted
-key cools until midnight); off by default.
+An optional daily cap per key (Settings → Retries) cools an exhausted key
+until midnight; off by default.
 
 ## Built-in provider adapters
 
@@ -161,7 +154,8 @@ key cools until midnight); off by default.
 | `kilo` | Kilo Code (`api.kilo.ai/api/gateway/v1`) | OpenAI-compatible passthrough with rotation |
 | generic | any OpenAI-compatible base URL | GUI-added providers (OpenAI, Groq, Together, vLLM, Ollama, …) — no code needed |
 
-Adapter-specific settings live under the `zen` and `kilo` config keys — see
+Adapter-specific settings (user agent, fingerprint injection, free-only
+filters, the Zen model catalog) live in the GUI under Settings — see
 [docs/configuration.md](docs/configuration.md).
 
 ## Using Claude Code
@@ -184,7 +178,7 @@ integration uses env slots plus the gateway's model aliases:
 
 - `--model opus|sonnet|haiku` substitutes the matching slot value.
 - Literal `claude-*` model names hit the gateway's alias map
-  (`anthropic.aliases` in the config) and get rewritten server-side.
+  (Settings → Anthropic aliases) and get rewritten server-side.
 - Append `[1m]` to a slot value to opt into 1M-context accounting; the
   gateway strips the suffix before the upstream call.
 
@@ -202,6 +196,7 @@ Served by the same binary at `/`.
 | My Keys | everyone | Create/disable/delete own client keys; plaintext shown exactly once |
 | Users | superadmin | User CRUD, roles, per-user key management |
 | Providers | superadmin | Add generic providers, edit base URLs, add/remove/toggle upstream keys |
+| Settings | superadmin | Rotation, retries/cooldowns, daily cap, Anthropic aliases, adapter knobs, Zen model-catalog sync |
 
 First boot requires `ADMIN_EMAIL` and `ADMIN_PASSWORD` (environment variables
 or an env file); the superadmin is created once and never overwritten.
@@ -216,29 +211,36 @@ Forgot the password? Run `./nano-llm-proxy -reset-admin-password` with
   backoff, Origin checks on state-changing requests.
 - Upstream provider keys are visible only to the server (the GUI shows hashed
   prefixes and status). They must remain usable verbatim, so they live in the
-  SQLite file — keep it at 0600 and out of version control. `config.json`,
-  `keys.json`, and env files are gitignored already.
+  SQLite file — keep it at 0600 and out of version control. `keys.json` and
+  `.env` files are gitignored already.
 
 ## Configuration
 
-The config file is optional; every field has a default (see
-`config.example.json`). Full reference in
+Two layers, deliberately split:
+
+**Bootstrap** — the few values needed before the database opens. Environment
+variables, optionally seeded from a `.env` file in the working directory (the
+real environment always wins; see `.env.example`). Full reference in
 [docs/configuration.md](docs/configuration.md).
 
-| Field | Default | Meaning |
+| Variable | Default | Meaning |
 | --- | --- | --- |
-| `port` / `bind` | 8787 / 127.0.0.1 | Listen address |
-| `dbPath` | `gateway.db` | SQLite database |
-| `cookieSecure` | true | Secure flag on session cookies (false for plain HTTP) |
-| `trustedOrigins` | empty | Extra Origins allowed on GUI mutations behind a reverse proxy |
-| `rotation` | `priority` | `priority` or `lru` |
-| `retry.*` | 3 / 30 s / true | Failover depth, cooldown, honor `Retry-After` |
-| `anthropic.aliases` | empty | `claude-*` → model rewrites on `/v1/messages` |
-| `zen.*` / `kilo.*` | adapter defaults | Built-in adapter settings |
+| `ADMIN_EMAIL` / `ADMIN_PASSWORD` | — | First-boot superadmin credentials (required once) |
+| `NANO_PORT` / `NANO_BIND` | 8787 / 127.0.0.1 | Listen address |
+| `NANO_DB_PATH` | `gateway.db` | SQLite database |
+| `NANO_COOKIE_SECURE` | true | Secure flag on session cookies (false for plain HTTP) |
+| `NANO_TRUSTED_ORIGINS` | empty | Extra Origins allowed on GUI mutations behind a reverse proxy |
+
+**Runtime** — everything you tune while it runs (rotation, retries, daily
+cap, aliases, adapter knobs, the Zen model catalog) lives in the database and
+is edited in the GUI under **Settings**. Changes apply in-request; no
+restarts.
 
 ## Deploying
 
-A systemd unit (full walkthrough in
+`sudo ./deploy.sh` does the whole setup on a systemd host: it requires a
+`.env`, builds GUI + binary, installs to `/opt/nano-llm-proxy`, and installs
+a hardened unit. Hand-rolled equivalent (full walkthrough in
 [docs/configuration.md](docs/configuration.md)):
 
 ```ini
@@ -250,7 +252,7 @@ After=network-online.target
 DynamicUser=yes
 StateDirectory=nano-llm-proxy
 WorkingDirectory=/var/lib/nano-llm-proxy
-EnvironmentFile=/etc/nano-llm-proxy/gateway.env
+EnvironmentFile=/opt/nano-llm-proxy/.env
 ExecStart=/usr/local/bin/nano-llm-proxy
 Restart=on-failure
 ProtectSystem=strict
@@ -279,11 +281,14 @@ cd web && npm ci && npm run dev       # GUI dev server
 | `responses.go`, `responses_endpoint.go` | Responses ↔ chat translation; native `/v1/responses` |
 | `anthropic.go`, `anthropic_handler.go` | Anthropic Messages conversion, aliases, `[1m]` handling |
 | `generic.go` | generic OpenAI-compatible proxy |
-| `store.go` | SQLite: migrations, bootstrap, users/keys/providers CRUD |
+| `store.go` | SQLite: migrations, bootstrap, users/keys/providers/settings CRUD |
+| `settings.go` | runtime-settings document: defaults, validation, store plumbing |
 | `auth.go` | sessions, bcrypt, roles, Origin checks, login backoff |
 | `api_*.go` | `/api` JSON handlers |
+| `modelmeta_sync.go` | models.dev sync for the Zen model catalog |
 | `clientkeys.go` | client-key cache + usage tracker |
-| `modelid.go`, `sse.go`, `config.go` | ID suffix grammar, streaming helpers, config schema |
+| `modelid.go`, `sse.go` | ID suffix grammar, streaming helpers |
+| `dotenv.go`, `config.go` | .env parser, env bootstrap, `ModelMeta` schema |
 | `web/` | React 19 + Chakra UI admin GUI (Vite, TypeScript) |
 
 ## Troubleshooting
@@ -293,8 +298,9 @@ cd web && npm ci && npm run dev       # GUI dev server
 | 401 on `/v1/*` | missing or wrong client key | create one in the GUI (My Keys) |
 | 502 with a client-shape hint | provider rejected the adapted request | check the adapter's config (`userAgent`, injection flags) |
 | 502 "no healthy keys" | all keys cooling or disabled | check Dashboard → Providers; re-enable or wait out cooldowns |
-| GUI login loop over plain HTTP | `cookieSecure: true` without TLS | set it false locally, or serve over HTTPS |
-| GUI mutations 403 behind a reverse proxy | browser Origin differs from backend Host | add your public host to `trustedOrigins` |
+| Boot refuses to start: "zen.userAgent ... fails the 1.18.0 floor" | the DB holds a too-old user agent | fix it in Settings → Zen, or reset all settings: `sqlite3 gateway.db "DELETE FROM settings WHERE key='runtime_settings'"` |
+| GUI login loop over plain HTTP | `NANO_COOKIE_SECURE=true` without TLS | set it false locally, or serve over HTTPS |
+| GUI mutations 403 behind a reverse proxy | browser Origin differs from backend Host | add your public host to `NANO_TRUSTED_ORIGINS` |
 | Empty model replies, `finish_reason: "length"` | output budget consumed by hidden reasoning | raise `max_tokens` (≥ 500) |
 | Claude Code: "Unknown Model" before any request | CC validates model names client-side | use `ANTHROPIC_DEFAULT_*_MODEL` slots or a `claude-*` alias |
 

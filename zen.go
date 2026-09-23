@@ -32,7 +32,7 @@ func (g *gateway) surfaceFor(model string) string {
 	if s, ok := g.surfaceOver[model]; ok {
 		return s
 	}
-	if slices.Contains(g.cfg.Zen.ResponsesModels, model) {
+	if slices.Contains(g.rs().Zen.ResponsesModels, model) {
 		return "responses"
 	}
 	return "chat"
@@ -206,7 +206,7 @@ func (g *gateway) proxyZen(ref providerRef, w http.ResponseWriter, r *http.Reque
 	surface := g.surfaceFor(model)
 	var lastHint string
 
-	for attempt := 0; attempt < g.cfg.Retry.MaxKeysPerRequest; attempt++ {
+	for attempt := 0; attempt < g.rs().Retry.MaxKeysPerRequest; attempt++ {
 		k := ref.pool.pick(exclude)
 		if k == nil {
 			break
@@ -222,7 +222,7 @@ func (g *gateway) proxyZen(ref providerRef, w http.ResponseWriter, r *http.Reque
 			cp := make(map[string]any, len(body))
 			maps.Copy(cp, body)
 			upBody = cp
-			injectChatFingerprint(upBody, g.cfg.Zen.InjectTools)
+			injectChatFingerprint(upBody, g.rs().Zen.InjectTools)
 		}
 		raw, _ := json.Marshal(upBody)
 
@@ -237,7 +237,7 @@ func (g *gateway) proxyZen(ref providerRef, w http.ResponseWriter, r *http.Reque
 		}
 		req.Header.Set("Authorization", "Bearer "+k.Key)
 		req.Header.Set("Content-Type", "application/json")
-		req.Header.Set("User-Agent", g.cfg.Zen.UserAgent)
+		req.Header.Set("User-Agent", g.rs().Zen.UserAgent)
 		req.Header.Set("x-opencode-session", newZenSessionID())
 
 		resp, err := g.client.Do(req)

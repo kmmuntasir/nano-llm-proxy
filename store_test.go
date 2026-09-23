@@ -17,10 +17,8 @@ import (
 func testCfg() *Config {
 	return &Config{
 		Port: 0, Bind: "127.0.0.1",
-		Zen:  ZenProviderConfig{BaseURL: "https://zen.example/v1", UserAgent: "opencode/1.18.32"},
+		Zen:  ZenProviderConfig{BaseURL: "https://zen.example/v1"},
 		Kilo: KiloProviderConfig{BaseURL: "https://kilo.example/v1"},
-		Retry: RetryConfig{MaxKeysPerRequest: 3, CooldownSeconds: 30},
-		APIKeys: []string{"fg-legacy-key-aaaaaaaaaa"},
 	}
 }
 
@@ -80,13 +78,14 @@ func TestMigrateV1AndBootstrap(t *testing.T) {
 		t.Fatalf("kilo keys wrong: %+v", keyLists[1])
 	}
 
-	// legacy client key imported under the superadmin
+	// no client keys exist until someone creates one — bootstrap no longer
+	// imports legacy config keys (clean cut)
 	keys, err := st.ListClientKeys(admin.ID)
 	if err != nil {
 		t.Fatalf("ListClientKeys: %v", err)
 	}
-	if len(keys) != 1 || keys[0].KeyHash != hashSecret("fg-legacy-key-aaaaaaaaaa") {
-		t.Fatalf("legacy key not imported: %+v", keys)
+	if len(keys) != 0 {
+		t.Fatalf("bootstrap created client keys: %+v", keys)
 	}
 
 	// second bootstrap run is a no-op
@@ -98,20 +97,8 @@ func TestMigrateV1AndBootstrap(t *testing.T) {
 		t.Fatalf("second bootstrap created extra users: %d", len(users))
 	}
 	keys2, _ := st.ListClientKeys(admin.ID)
-	if len(keys2) != 1 {
-		t.Fatalf("second bootstrap re-imported legacy keys: %d", len(keys2))
-	}
-
-	// a GUI key deletion survives re-bootstrap
-	if err := st.DeleteClientKey(keys2[0].ID); err != nil {
-		t.Fatalf("DeleteClientKey: %v", err)
-	}
-	if err := st.Bootstrap(testCfg(), testKeyFile(), "admin@example.com", "x"); err != nil {
-		t.Fatalf("third Bootstrap: %v", err)
-	}
-	keys3, _ := st.ListClientKeys(admin.ID)
-	if len(keys3) != 0 {
-		t.Fatalf("deleted key resurrected by bootstrap")
+	if len(keys2) != 0 {
+		t.Fatalf("second bootstrap created client keys: %d", len(keys2))
 	}
 }
 
@@ -219,8 +206,7 @@ func TestClientKeyLifecycleHotPath(t *testing.T) {
 	}
 	admin, _ := st.UserByEmail("admin@example.com")
 	cfg := testCfg()
-	cfg.APIKeys = nil // store mode; no legacy fallback
-	g, err := newGatewayFromStore(cfg, st)
+	g, err := newGatewayFromStore(cfg, testRuntime(), st)
 	if err != nil {
 		t.Fatalf("newGatewayFromStore: %v", err)
 	}

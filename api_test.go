@@ -39,7 +39,7 @@ func testStoreGateway(t *testing.T, upURL string) (*gateway, *Store) {
 			}
 		}
 	}
-	g, err := newGatewayFromStore(cfg, st)
+	g, err := newGatewayFromStore(cfg, testRuntime(), st)
 	if err != nil {
 		t.Fatalf("newGatewayFromStore: %v", err)
 	}
@@ -441,13 +441,370 @@ func TestPostUpstreamFingerprintByType(t *testing.T) {
 	if len(uas) != 2 {
 		t.Fatalf("expected 2 upstream calls, got %d", len(uas))
 	}
-	if uas[0] != g.cfg.Zen.UserAgent {
-		t.Fatalf("zen call UA = %q, want %q", uas[0], g.cfg.Zen.UserAgent)
+	if uas[0] != g.rs().Zen.UserAgent {
+		t.Fatalf("zen call UA = %q, want %q", uas[0], g.rs().Zen.UserAgent)
 	}
 	if !strings.HasPrefix(sessions[0], "ses_") {
 		t.Fatalf("zen call missing session header: %q", sessions[0])
 	}
 	if strings.Contains(uas[1], "opencode/") || sessions[1] != "" {
 		t.Fatalf("plain call carried zen fingerprint: UA=%q session=%q", uas[1], sessions[1])
+	}
+}
+
+// --- settings API ---
+
+func TestSettingsAPIAuth(t *testing.T) {
+	g, st := testStoreGateway(t, "http://127.0.0.1:1") // upstream never reached
+	insertPlainUser(t, st, "pi@example.com", "pi-password-123", "user")
+
+	// no cookie -> 401
+	rec := httptest.NewRecorder()
+	g.requireSession(g.requireSuperadmin(g.handleGetSettings))(rec, httptest.NewRequest("GET", "/api/settings", nil))
+	if rec.Code != 401 {
+		t.Fatalf("settings without cookie: got %d, want 401", rec.Code)
+	}
+
+	// plain user -> 403 on GET and PUT
+	piCookie := loginAs(t, g, "pi@example.com", "pi-password-123")
+	rec = httptest.NewRecorder()
+	get := httptest.NewRequest("GET", "/api/settings", nil)
+	get.AddCookie(piCookie)
+	g.requireSession(g.requireSuperadmin(g.handleGetSettings))(rec, get)
+	if rec.Code != 403 {
+		t.Fatalf("plain user GET settings: got %d, want 403", rec.Code)
+	}
+	rec = httptest.NewRecorder()
+	put := httptest.NewRequest("PUT", "/api/settings", strings.NewReader(`{}`))
+	put.AddCookie(piCookie)
+	put.Header.Set("Origin", "https://gateway.example.com")
+	put.RemoteAddr = "10.9.9.9:5555"
+	g.requireSession(g.requireSuperadmin(g.handlePutSettings))(rec, put)
+	if rec.Code != 403 {
+		t.Fatalf("plain user PUT settings: got %d, want 403", rec.Code)
+	}
+
+	// superadmin GET returns the effective defaults
+	adminCookie := loginAs(t, g, "admin@example.com", "super-secret-pass")
+	rec = httptest.NewRecorder()
+	get = httptest.NewRequest("GET", "/api/settings", nil)
+	get.AddCookie(adminCookie)
+	g.requireSession(g.requireSuperadmin(g.handleGetSettings))(rec, get)
+	if rec.Code != 200 {
+		t.Fatalf("admin GET settings: got %d: %s", rec.Code, rec.Body.String())
+	}
+	for _, want := range []string{`"rotation":"priority"`, `"maxKeysPerRequest":3`, `"respectRetryAfter":true`} {
+		if !strings.Contains(rec.Body.String(), want) {
+			t.Fatalf("GET settings missing %s: %s", want, rec.Body.String())
+		}
+	}
+}
+
+func TestSettingsPutValidation(t *testing.T) {
+	g, _ := testStoreGateway(t, "http://127.0.0.1:1")
+	adminCookie := loginAs(t, g, "admin@example.com", "super-secret-pass")
+	for _, bad := range []string{
+		`{"rotation":"random"}`,
+		// note: an explicit maxKeysPerRequest:0 is indistinguishable from an
+		// omitted field (both are the zero value) and defaults to 3; >100 is
+		// the unambiguous bound violation
+		`{"retry":{"maxKeysPerRequest":101}}`,
+		`{"retry":{"cooldownSeconds":-1}}`,
+		`{"retry":{"maxRequestsPerKeyPerDay":-5}}`,
+		`{"anthropic":{"aliases":{"a":"noslash"}}}`,
+		`{"zen":{"userAgent":"opencode/1.0.0"}}`,
+		`{"zen":{"responsesModels":[" "]}}`,
+		`{"zen":{"modelMeta":{"m":{"contextWindow":0}}}}`,
+	} {
+		rec := httptest.NewRecorder()
+		req := httptest.NewRequest("PUT", "/api/settings", strings.NewReader(bad))
+		req.AddCookie(adminCookie)
+		req.Header.Set("Origin", "https://gateway.example.com")
+		req.RemoteAddr = "10.9.9.9:5555"
+		g.requireSession(g.requireSuperadmin(g.handlePutSettings))(rec, req)
+		if rec.Code != 400 {
+			t.Fatalf("PUT %s: got %d, want 400", bad, rec.Code)
+		}
+		if err := g.store.SaveRuntimeSettings(nil); err == nil {
+			// SaveRuntimeSettings(nil) would marshal fine — this guard is
+			// about the DB never changing on a rejected PUT, asserted below
+			_ = err
+		}
+	}
+	rs, err := g.store.LoadRuntimeSettings()
+	if err != nil {
+		t.Fatalf("load after rejects: %v", err)
+	}
+	if rs.Rotation != rotationPriority || rs.Retry.MaxKeysPerRequest != 3 {
+		t.Fatalf("rejected PUTs still changed the stored document: %+v", rs)
+	}
+}
+
+func TestSettingsPutHotReload(t *testing.T) {
+	var mu sync.Mutex
+	var servedBy []string
+	up := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		mu.Lock()
+		servedBy = append(servedBy, r.Header.Get("Authorization"))
+		mu.Unlock()
+		w.Header().Set("Content-Type", "text/event-stream")
+		w.Write([]byte("data: {\"id\":\"x\",\"choices\":[{\"delta\":{\"content\":\"ok\"}}]}\n\ndata: [DONE]\n\n"))
+	}))
+	g, st := testStoreGateway(t, up.URL)
+	admin, _ := st.UserByEmail("admin@example.com")
+	adminCookie := loginAs(t, g, "admin@example.com", "super-secret-pass")
+	ck := newClientKey(t, g, st, admin.ID, "settings-test")
+
+	putSettings := func(t *testing.T, body string) *httptest.ResponseRecorder {
+		t.Helper()
+		rec := httptest.NewRecorder()
+		req := httptest.NewRequest("PUT", "/api/settings", strings.NewReader(body))
+		req.AddCookie(adminCookie)
+		req.Header.Set("Origin", "https://gateway.example.com")
+		req.RemoteAddr = "10.9.9.9:5555"
+		g.requireSession(g.requireSuperadmin(g.handlePutSettings))(rec, req)
+		return rec
+	}
+
+	// switch to lru through the API; the pool rebuild inside applyMutation
+	// must pick the new mode up before the response is written
+	rec := putSettings(t, `{"rotation":"lru"}`)
+	if rec.Code != 200 {
+		t.Fatalf("PUT lru: got %d: %s", rec.Code, rec.Body.String())
+	}
+	if g.rs().Rotation != rotationLRU {
+		t.Fatalf("rs().Rotation = %q, want lru", g.rs().Rotation)
+	}
+	stored, err := st.LoadRuntimeSettings()
+	if err != nil || stored.Rotation != rotationLRU {
+		t.Fatalf("stored rotation = %q err=%v, want lru", stored.Rotation, err)
+	}
+
+	// lru alternates across two requests (priority would stick to key a)
+	chat := func() {
+		t.Helper()
+		rec := httptest.NewRecorder()
+		req := chatReq("zen", "mimo-test-free")
+		req.Header.Set("Authorization", "Bearer "+ck)
+		g.clientOnly(g.handleChat)(rec, req)
+		if rec.Code != 200 {
+			t.Fatalf("chat: got %d: %s", rec.Code, rec.Body.String())
+		}
+	}
+	chat()
+	chat()
+	mu.Lock()
+	defer mu.Unlock()
+	if len(servedBy) != 2 || servedBy[0] == servedBy[1] {
+		t.Fatalf("lru should alternate keys, served: %v", servedBy)
+	}
+}
+
+func TestSettingsPutCooldownTakesEffect(t *testing.T) {
+	up := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.Header.Get("Authorization") == "Bearer sk-zen-1" {
+			w.WriteHeader(429)
+			w.Write([]byte(`{"error":{"message":"limited"}}`))
+			return
+		}
+		w.Header().Set("Content-Type", "text/event-stream")
+		w.Write([]byte("data: {\"id\":\"x\",\"choices\":[{\"delta\":{\"content\":\"ok\"}}]}\n\ndata: [DONE]\n\n"))
+	}))
+	g, st := testStoreGateway(t, up.URL)
+	admin, _ := st.UserByEmail("admin@example.com")
+	adminCookie := loginAs(t, g, "admin@example.com", "super-secret-pass")
+	ck := newClientKey(t, g, st, admin.ID, "cooldown-test")
+
+	rec := httptest.NewRecorder()
+	req := httptest.NewRequest("PUT", "/api/settings",
+		strings.NewReader(`{"retry":{"cooldownSeconds":61,"respectRetryAfter":false}}`))
+	req.AddCookie(adminCookie)
+	req.Header.Set("Origin", "https://gateway.example.com")
+	req.RemoteAddr = "10.9.9.9:5555"
+	g.requireSession(g.requireSuperadmin(g.handlePutSettings))(rec, req)
+	if rec.Code != 200 {
+		t.Fatalf("PUT cooldown: got %d: %s", rec.Code, rec.Body.String())
+	}
+
+	// the 429 on key a must apply the new 61s default cooldown (not the
+	// previous 30s, and no Retry-After since respect is off)
+	rec = httptest.NewRecorder()
+	chat := chatReq("zen", "mimo-test-free")
+	chat.Header.Set("Authorization", "Bearer "+ck)
+	g.clientOnly(g.handleChat)(rec, chat)
+	if rec.Code != 200 {
+		t.Fatalf("chat after failover: got %d: %s", rec.Code, rec.Body.String())
+	}
+	for _, k := range g.zen.snapshot() {
+		if k.Label == "key-a" {
+			if k.Status != statusCooling {
+				t.Fatalf("key a status = %s, want cooling", k.Status)
+			}
+			if k.CooldownFor == "" || !strings.HasPrefix(k.CooldownFor, "1m") {
+				t.Fatalf("cooldown remaining = %q, want ~1m", k.CooldownFor)
+			}
+		}
+	}
+}
+
+func TestSettingsPutPreservesSyncStatus(t *testing.T) {
+	g, st := testStoreGateway(t, "http://127.0.0.1:1")
+	if err := st.UpdateSettings(func(rs *RuntimeSettings) *RuntimeSettings {
+		rs.Zen.ModelMetaSyncStatus = &ModelMetaSyncStatus{At: 777, OK: true, Added: 3, Updated: 1}
+		return rs
+	}); err != nil {
+		t.Fatalf("seed status: %v", err)
+	}
+	adminCookie := loginAs(t, g, "admin@example.com", "super-secret-pass")
+	rec := httptest.NewRecorder()
+	req := httptest.NewRequest("PUT", "/api/settings",
+		strings.NewReader(`{"rotation":"lru","zen":{"modelMetaSyncStatus":{"at":1,"ok":false,"error":"spoof"}}}`))
+	req.AddCookie(adminCookie)
+	req.Header.Set("Origin", "https://gateway.example.com")
+	req.RemoteAddr = "10.9.9.9:5555"
+	g.requireSession(g.requireSuperadmin(g.handlePutSettings))(rec, req)
+	if rec.Code != 200 {
+		t.Fatalf("PUT: got %d: %s", rec.Code, rec.Body.String())
+	}
+	got, err := st.LoadRuntimeSettings()
+	if err != nil {
+		t.Fatalf("load: %v", err)
+	}
+	if got.Zen.ModelMetaSyncStatus == nil || got.Zen.ModelMetaSyncStatus.At != 777 || got.Zen.ModelMetaSyncStatus.Added != 3 {
+		t.Fatalf("server-owned sync status was clobbered: %+v", got.Zen.ModelMetaSyncStatus)
+	}
+	if !strings.Contains(rec.Body.String(), `"at":777`) {
+		t.Fatalf("response should echo the preserved status: %s", rec.Body.String())
+	}
+}
+
+// --- modelMeta sync ---
+
+func TestDecodeOpencodeModels(t *testing.T) {
+	stream := strings.NewReader(`{
+		"openai": {"models": {"gpt-x": {"limit":{"context":1,"output":1}}}},
+		"anthropic": {"models": {}},
+		"opencode": {"models": {
+			"glm-5": {"limit":{"context":200000,"output":32000},"reasoning":true,"modalities":{"input":["text"]},"description":"big"}
+		}}
+	}`)
+	models, err := decodeOpencodeModels(stream)
+	if err != nil {
+		t.Fatalf("decode: %v", err)
+	}
+	if len(models) != 1 {
+		t.Fatalf("got %d models, want only the opencode subtree", len(models))
+	}
+	if models["glm-5"].Limit.Context != 200000 || !models["glm-5"].Reasoning {
+		t.Fatalf("glm-5 = %+v", models["glm-5"])
+	}
+	if _, err := decodeOpencodeModels(strings.NewReader(`{"openai":{}}`)); err == nil {
+		t.Fatal("expected error when opencode provider is missing")
+	}
+	if _, err := decodeOpencodeModels(strings.NewReader(`[1,2]`)); err == nil {
+		t.Fatal("expected error for non-object document")
+	}
+}
+
+func TestSyncModelMetaMerge(t *testing.T) {
+	dev := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Write([]byte(`{
+			"openai": {"models": {"gpt-x": {"limit":{"context":1,"output":1}}}},
+			"opencode": {"models": {
+				"glm-5": {"limit":{"context":200000,"output":32000},"reasoning":true,"modalities":{"input":["text","image"]},"description":"big"},
+				"no-limits": {"reasoning":true}
+			}}
+		}`))
+	}))
+	zen := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path == "/models" {
+			w.Header().Set("Content-Type", "application/json")
+			w.Write([]byte(`{"data":[{"id":"glm-5"},{"id":"manual-only"}]}`))
+			return
+		}
+		w.WriteHeader(404)
+	}))
+	g, st := testStoreGateway(t, zen.URL)
+
+	// pre-seed: a stale entry (dead id -> pruned), a manual entry for a live
+	// model models.dev doesn't know (survives), and a responsesModels list
+	// (never auto-touched)
+	if err := st.UpdateSettings(func(rs *RuntimeSettings) *RuntimeSettings {
+		rs.Zen.ModelMeta["stale-model"] = ModelMeta{ContextWindow: 1, MaxOutputTokens: 1}
+		rs.Zen.ModelMeta["manual-only"] = ModelMeta{ContextWindow: 5000, MaxOutputTokens: 100}
+		rs.Zen.ResponsesModels = []string{"glm-5"}
+		return rs
+	}); err != nil {
+		t.Fatalf("seed: %v", err)
+	}
+
+	status := g.syncModelMeta(dev.URL)
+	if !status.OK {
+		t.Fatalf("sync not ok: %+v", status)
+	}
+	if status.Added != 1 || status.Updated != 0 || status.Pruned != 1 {
+		t.Fatalf("counts = %+v, want added=1 updated=0 pruned=1", status)
+	}
+
+	got, err := st.LoadRuntimeSettings()
+	if err != nil {
+		t.Fatalf("load: %v", err)
+	}
+	if len(got.Zen.ModelMeta) != 2 {
+		t.Fatalf("meta keys = %+v, want glm-5 + manual-only", got.Zen.ModelMeta)
+	}
+	glm := got.Zen.ModelMeta["glm-5"]
+	if glm.ContextWindow != 200000 || glm.MaxOutputTokens != 32000 || !glm.Reasoning || glm.Description != "big" || len(glm.InputModalities) != 2 {
+		t.Fatalf("glm-5 imported wrong: %+v", glm)
+	}
+	if m := got.Zen.ModelMeta["manual-only"]; m.ContextWindow != 5000 || m.MaxOutputTokens != 100 {
+		t.Fatalf("manual entry clobbered: %+v", m)
+	}
+	if _, exists := got.Zen.ModelMeta["stale-model"]; exists {
+		t.Fatal("stale-model should have been pruned")
+	}
+	if len(got.Zen.ResponsesModels) != 1 || got.Zen.ResponsesModels[0] != "glm-5" {
+		t.Fatalf("responsesModels was auto-touched: %v", got.Zen.ResponsesModels)
+	}
+	// the in-memory snapshot the hot path reads must reflect the sync
+	if g.rs().Zen.ModelMeta["glm-5"].ContextWindow != 200000 {
+		t.Fatal("rsPtr was not refreshed after sync")
+	}
+	// the persisted status must record success (regression: it used to be
+	// snapshotted before OK was flipped)
+	if st, err := st.LoadRuntimeSettings(); err != nil || !st.Zen.ModelMetaSyncStatus.OK {
+		t.Fatalf("persisted sync status wrong: %+v err=%v", st.Zen.ModelMetaSyncStatus, err)
+	}
+}
+
+func TestSyncModelMetaFailureKeepsMeta(t *testing.T) {
+	dev := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.WriteHeader(500)
+	}))
+	zen := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		w.Write([]byte(`{"data":[{"id":"glm-5"}]}`))
+	}))
+	g, st := testStoreGateway(t, zen.URL)
+	if err := st.UpdateSettings(func(rs *RuntimeSettings) *RuntimeSettings {
+		rs.Zen.ModelMeta["glm-5"] = ModelMeta{ContextWindow: 9, MaxOutputTokens: 9}
+		return rs
+	}); err != nil {
+		t.Fatalf("seed: %v", err)
+	}
+
+	status := g.syncModelMeta(dev.URL)
+	if status.OK {
+		t.Fatal("sync should have failed")
+	}
+	if !strings.Contains(status.Error, "500") {
+		t.Fatalf("error = %q, want it to mention HTTP 500", status.Error)
+	}
+	got, _ := st.LoadRuntimeSettings()
+	if got.Zen.ModelMeta["glm-5"].ContextWindow != 9 {
+		t.Fatalf("failed sync mutated meta: %+v", got.Zen.ModelMeta)
+	}
+	if got.Zen.ModelMetaSyncStatus == nil || got.Zen.ModelMetaSyncStatus.OK {
+		t.Fatalf("failure status not persisted: %+v", got.Zen.ModelMetaSyncStatus)
 	}
 }

@@ -28,6 +28,8 @@ type KeyState struct {
 	Requests      int64
 	RateLimited   int64
 	Errors        int64
+	DayStamp      string // "2006-01-02" the DayCount bucket belongs to
+	DayCount      int64  // requests served today (daily-cap accounting)
 }
 
 func (k *KeyState) Status() string {
@@ -45,17 +47,18 @@ func (k *KeyState) Status() string {
 // key in configured order (prompt-cache affinity; keys.json order = priority)
 // and fails over down the list; mode "lru" spreads load evenly.
 type Pool struct {
-	mu   sync.Mutex
-	name string
-	mode string // "priority" | "lru"
-	keys []*KeyState
+	mu       sync.Mutex
+	name     string
+	mode     string // "priority" | "lru"
+	dailyCap int    // max requests per key per day, 0 = off
+	keys     []*KeyState
 }
 
-func newPool(name, mode string, entries []keyFileEntry) *Pool {
+func newPool(name, mode string, dailyCap int, entries []keyFileEntry) *Pool {
 	if mode != "lru" {
 		mode = "priority"
 	}
-	p := &Pool{name: name, mode: mode}
+	p := &Pool{name: name, mode: mode, dailyCap: dailyCap}
 	for _, e := range entries {
 		sum := sha256.Sum256([]byte(e.Key))
 		p.keys = append(p.keys, &KeyState{
@@ -71,8 +74,8 @@ func newPool(name, mode string, entries []keyFileEntry) *Pool {
 // state (cooldowns, usage counters) for keys that already existed — matched
 // by hash. DB-disabled keys are excluded by the caller; runtime auth-disables
 // reset (the key gets one retry before classify re-disables it).
-func newPoolPreserving(name, mode string, entries []keyFileEntry, prev map[string]*KeyState) *Pool {
-	p := newPool(name, mode, entries)
+func newPoolPreserving(name, mode string, dailyCap int, entries []keyFileEntry, prev map[string]*KeyState) *Pool {
+	p := newPool(name, mode, dailyCap, entries)
 	for _, k := range p.keys {
 		if old, ok := prev[k.Hash]; ok {
 			k.CooldownUntil = old.CooldownUntil
@@ -80,6 +83,8 @@ func newPoolPreserving(name, mode string, entries []keyFileEntry, prev map[strin
 			k.Requests = old.Requests
 			k.RateLimited = old.RateLimited
 			k.Errors = old.Errors
+			k.DayStamp = old.DayStamp
+			k.DayCount = old.DayCount
 		}
 	}
 	return p
@@ -92,17 +97,29 @@ func (p *Pool) rawKeys() []*KeyState {
 	return append([]*KeyState(nil), p.keys...)
 }
 
+// nextMidnight returns the coming local midnight — the cooldown an
+// exhausted daily-cap key rides out.
+func nextMidnight(t time.Time) time.Time {
+	return time.Date(t.Year(), t.Month(), t.Day(), 0, 0, 0, 0, t.Location()).AddDate(0, 0, 1)
+}
+
 // pick returns the next healthy key not in exclude, or nil. In priority mode
 // this is the first configured key that is healthy — traffic returns to the
-// primary automatically once its cooldown expires.
+// primary automatically once its cooldown expires. With a daily cap set, a
+// key that has served its quota today is skipped; the pick that reaches the
+// cap puts the key into cooldown until midnight.
 func (p *Pool) pick(exclude map[string]bool) *KeyState {
 	p.mu.Lock()
 	defer p.mu.Unlock()
 	now := time.Now()
+	today := now.Format("2006-01-02")
+	capped := func(k *KeyState) bool {
+		return p.dailyCap > 0 && k.DayStamp == today && k.DayCount >= int64(p.dailyCap)
+	}
 	var best *KeyState
 	if p.mode == "priority" {
 		for _, k := range p.keys {
-			if k.Disabled || exclude[k.Hash] || now.Before(k.CooldownUntil) {
+			if k.Disabled || exclude[k.Hash] || now.Before(k.CooldownUntil) || capped(k) {
 				continue
 			}
 			best = k
@@ -110,7 +127,7 @@ func (p *Pool) pick(exclude map[string]bool) *KeyState {
 		}
 	} else {
 		for _, k := range p.keys {
-			if k.Disabled || exclude[k.Hash] || now.Before(k.CooldownUntil) {
+			if k.Disabled || exclude[k.Hash] || now.Before(k.CooldownUntil) || capped(k) {
 				continue
 			}
 			if best == nil || k.LastUsed.Before(best.LastUsed) {
@@ -121,6 +138,16 @@ func (p *Pool) pick(exclude map[string]bool) *KeyState {
 	if best != nil {
 		best.LastUsed = now
 		best.Requests++
+		if p.dailyCap > 0 {
+			if best.DayStamp != today {
+				best.DayStamp = today
+				best.DayCount = 0
+			}
+			best.DayCount++
+			if int(best.DayCount) == p.dailyCap {
+				best.CooldownUntil = nextMidnight(now)
+			}
+		}
 	}
 	return best
 }
@@ -189,7 +216,7 @@ func (p *Pool) snapshot() []KeyView {
 			Errors:      k.Errors,
 		}
 		if now.Before(k.CooldownUntil) {
-			v.CooldownFor = now.Sub(k.CooldownUntil).Round(time.Second).String()
+			v.CooldownFor = k.CooldownUntil.Sub(now).Round(time.Second).String()
 		}
 		out = append(out, v)
 	}
