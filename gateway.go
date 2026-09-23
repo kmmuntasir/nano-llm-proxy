@@ -56,6 +56,8 @@ type gateway struct {
 	catMu     sync.Mutex
 	catalog   []byte // cached merged /v1/models body
 	catalogAt time.Time
+
+	usageBuf usageBuffer // per-request usage events, drained to the DB by the maintenance loop
 }
 
 // conf returns the bootstrap config; never nil after either constructor.
@@ -369,16 +371,16 @@ func (g *gateway) handleChat(w http.ResponseWriter, r *http.Request) {
 		out = g.proxyOpenAI(ref, w, r, body, clientWantsStream, start)
 	}
 	if out != "" {
-		g.recordActivity(r, ref, upstreamModel, "", start, http.StatusBadGateway, out)
+		g.recordActivity(r, ref, upstreamModel, "", start, http.StatusBadGateway, out, tokenUsage{})
 		log.Printf("res provider=%s model=%s status=failed %s ttft_ms=%d", provider, upstreamModel, out, time.Since(start).Milliseconds())
 		writeErr(w, http.StatusBadGateway, out)
 	}
 }
 
-// recordActivity files one completed request into the dashboard ring (proxies
-// record their own successes with the serving upstream key; callers record
-// failures with the client-facing reason).
-func (g *gateway) recordActivity(r *http.Request, ref providerRef, model, upstreamHash string, start time.Time, status int, failReason string) {
+// recordActivity files one completed request into the dashboard ring and the
+// persisted usage log (proxies record their own successes with the serving
+// upstream key; callers record failures with the client-facing reason).
+func (g *gateway) recordActivity(r *http.Request, ref providerRef, model, upstreamHash string, start time.Time, status int, failReason string, tokens tokenUsage) {
 	e := activityEntry{
 		TS:         time.Now().Unix(),
 		Provider:   ref.name,
@@ -391,6 +393,19 @@ func (g *gateway) recordActivity(r *http.Request, ref providerRef, model, upstre
 	if ck, ok := contextClientKey(r); ok {
 		e.KeyAlias = ck.Alias
 		e.User = ck.UserEmail
+		if g.store != nil {
+			g.usageBuf.add(usageEvent{
+				TS:           e.TS,
+				UserID:       ck.UserID,
+				ClientKeyID:  ck.ID,
+				Provider:     ref.name,
+				Model:        model,
+				InputTokens:  tokens.in,
+				OutputTokens: tokens.out,
+				Status:       status,
+				DurationMs:   e.DurationMs,
+			})
+		}
 	}
 	g.usage.addActivity(e)
 }

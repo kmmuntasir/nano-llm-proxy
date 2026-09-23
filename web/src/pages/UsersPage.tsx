@@ -16,12 +16,13 @@ import {
   Text,
   VStack,
 } from "@chakra-ui/react"
-import { FiPlus, FiTrash2 } from "react-icons/fi"
+import { KeyRound, Plus, Trash2 } from "lucide-react"
 import { api, del, patch, post, ApiError } from "../api/client"
 import type { ClientKeyView, UserView } from "../api/types"
 import ConfirmDialog from "../components/ConfirmDialog"
 import KeyRevealDialog from "../components/KeyRevealDialog"
 import { PasswordInput } from "../components/ui/password-input"
+import { Dialog } from "@chakra-ui/react"
 import { toaster } from "../components/ui/toaster"
 import { useSession } from "../App"
 
@@ -29,8 +30,25 @@ function fmtTs(ts: number) {
   return ts ? new Date(ts * 1000).toLocaleDateString() : "—"
 }
 
-// AddUserCard creates a user (superadmin-only page).
-function AddUserCard() {
+// RoleField keeps the wire values lowercase (the API's vocabulary) while
+// showing titlecase options.
+function RoleField({ value, onChange }: { value: string; onChange: (v: string) => void }) {
+  return (
+    <Field.Root>
+      <Field.Label>Role</Field.Label>
+      <NativeSelect.Root size="sm">
+        <NativeSelect.Field value={value} onChange={(e) => onChange(e.target.value)}>
+          <option value="user">User</option>
+          <option value="superadmin">Superadmin</option>
+        </NativeSelect.Field>
+        <NativeSelect.Indicator />
+      </NativeSelect.Root>
+    </Field.Root>
+  )
+}
+
+// AddUserModal creates a user from a modal, invoked by the page-header button.
+function AddUserModal({ open, onOpenChange }: { open: boolean; onOpenChange: (o: boolean) => void }) {
   const qc = useQueryClient()
   const [name, setName] = useState("")
   const [email, setEmail] = useState("")
@@ -44,7 +62,9 @@ function AddUserCard() {
       setName("")
       setEmail("")
       setPassword("")
+      setRole("user")
       setError("")
+      onOpenChange(false)
       await qc.invalidateQueries({ queryKey: ["users"] })
       toaster.create({ title: "User created", type: "success" })
     },
@@ -52,54 +72,134 @@ function AddUserCard() {
   })
 
   return (
-    <Card.Root>
-      <Card.Header>
-        <Heading size="sm">Add user</Heading>
-      </Card.Header>
-      <Card.Body>
-        <form
-          onSubmit={(e) => {
-            e.preventDefault()
-            create.mutate()
-          }}
-        >
-          <HStack gap={3} align="end" flexWrap="wrap">
-            <Field.Root required minW="140px">
-              <Field.Label>Name</Field.Label>
-              <Input value={name} onChange={(e) => setName(e.target.value)} />
-            </Field.Root>
-            <Field.Root required minW="200px">
-              <Field.Label>Email</Field.Label>
-              <Input type="email" value={email} onChange={(e) => setEmail(e.target.value)} />
-            </Field.Root>
-            <Field.Root required minW="180px">
-              <Field.Label>Password</Field.Label>
-              <PasswordInput
-                value={password}
-                onChange={(e) => setPassword(e.target.value)}
-                autoComplete="new-password"
-              />
-              <Field.HelperText>min 10 chars</Field.HelperText>
-            </Field.Root>
-            <NativeSelect.Root minW="130px">
-              <NativeSelect.Field value={role} onChange={(e) => setRole(e.target.value)}>
-                <option value="user">user</option>
-                <option value="superadmin">superadmin</option>
-              </NativeSelect.Field>
-              <NativeSelect.Indicator />
-            </NativeSelect.Root>
-            <Button type="submit" colorPalette="blue" loading={create.isPending}>
-              <FiPlus /> Create
+    <Dialog.Root open={open} onOpenChange={(e) => onOpenChange(e.open)}>
+      <Dialog.Backdrop />
+      <Dialog.Positioner>
+        <Dialog.Content as="form" maxW="440px">
+          <Dialog.Header>
+            <Dialog.Title>Add user</Dialog.Title>
+          </Dialog.Header>
+          <Dialog.Body
+            as="form"
+            onSubmit={(e) => {
+              e.preventDefault()
+              create.mutate()
+            }}
+          >
+            <VStack align="stretch" gap={3}>
+              <Field.Root required>
+                <Field.Label>Name</Field.Label>
+                <Input value={name} onChange={(e) => setName(e.target.value)} />
+              </Field.Root>
+              <Field.Root required>
+                <Field.Label>Email</Field.Label>
+                <Input type="email" value={email} onChange={(e) => setEmail(e.target.value)} />
+              </Field.Root>
+              <Field.Root required>
+                <Field.Label>Password</Field.Label>
+                <PasswordInput
+                  value={password}
+                  onChange={(e) => setPassword(e.target.value)}
+                  autoComplete="new-password"
+                />
+                <Field.HelperText>min 10 chars</Field.HelperText>
+              </Field.Root>
+              <RoleField value={role} onChange={setRole} />
+              {error && (
+                <Text color="red.fg" fontSize="sm">
+                  {error}
+                </Text>
+              )}
+            </VStack>
+          </Dialog.Body>
+          <Dialog.Footer>
+            <Dialog.ActionTrigger asChild>
+              <Button variant="outline">Cancel</Button>
+            </Dialog.ActionTrigger>
+            <Button colorPalette="blue" loading={create.isPending} onClick={() => create.mutate()}>
+              Create
             </Button>
-          </HStack>
-          {error && (
-            <Text color="red.fg" fontSize="sm" mt={2}>
-              {error}
-            </Text>
-          )}
-        </form>
-      </Card.Body>
-    </Card.Root>
+          </Dialog.Footer>
+          <Dialog.CloseTrigger />
+        </Dialog.Content>
+      </Dialog.Positioner>
+    </Dialog.Root>
+  )
+}
+
+// ResetPasswordModal lets a superadmin set any user a new password.
+function ResetPasswordModal({
+  user,
+  open,
+  onOpenChange,
+}: {
+  user: UserView
+  open: boolean
+  onOpenChange: (o: boolean) => void
+}) {
+  const qc = useQueryClient()
+  const [password, setPassword] = useState("")
+  const [error, setError] = useState("")
+
+  const reset = useMutation({
+    mutationFn: () => patch(`/api/users/${user.id}`, { password }),
+    onSuccess: async () => {
+      setPassword("")
+      setError("")
+      onOpenChange(false)
+      await qc.invalidateQueries({ queryKey: ["users"] })
+      toaster.create({
+        title: `Password reset — ${user.email}'s sessions were logged out`,
+        type: "success",
+      })
+    },
+    onError: (e) => setError(e instanceof ApiError ? e.message : "reset failed"),
+  })
+
+  return (
+    <Dialog.Root open={open} onOpenChange={(e) => onOpenChange(e.open)}>
+      <Dialog.Backdrop />
+      <Dialog.Positioner>
+        <Dialog.Content as="form" maxW="420px">
+          <Dialog.Header>
+            <Dialog.Title>Reset password — {user.email}</Dialog.Title>
+          </Dialog.Header>
+          <Dialog.Body>
+            <VStack align="stretch" gap={3}>
+              <Field.Root required>
+                <Field.Label>New password</Field.Label>
+                <PasswordInput
+                  value={password}
+                  onChange={(e) => setPassword(e.target.value)}
+                  autoComplete="new-password"
+                />
+                <Field.HelperText>
+                  min 10 chars; all their sessions are logged out
+                </Field.HelperText>
+              </Field.Root>
+              {error && (
+                <Text color="red.fg" fontSize="sm">
+                  {error}
+                </Text>
+              )}
+            </VStack>
+          </Dialog.Body>
+          <Dialog.Footer>
+            <Dialog.ActionTrigger asChild>
+              <Button variant="outline">Cancel</Button>
+            </Dialog.ActionTrigger>
+            <Button
+              colorPalette="blue"
+              loading={reset.isPending}
+              onClick={() => reset.mutate()}
+            >
+              Reset password
+            </Button>
+          </Dialog.Footer>
+          <Dialog.CloseTrigger />
+        </Dialog.Content>
+      </Dialog.Positioner>
+    </Dialog.Root>
   )
 }
 
@@ -134,7 +234,7 @@ function UserKeysRow({ userID, onClose }: { userID: number; onClose: () => void 
       <Table.Cell colSpan={7}>
         <HStack mb={2}>
           <Button size="xs" colorPalette="blue" onClick={() => create.mutate()}>
-            <FiPlus /> New key
+            <Plus /> New key
           </Button>
           <Button size="xs" variant="ghost" onClick={onClose}>
             Close
@@ -163,7 +263,7 @@ function UserKeysRow({ userID, onClose }: { userID: number; onClose: () => void 
                 colorPalette="red"
                 onClick={() => remove.mutate(k.id)}
               >
-                <FiTrash2 />
+                <Trash2 />
               </IconButton>
             </HStack>
           ))}
@@ -183,6 +283,7 @@ function UserRow({ u, isSelf }: { u: UserView; isSelf: boolean }) {
   const qc = useQueryClient()
   const [toDelete, setToDelete] = useState(false)
   const [managingKeys, setManagingKeys] = useState(false)
+  const [resetting, setResetting] = useState(false)
 
   const patchU = useMutation({
     mutationFn: (body: Record<string, unknown>) => patch(`/api/users/${u.id}`, body),
@@ -206,7 +307,9 @@ function UserRow({ u, isSelf }: { u: UserView; isSelf: boolean }) {
       <Table.Cell>{u.name}</Table.Cell>
       <Table.Cell>{u.email}</Table.Cell>
       <Table.Cell>
-        <Badge variant={u.role === "superadmin" ? "solid" : "subtle"}>{u.role}</Badge>
+        <Badge variant={u.role === "superadmin" ? "solid" : "subtle"}>
+          {u.role === "superadmin" ? "Superadmin" : "User"}
+        </Badge>
       </Table.Cell>
       <Table.Cell>{u.keyCount ?? 0}</Table.Cell>
       <Table.Cell>{fmtTs(u.createdAt)}</Table.Cell>
@@ -233,6 +336,16 @@ function UserRow({ u, isSelf }: { u: UserView; isSelf: boolean }) {
             Keys
           </Button>
           {!isSelf && (
+            <Button
+              variant="ghost"
+              size="xs"
+              onClick={() => setResetting(true)}
+              aria-label={`reset password for ${u.email}`}
+            >
+              <KeyRound /> Reset password
+            </Button>
+          )}
+          {!isSelf && (
             <IconButton
               variant="ghost"
               size="xs"
@@ -240,12 +353,13 @@ function UserRow({ u, isSelf }: { u: UserView; isSelf: boolean }) {
               colorPalette="red"
               onClick={() => setToDelete(true)}
             >
-              <FiTrash2 />
+              <Trash2 />
             </IconButton>
           )}
         </HStack>
       </Table.Cell>
       {managingKeys && <UserKeysRow userID={u.id} onClose={() => setManagingKeys(false)} />}
+      <ResetPasswordModal user={u} open={resetting} onOpenChange={setResetting} />
       <ConfirmDialog
         open={toDelete}
         onOpenChange={() => setToDelete(false)}
@@ -262,6 +376,7 @@ function UserRow({ u, isSelf }: { u: UserView; isSelf: boolean }) {
 
 export default function UsersPage() {
   const { data: me } = useSession()
+  const [adding, setAdding] = useState(false)
   const { data, isLoading, error } = useQuery({
     queryKey: ["users"],
     queryFn: () => api<{ users: UserView[] }>("/api/users"),
@@ -269,8 +384,12 @@ export default function UsersPage() {
 
   return (
     <VStack align="stretch" gap={6}>
-      <Heading size="lg">Users</Heading>
-      <AddUserCard />
+      <HStack justify="space-between">
+        <Heading size="lg">Users</Heading>
+        <Button colorPalette="blue" size="sm" onClick={() => setAdding(true)}>
+          <Plus /> Add user
+        </Button>
+      </HStack>
       <Card.Root>
         <Card.Body pt={0}>
           {isLoading ? (
@@ -299,6 +418,7 @@ export default function UsersPage() {
           )}
         </Card.Body>
       </Card.Root>
+      <AddUserModal open={adding} onOpenChange={setAdding} />
     </VStack>
   )
 }

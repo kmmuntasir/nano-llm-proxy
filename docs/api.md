@@ -78,10 +78,12 @@ curl http://localhost:8787/v1/messages \
   }'
 ```
 
-Model resolution order: a `claude-*` name hits the alias map
-(Settings → Anthropic aliases, stored in the runtime settings document);
-anything else (including suffixed IDs like `myprovider/my-model-128K`) routes
-directly. A `[1m]` suffix is stripped before the upstream call.
+Model resolution order: a literal `claude-*` name (no explicit
+`provider/` prefix) routes to the configured fallback target
+(Settings → Anthropic fallback) — the safety net for the background calls
+clients self-issue; anything else (including suffixed IDs like
+`myprovider/my-model-128K`) routes directly. A `[1m]` suffix is stripped
+before the upstream call.
 
 ## GET /v1/models
 
@@ -129,9 +131,17 @@ Roles: `superadmin` (everything below) and `user` (own keys + dashboard).
 | `PUT /api/settings` | superadmin | Validate and replace the document; omitted fields fall back to defaults, the models.dev sync status is server-owned and preserved. Validation failures return 400 and change nothing. Applies in-request — pool mode and the `/v1/models` cache refresh before the response |
 | `POST /api/settings/model-meta/sync` | superadmin | Run the models.dev catalog sync now; returns the sync status (200 even when `ok:false` — the error is in the status block) |
 | `GET /api/dashboard` | user | Pool health, per-key counters, recent activity |
+| `GET /api/usage/summary?from=&to=` | user | Requests/errors/tokens totals, top models, per-provider (scoped to own user; superadmin sees all) |
+| `GET /api/usage/keys?from=&to=` | user | Per-client-key requests/tokens in range (scoped) |
+| `GET /api/usage/users?from=&to=` | superadmin | Per-user requests/tokens in range |
+| `GET /api/usage/activity?limit=` | user | Persisted recent requests with token counts (scoped) |
+| `POST /api/me/password` | user | Self-service password reset; requires the current password and wipes all sessions |
 
 Every mutation writes to SQLite and rebuilds the in-memory pools/key cache
-in the same request.
+in the same request. Usage ranges are unix seconds, capped to 92 days;
+token counts come from whatever the upstream reports (0 when it reports
+none). Events persist in the `usage_events` table and are pruned after 90
+days.
 
 ## Errors
 

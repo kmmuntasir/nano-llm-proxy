@@ -85,6 +85,52 @@ export interface ApiErrorBody {
   error?: { message?: string }
 }
 
+// --- usage reporting (GET /api/usage/*) ---
+
+export interface UsageTotals {
+  requests: number
+  errors: number
+  inputTokens: number
+  outputTokens: number
+}
+
+export interface UsageModelRow {
+  key: string
+  requests: number
+  inputTokens: number
+  outputTokens: number
+}
+
+export interface UsageUserRow {
+  userId: number
+  email: string
+  requests: number
+  inputTokens: number
+  outputTokens: number
+}
+
+export interface UsageKeyRow {
+  keyId: number
+  alias: string
+  userId: number
+  email: string
+  requests: number
+  inputTokens: number
+  outputTokens: number
+}
+
+export interface UsageActivityRow {
+  ts: number
+  email: string
+  alias: string
+  provider: string
+  model: string
+  inputTokens: number
+  outputTokens: number
+  status: number
+  durationMs: number
+}
+
 // --- runtime settings (GET/PUT /api/settings) ---
 
 export interface ModelMetaView {
@@ -127,7 +173,7 @@ export interface KiloSettingsView {
 }
 
 export interface AnthropicSettingsView {
-  aliases: Record<string, string>
+  fallbackModel: string
 }
 
 export interface RuntimeSettingsView {

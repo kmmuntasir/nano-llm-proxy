@@ -269,14 +269,15 @@ func (g *gateway) proxyZen(ref providerRef, w http.ResponseWriter, r *http.Reque
 			continue
 		}
 
+		var tu tokenUsage
 		if surface == "responses" {
-			translateResponses(w, resp, model, clientWantsStream)
+			tu = translateResponses(w, resp, model, clientWantsStream)
 		} else if clientWantsStream {
-			passthroughSSE(w, resp)
+			tu = passthroughSSE(w, resp)
 		} else {
-			aggregateChatSSE(w, resp, model)
+			tu = aggregateChatSSE(w, resp, model)
 		}
-		g.recordActivity(r, ref, model, k.Hash, start, http.StatusOK, "")
+		g.recordActivity(r, ref, model, k.Hash, start, http.StatusOK, "", tu)
 		return ""
 	}
 	if lastHint == "" {

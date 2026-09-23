@@ -54,8 +54,8 @@ func (g *gateway) proxyOpenAI(ref providerRef, w http.ResponseWriter, r *http.Re
 			lastHint = v.hint
 			continue
 		}
-		streamKilo(w, resp, clientWantsStream)
-		g.recordActivity(r, ref, model, k.Hash, start, http.StatusOK, "")
+		tu := streamKilo(w, resp)
+		g.recordActivity(r, ref, model, k.Hash, start, http.StatusOK, "", tu)
 		return ""
 	}
 	if lastHint == "" {

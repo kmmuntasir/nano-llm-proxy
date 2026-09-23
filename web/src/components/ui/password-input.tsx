@@ -17,7 +17,7 @@ import {
   useControllableState,
 } from "@chakra-ui/react"
 import * as React from "react"
-import { LuEye, LuEyeOff } from "react-icons/lu"
+import { Eye, EyeOff } from "lucide-react"
 
 export interface PasswordVisibilityProps {
   /**
@@ -52,7 +52,7 @@ export const PasswordInput = React.forwardRef<
     defaultVisible,
     visible: visibleProp,
     onVisibleChange,
-    visibilityIcon = { on: <LuEye />, off: <LuEyeOff /> },
+    visibilityIcon = { on: <Eye size="16" />, off: <EyeOff size="16" /> },
     ...rest
   } = props
 

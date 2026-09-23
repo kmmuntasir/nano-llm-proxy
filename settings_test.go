@@ -39,7 +39,7 @@ func TestSettingsRoundTrip(t *testing.T) {
 			RespectRetryAfter:    false,
 			MaxRequestsPerKeyDay: 0, // off
 		},
-		Anthropic: AnthropicSettings{Aliases: map[string]string{"claude-sonnet-5": "zen/glm-5"}},
+		Anthropic: AnthropicSettings{FallbackModel: "zen/glm-5"},
 		Zen: ZenSettings{
 			UserAgent:       "opencode/1.19.0",
 			InjectTools:     false, // explicit false must survive the onto-defaults unmarshal
@@ -74,8 +74,8 @@ func TestSettingsRoundTrip(t *testing.T) {
 	if got.Zen.UserAgent != "opencode/1.19.0" {
 		t.Errorf("userAgent = %q", got.Zen.UserAgent)
 	}
-	if got.Anthropic.Aliases["claude-sonnet-5"] != "zen/glm-5" {
-		t.Errorf("aliases = %v", got.Anthropic.Aliases)
+	if got.Anthropic.FallbackModel != "zen/glm-5" {
+		t.Errorf("fallbackModel = %q", got.Anthropic.FallbackModel)
 	}
 	if len(got.Zen.ModelMeta) != 1 || got.Zen.ModelMeta["glm-5"].ContextWindow != 128000 {
 		t.Errorf("modelMeta = %v", got.Zen.ModelMeta)
@@ -89,7 +89,7 @@ func TestUpdateSettingsPreservesUntouched(t *testing.T) {
 	st := openTestStore(t)
 	seed := DefaultRuntimeSettings()
 	seed.Rotation = rotationLRU
-	seed.Anthropic.Aliases["a"] = "zen/b"
+	seed.Anthropic.FallbackModel = "zen/b"
 	seed.Zen.ModelMetaSyncStatus = &ModelMetaSyncStatus{At: 123, OK: true, Added: 3}
 	if err := st.SaveRuntimeSettings(seed); err != nil {
 		t.Fatalf("save: %v", err)
@@ -108,7 +108,7 @@ func TestUpdateSettingsPreservesUntouched(t *testing.T) {
 	if got.Retry.CooldownSeconds != 99 {
 		t.Errorf("cooldown = %d, want 99", got.Retry.CooldownSeconds)
 	}
-	if got.Rotation != rotationLRU || got.Anthropic.Aliases["a"] != "zen/b" {
+	if got.Rotation != rotationLRU || got.Anthropic.FallbackModel != "zen/b" {
 		t.Errorf("mutate clobbered unrelated fields: %+v", got)
 	}
 	if got.Zen.ModelMetaSyncStatus == nil || got.Zen.ModelMetaSyncStatus.Added != 3 {
@@ -140,8 +140,7 @@ func TestRuntimeSettingsValidate(t *testing.T) {
 		{"huge maxKeys", func(rs *RuntimeSettings) { rs.Retry.MaxKeysPerRequest = 101 }, "maxKeysPerRequest"},
 		{"negative cooldown", func(rs *RuntimeSettings) { rs.Retry.CooldownSeconds = -1 }, "cooldownSeconds"},
 		{"negative cap", func(rs *RuntimeSettings) { rs.Retry.MaxRequestsPerKeyDay = -5 }, "maxRequestsPerKeyPerDay"},
-		{"empty alias key", func(rs *RuntimeSettings) { rs.Anthropic.Aliases["  "] = "zen/x" }, "aliases"},
-		{"alias without slash", func(rs *RuntimeSettings) { rs.Anthropic.Aliases["a"] = "noslash" }, "provider/model"},
+		{"fallback without slash", func(rs *RuntimeSettings) { rs.Anthropic.FallbackModel = "noslash" }, "provider/model"},
 		{"ua below floor", func(rs *RuntimeSettings) { rs.Zen.UserAgent = "opencode/1.17.9" }, "1.18.0"},
 		{"empty responses model", func(rs *RuntimeSettings) { rs.Zen.ResponsesModels = []string{" "} }, "responsesModels"},
 		{"meta zero ctx", func(rs *RuntimeSettings) {
@@ -165,14 +164,14 @@ func TestRuntimeSettingsValidate(t *testing.T) {
 
 func TestSettingsCloneIsDeep(t *testing.T) {
 	rs := DefaultRuntimeSettings()
-	rs.Anthropic.Aliases["a"] = "zen/b"
+	rs.Anthropic.FallbackModel = "zen/b"
 	rs.Zen.ResponsesModels = []string{"m"}
 	rs.Zen.ModelMeta["m"] = ModelMeta{ContextWindow: 1, MaxOutputTokens: 2}
 	c := rs.Clone()
-	c.Anthropic.Aliases["a"] = "zen/CHANGED"
+	c.Anthropic.FallbackModel = "zen/CHANGED"
 	c.Zen.ResponsesModels[0] = "CHANGED"
 	c.Zen.ModelMeta["m"] = ModelMeta{ContextWindow: 9, MaxOutputTokens: 9}
-	if rs.Anthropic.Aliases["a"] != "zen/b" || rs.Zen.ResponsesModels[0] != "m" || rs.Zen.ModelMeta["m"].ContextWindow != 1 {
+	if rs.Zen.ResponsesModels[0] != "m" || rs.Zen.ModelMeta["m"].ContextWindow != 1 {
 		t.Fatalf("Clone is not deep: %+v", rs)
 	}
 }

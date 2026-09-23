@@ -26,7 +26,10 @@ type RetryConfig struct {
 }
 
 type AnthropicSettings struct {
-	Aliases map[string]string `json:"aliases"` // "claude-sonnet-5" -> "zen/mimo-..." on /v1/messages
+	// FallbackModel routes literal "claude-*" requests (background tasks
+	// clients self-issue) to one configured "provider/model" target; empty
+	// disables the rewrite.
+	FallbackModel string `json:"fallbackModel"`
 }
 
 // ModelMetaSyncStatus records the outcome of the last models.dev sync (the
@@ -72,7 +75,7 @@ func DefaultRuntimeSettings() *RuntimeSettings {
 			CooldownSeconds:   30,
 			RespectRetryAfter: true,
 		},
-		Anthropic: AnthropicSettings{Aliases: map[string]string{}},
+		Anthropic: AnthropicSettings{},
 		Zen: ZenSettings{
 			UserAgent:       "opencode/1.18.32",
 			InjectTools:     true,
@@ -95,9 +98,6 @@ func (rs *RuntimeSettings) applyDefaults() *RuntimeSettings {
 	}
 	if rs.Retry.MaxKeysPerRequest <= 0 {
 		rs.Retry.MaxKeysPerRequest = 3
-	}
-	if rs.Anthropic.Aliases == nil {
-		rs.Anthropic.Aliases = map[string]string{}
 	}
 	if rs.Zen.ResponsesModels == nil {
 		rs.Zen.ResponsesModels = []string{}
@@ -127,12 +127,9 @@ func (rs *RuntimeSettings) Validate() string {
 	if rs.Retry.MaxRequestsPerKeyDay < 0 || rs.Retry.MaxRequestsPerKeyDay > 1_000_000 {
 		return "retry.maxRequestsPerKeyPerDay must be 0 (off) or between 1 and 1000000"
 	}
-	for alias, target := range rs.Anthropic.Aliases {
-		if strings.TrimSpace(alias) == "" {
-			return "anthropic.aliases keys must be non-empty"
-		}
-		if parts := strings.Split(target, "/"); len(parts) != 2 || parts[0] == "" || parts[1] == "" {
-			return fmt.Sprintf("anthropic.aliases[%q]: %q must look like \"provider/model\"", alias, target)
+	if f := rs.Anthropic.FallbackModel; f != "" {
+		if parts := strings.Split(f, "/"); len(parts) != 2 || parts[0] == "" || parts[1] == "" {
+			return fmt.Sprintf("anthropic.fallbackModel %q must look like \"provider/model\"", f)
 		}
 	}
 	if !uaVersionOK(rs.Zen.UserAgent) {
@@ -158,8 +155,6 @@ func (rs *RuntimeSettings) Validate() string {
 // from a snapshot without racing the next reader.
 func (rs *RuntimeSettings) Clone() *RuntimeSettings {
 	out := *rs
-	out.Anthropic.Aliases = make(map[string]string, len(rs.Anthropic.Aliases))
-	maps.Copy(out.Anthropic.Aliases, rs.Anthropic.Aliases)
 	out.Zen.ResponsesModels = append([]string(nil), rs.Zen.ResponsesModels...)
 	out.Zen.ModelMeta = make(map[string]ModelMeta, len(rs.Zen.ModelMeta))
 	maps.Copy(out.Zen.ModelMeta, rs.Zen.ModelMeta)
