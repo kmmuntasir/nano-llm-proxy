@@ -25,13 +25,13 @@ func (g *gateway) handleResponses(w http.ResponseWriter, r *http.Request) {
 	parts := strings.SplitN(model, "/", 2)
 	if len(parts) != 2 || parts[0] == "" || parts[1] == "" {
 		writeErr(w, http.StatusBadRequest,
-			`model must be "zen/<id>"; only zen has a Responses API — use /v1/chat/completions`)
+			`Model must be "zen/<id>"; only zen has a Responses API — use /v1/chat/completions`)
 		return
 	}
 	ref, ok := g.provider(parts[0])
 	if !ok || ref.typ != "opencode" {
 		writeErr(w, http.StatusBadRequest,
-			fmt.Sprintf("provider %q has no Responses API — use /v1/chat/completions", parts[0]))
+			fmt.Sprintf("Provider %q has no Responses API — use /v1/chat/completions", parts[0]))
 		return
 	}
 	upstreamModel := parts[1]
@@ -43,7 +43,7 @@ func (g *gateway) handleResponses(w http.ResponseWriter, r *http.Request) {
 	body["model"] = upstreamModel
 	if g.surfaceFor(upstreamModel) != "responses" {
 		writeErr(w, http.StatusBadRequest,
-			fmt.Sprintf("model %s is served on the chat surface — use /v1/chat/completions", upstreamModel))
+			fmt.Sprintf("Model %s is served on the chat surface — use /v1/chat/completions", upstreamModel))
 		return
 	}
 	clientWantsStream := bodyStreamFlag(body)
@@ -117,7 +117,7 @@ func (g *gateway) proxyZenResponses(ref providerRef, w http.ResponseWriter, r *h
 				return v.hint
 			}
 			if v.action == "flipsurface" {
-				return fmt.Sprintf("model %s moved off the Responses surface — use /v1/chat/completions", model)
+				return fmt.Sprintf("Model %s moved off the Responses surface — use /v1/chat/completions", model)
 			}
 			lastHint = v.hint
 			continue
@@ -134,7 +134,7 @@ func (g *gateway) proxyZenResponses(ref providerRef, w http.ResponseWriter, r *h
 		return ""
 	}
 	if lastHint == "" {
-		lastHint = "no healthy zen keys available"
+		lastHint = "No healthy zen keys available — every key is cooling or disabled"
 	}
 	return lastHint
 }

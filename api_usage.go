@@ -57,7 +57,7 @@ func scopedUser(u *User) *int64 {
 func (g *gateway) handleUsageSummary(w http.ResponseWriter, r *http.Request) {
 	from, to, ok := usageRange(r)
 	if !ok {
-		apiErr(w, http.StatusBadRequest, "invalid range: need from < to (unix seconds)")
+		apiErr(w, http.StatusBadRequest, "Invalid date range: 'from' must be before 'to' (unix seconds)")
 		return
 	}
 	user := contextUser(r)
@@ -88,7 +88,7 @@ func (g *gateway) handleUsageSummary(w http.ResponseWriter, r *http.Request) {
 func (g *gateway) handleUsageUsers(w http.ResponseWriter, r *http.Request) {
 	from, to, ok := usageRange(r)
 	if !ok {
-		apiErr(w, http.StatusBadRequest, "invalid range")
+		apiErr(w, http.StatusBadRequest, "Invalid date range")
 		return
 	}
 	rows, err := g.store.UsageByUser(from, to)
@@ -102,7 +102,7 @@ func (g *gateway) handleUsageUsers(w http.ResponseWriter, r *http.Request) {
 func (g *gateway) handleUsageKeys(w http.ResponseWriter, r *http.Request) {
 	from, to, ok := usageRange(r)
 	if !ok {
-		apiErr(w, http.StatusBadRequest, "invalid range")
+		apiErr(w, http.StatusBadRequest, "Invalid date range")
 		return
 	}
 	rows, err := g.store.UsageByKey(from, to, scopedUser(contextUser(r)))
@@ -135,7 +135,7 @@ func (g *gateway) handleUsageActivity(w http.ResponseWriter, r *http.Request) {
 func (g *gateway) handleUsageTimeseries(w http.ResponseWriter, r *http.Request) {
 	from, to, ok := usageRange(r)
 	if !ok {
-		apiErr(w, http.StatusBadRequest, "invalid range")
+		apiErr(w, http.StatusBadRequest, "Invalid date range")
 		return
 	}
 	bucket := int64(86400)

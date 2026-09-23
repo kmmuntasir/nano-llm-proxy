@@ -42,7 +42,7 @@ func (g *gateway) handlePutSettings(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	rs.Zen.ModelMetaSyncStatus = cur.Zen.ModelMetaSyncStatus
-	if !g.applyMutation(w, actor, "settings.update", func() error {
+	if !g.applyMutation(w, actor, "settings.update", "", func() error {
 		if err := g.store.SaveRuntimeSettings(rs); err != nil {
 			return err
 		}

@@ -108,11 +108,11 @@ func (g *gateway) handleCreateProvider(w http.ResponseWriter, r *http.Request) {
 	name := req.Name
 	baseURL := req.BaseURL
 	if !providerNameRe.MatchString(name) {
-		apiErr(w, http.StatusBadRequest, "provider name must match ^[a-z][a-z0-9-]{0,31}$ (it becomes the model prefix)")
+		apiErr(w, http.StatusBadRequest, "Provider name must be 1-32 characters of lowercase letters, digits, or dashes (it becomes the model prefix)")
 		return
 	}
 	if name == "zen" || name == "kilo" {
-		apiErr(w, http.StatusConflict, "that name is reserved")
+		apiErr(w, http.StatusConflict, "That name is reserved (zen and kilo are built in)")
 		return
 	}
 	u, err := url.Parse(baseURL)
@@ -125,7 +125,7 @@ func (g *gateway) handleCreateProvider(w http.ResponseWriter, r *http.Request) {
 		keys = []string{req.FirstKey}
 	}
 	if len(keys) == 0 {
-		apiErr(w, http.StatusBadRequest, "at least one upstream API key is required")
+		apiErr(w, http.StatusBadRequest, "At least one upstream API key is required")
 		return
 	}
 	p := &Provider{Name: name, Type: "openai", BaseURL: baseURL, Enabled: true, SortOrder: 100}
@@ -136,10 +136,10 @@ func (g *gateway) handleCreateProvider(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 	if len(pks) == 0 {
-		apiErr(w, http.StatusBadRequest, "at least one upstream API key is required")
+		apiErr(w, http.StatusBadRequest, "At least one upstream API key is required")
 		return
 	}
-	if !g.applyMutation(w, actor, "provider.create", func() error { return g.store.CreateProvider(p, pks) }) {
+	if !g.applyMutation(w, actor, "provider.create", "A provider with this name already exists", func() error { return g.store.CreateProvider(p, pks) }) {
 		return
 	}
 	writeJSON(w, http.StatusCreated, map[string]any{"id": p.ID})
@@ -157,7 +157,7 @@ func (g *gateway) handlePatchProvider(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	if p == nil {
-		apiErr(w, http.StatusNotFound, "no such provider")
+		apiErr(w, http.StatusNotFound, "That provider no longer exists (it may have been deleted)")
 		return
 	}
 	var req struct {
@@ -169,11 +169,11 @@ func (g *gateway) handlePatchProvider(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	if req.Name != nil && p.Builtin {
-		apiErr(w, http.StatusConflict, "builtin providers cannot be renamed")
+		apiErr(w, http.StatusConflict, "Built-in providers cannot be renamed")
 		return
 	}
 	if req.Name != nil && !providerNameRe.MatchString(*req.Name) {
-		apiErr(w, http.StatusBadRequest, "provider name must match ^[a-z][a-z0-9-]{0,31}$")
+		apiErr(w, http.StatusBadRequest, "Provider name must be 1-32 characters of lowercase letters, digits, or dashes")
 		return
 	}
 	if req.BaseURL != nil {
@@ -183,7 +183,7 @@ func (g *gateway) handlePatchProvider(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 	}
-	if !g.applyMutation(w, actor, "provider.update", func() error {
+	if !g.applyMutation(w, actor, "provider.update", "A provider with this name already exists", func() error {
 		return g.store.UpdateProvider(id, req.Name, req.BaseURL, req.Enabled)
 	}) {
 		return
@@ -198,7 +198,7 @@ func (g *gateway) handleDeleteProvider(w http.ResponseWriter, r *http.Request) {
 	if !ok {
 		return
 	}
-	if !g.applyMutation(w, actor, "provider.delete", func() error { return g.store.DeleteProvider(id) }) {
+	if !g.applyMutation(w, actor, "provider.delete", "", func() error { return g.store.DeleteProvider(id) }) {
 		return
 	}
 	writeJSON(w, http.StatusOK, map[string]any{"ok": true})
@@ -216,7 +216,7 @@ func (g *gateway) handleAddProviderKey(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	if p == nil {
-		apiErr(w, http.StatusNotFound, "no such provider")
+		apiErr(w, http.StatusNotFound, "That provider no longer exists (it may have been deleted)")
 		return
 	}
 	var req struct {
@@ -227,11 +227,11 @@ func (g *gateway) handleAddProviderKey(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	if req.Key == "" {
-		apiErr(w, http.StatusBadRequest, "key is required")
+		apiErr(w, http.StatusBadRequest, "The upstream API key is required")
 		return
 	}
 	var pk ProviderKey
-	if !g.applyMutation(w, actor, "provider.key.add", func() error {
+	if !g.applyMutation(w, actor, "provider.key.add", "This upstream key is already on this provider", func() error {
 		var err error
 		pk, err = g.store.AddProviderKey(id, req.Label, req.Key)
 		return err
@@ -256,7 +256,7 @@ func (g *gateway) handlePatchProviderKey(w http.ResponseWriter, r *http.Request)
 	if !readJSON(w, r, &req) {
 		return
 	}
-	if !g.applyMutation(w, actor, "provider.key.update", func() error {
+	if !g.applyMutation(w, actor, "provider.key.update", "", func() error {
 		return g.store.UpdateProviderKey(keyID, req.Label, req.Disabled)
 	}) {
 		return
@@ -270,7 +270,7 @@ func (g *gateway) handleDeleteProviderKey(w http.ResponseWriter, r *http.Request
 	if !ok {
 		return
 	}
-	if !g.applyMutation(w, actor, "provider.key.delete", func() error {
+	if !g.applyMutation(w, actor, "provider.key.delete", "", func() error {
 		return g.store.DeleteProviderKey(keyID)
 	}) {
 		return

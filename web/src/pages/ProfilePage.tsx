@@ -42,7 +42,7 @@ function ChangePasswordModal({ open, onOpenChange }: { open: boolean; onOpenChan
       navigate("/login")
     },
     onError: (e) => {
-      const msg = e instanceof ApiError ? e.message : "change failed"
+      const msg = e instanceof ApiError ? e.message : "Failed to change the password"
       setError(msg)
       toaster.create({ title: msg, type: "error" })
     },
@@ -51,7 +51,7 @@ function ChangePasswordModal({ open, onOpenChange }: { open: boolean; onOpenChan
   const submit = () => {
     setError("")
     if (next !== confirm) {
-      setError("new passwords don't match")
+      setError("New passwords don't match")
       return
     }
     change.mutate()

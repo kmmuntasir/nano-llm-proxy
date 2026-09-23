@@ -59,7 +59,7 @@ func (g *gateway) proxyOpenAI(ref providerRef, w http.ResponseWriter, r *http.Re
 		return ""
 	}
 	if lastHint == "" {
-		lastHint = fmt.Sprintf("no healthy %s keys available", ref.name)
+		lastHint = fmt.Sprintf("No healthy %s keys available — every key is cooling or disabled", ref.name)
 	}
 	return lastHint
 }

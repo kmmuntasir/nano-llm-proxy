@@ -196,7 +196,7 @@ func (g *gateway) clientOnly(next http.HandlerFunc) http.HandlerFunc {
 
 func (g *gateway) rejectClient(w http.ResponseWriter) {
 	w.Header().Set("WWW-Authenticate", `Bearer realm="nano-llm-proxy"`)
-	writeErr(w, http.StatusUnauthorized, "invalid or missing API key")
+	writeErr(w, http.StatusUnauthorized, "Invalid or missing API key")
 }
 
 func (g *gateway) handleHealth(w http.ResponseWriter, r *http.Request) {
@@ -222,7 +222,7 @@ var startTime = time.Now()
 func (g *gateway) fetchUpstreamModels(ref providerRef) ([]any, error) {
 	key := ref.pool.pick(nil)
 	if key == nil {
-		return nil, fmt.Errorf("no healthy %s keys", ref.name)
+		return nil, fmt.Errorf("No healthy %s keys available — every key is cooling or disabled", ref.name)
 	}
 	req, err := http.NewRequestWithContext(context.Background(), http.MethodGet, ref.baseURL+"/models", nil)
 	if err != nil {
@@ -361,7 +361,7 @@ func (g *gateway) handleModels(w http.ResponseWriter, r *http.Request) {
 			merged = append(merged, models...)
 		}
 		if len(merged) == 0 && len(failed) > 0 {
-			writeErr(w, http.StatusBadGateway, "catalog fetch failed: "+strings.Join(failed, " "))
+			writeErr(w, http.StatusBadGateway, "Catalog fetch failed: "+strings.Join(failed, " "))
 			return
 		}
 		body, _ := json.Marshal(map[string]any{"object": "list", "data": merged})

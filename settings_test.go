@@ -135,17 +135,17 @@ func TestRuntimeSettingsValidate(t *testing.T) {
 	}{
 		{"defaults", func(*RuntimeSettings) {}, ""},
 		{"lru", func(rs *RuntimeSettings) { rs.Rotation = rotationLRU }, ""},
-		{"bad rotation", func(rs *RuntimeSettings) { rs.Rotation = "random" }, "rotation"},
-		{"zero maxKeys", func(rs *RuntimeSettings) { rs.Retry.MaxKeysPerRequest = 0 }, "maxKeysPerRequest"},
-		{"huge maxKeys", func(rs *RuntimeSettings) { rs.Retry.MaxKeysPerRequest = 101 }, "maxKeysPerRequest"},
-		{"negative cooldown", func(rs *RuntimeSettings) { rs.Retry.CooldownSeconds = -1 }, "cooldownSeconds"},
-		{"negative cap", func(rs *RuntimeSettings) { rs.Retry.MaxRequestsPerKeyDay = -5 }, "maxRequestsPerKeyPerDay"},
-		{"fallback without slash", func(rs *RuntimeSettings) { rs.Anthropic.FallbackModel = "noslash" }, "provider/model"},
+		{"bad rotation", func(rs *RuntimeSettings) { rs.Rotation = "random" }, "Rotation must be"},
+		{"zero maxKeys", func(rs *RuntimeSettings) { rs.Retry.MaxKeysPerRequest = 0 }, "Max keys per request"},
+		{"huge maxKeys", func(rs *RuntimeSettings) { rs.Retry.MaxKeysPerRequest = 101 }, "Max keys per request"},
+		{"negative cooldown", func(rs *RuntimeSettings) { rs.Retry.CooldownSeconds = -1 }, "Cooldown seconds"},
+		{"negative cap", func(rs *RuntimeSettings) { rs.Retry.MaxRequestsPerKeyDay = -5 }, "Daily cap"},
+		{"fallback without slash", func(rs *RuntimeSettings) { rs.Anthropic.FallbackModel = "noslash" }, "Fallback model"},
 		{"ua below floor", func(rs *RuntimeSettings) { rs.Zen.UserAgent = "opencode/1.17.9" }, "1.18.0"},
-		{"empty responses model", func(rs *RuntimeSettings) { rs.Zen.ResponsesModels = []string{" "} }, "responsesModels"},
+		{"empty responses model", func(rs *RuntimeSettings) { rs.Zen.ResponsesModels = []string{" "} }, "Responses-API"},
 		{"meta zero ctx", func(rs *RuntimeSettings) {
 			rs.Zen.ModelMeta["m"] = ModelMeta{}
-		}, "contextWindow"},
+		}, "context window must be"},
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
