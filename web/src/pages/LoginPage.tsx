@@ -6,6 +6,7 @@ import {
   Button,
   Card,
   Field,
+  HStack,
   Heading,
   Input,
   Text,
@@ -14,6 +15,7 @@ import {
 import { post, ApiError } from "../api/client"
 import { PasswordInput } from "../components/ui/password-input"
 import { toaster } from "../components/ui/toaster"
+import logoUrl from "../assets/logo.png"
 import type { UserView } from "../api/types"
 
 export default function LoginPage() {
@@ -45,7 +47,10 @@ export default function LoginPage() {
     <Box minH="100vh" display="grid" placeItems="center" p={4}>
       <Card.Root w="full" maxW="sm">
         <Card.Header gap={1}>
-          <Heading size="lg">nano-llm-proxy</Heading>
+          <HStack gap={2} align="center">
+            <img src={logoUrl} alt="Nano LLM Proxy logo" width={32} height={32} />
+            <Heading size="lg">Nano LLM Proxy</Heading>
+          </HStack>
           <Text color="fg.muted" fontSize="sm">
             Sign in to manage keys and providers
           </Text>
