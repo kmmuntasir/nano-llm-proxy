@@ -2,17 +2,17 @@ import { Suspense, lazy } from "react"
 import { useQuery } from "@tanstack/react-query"
 import {
   Badge,
-  Box,
   Card,
   Heading,
   SimpleGrid,
   Stat,
-  Table,
   Text,
   VStack,
 } from "@chakra-ui/react"
 import { api } from "../api/client"
-import type { DashboardData, UsageTotals } from "../api/types"
+import { DataTable } from "../components/DataTable"
+import { useSession } from "../App"
+import type { DashboardData, UsageActivityRow, UsageTotals } from "../api/types"
 
 // Recharts is a big chunk and only the dashboard needs it — load on demand.
 const UsageCharts = lazy(() => import("../components/UsageCharts"))
@@ -47,12 +47,21 @@ export default function DashboardPage() {
     refetchInterval: 15_000,
   })
   // 24h usage totals for the stat row, scoped to the signed-in user
+  const { data: me } = useSession()
+  const isSuperadmin = me?.user.role === "superadmin"
   const usage = useQuery({
     queryKey: ["dashboard", "usage"],
     queryFn: () => {
       const to = Math.ceil(Date.now() / 1000)
       return api<UsageSummary>(`/api/usage/summary?from=${to - 24 * 3600}&to=${to}`)
     },
+    refetchInterval: 60_000,
+  })
+
+  const recent = useQuery({
+    queryKey: ["dashboard", "recent"],
+    queryFn: () =>
+      api<{ activity: UsageActivityRow[] }>("/api/usage/activity?limit=10"),
     refetchInterval: 60_000,
   })
 
@@ -114,54 +123,44 @@ export default function DashboardPage() {
       </Suspense>
 
       <VStack align="stretch" gap={3}>
-        <Heading size="md">Recent activity</Heading>
+        <Heading size="md">Recent user activity</Heading>
         <Card.Root>
           <Card.Body pt={3}>
-            <Box overflowX="auto">
-            <Table.Root size="sm">
-              <Table.Header>
-                <Table.Row>
-                  <Table.ColumnHeader>Time</Table.ColumnHeader>
-                  <Table.ColumnHeader>User</Table.ColumnHeader>
-                  <Table.ColumnHeader>Key</Table.ColumnHeader>
-                  <Table.ColumnHeader>Provider</Table.ColumnHeader>
-                  <Table.ColumnHeader>Model</Table.ColumnHeader>
-                  <Table.ColumnHeader>Status</Table.ColumnHeader>
-                  <Table.ColumnHeader>ms</Table.ColumnHeader>
-                </Table.Row>
-              </Table.Header>
-              <Table.Body>
-                {data.activity.length === 0 && (
-                  <Table.Row>
-                    <Table.Cell colSpan={7} color="fg.muted" textAlign="center">
-                      No requests yet
-                    </Table.Cell>
-                  </Table.Row>
-                )}
-                {data.activity.map((e, i) => (
-                  <Table.Row key={`${e.ts}-${i}`}>
-                    <Table.Cell whiteSpace="nowrap">{fmtTs(e.ts)}</Table.Cell>
-                    <Table.Cell>{e.user || "—"}</Table.Cell>
-                    <Table.Cell>{e.keyAlias || "—"}</Table.Cell>
-                    <Table.Cell>{e.provider}</Table.Cell>
-                    <Table.Cell fontFamily="mono" fontSize="xs" truncate maxW="220px">
+            <DataTable
+              rows={recent.data?.activity ?? []}
+              rowKey={(_, i) => String(i)}
+              empty="No requests recorded yet"
+              columns={[
+                ...(isSuperadmin
+                  ? [{ header: "User", render: (e: UsageActivityRow) => e.email }]
+                  : []),
+                { header: "Time", render: (e: UsageActivityRow) => fmtTs(e.ts) },
+                { header: "Key", render: (e: UsageActivityRow) => e.alias || "—" },
+                { header: "Provider", render: (e: UsageActivityRow) => e.provider },
+                {
+                  header: "Model",
+                  render: (e: UsageActivityRow) => (
+                    <Text fontFamily="mono" fontSize="xs" truncate maxW="220px">
                       {e.model}
-                    </Table.Cell>
-                    <Table.Cell>
-                      <Badge
-                        colorPalette={e.status === 200 ? "green" : "red"}
-                        variant="subtle"
-                      >
-                        {e.status}
-                        {e.failReason ? " failed" : ""}
-                      </Badge>
-                    </Table.Cell>
-                    <Table.Cell>{e.durationMs}</Table.Cell>
-                  </Table.Row>
-                ))}
-              </Table.Body>
-            </Table.Root>
-            </Box>
+                    </Text>
+                  ),
+                },
+                {
+                  header: "Tokens",
+                  render: (e: UsageActivityRow) =>
+                    `${fmtTokens(e.inputTokens)} / ${fmtTokens(e.outputTokens)}`,
+                },
+                {
+                  header: "Status",
+                  render: (e: UsageActivityRow) => (
+                    <Badge colorPalette={e.status === 200 ? "green" : "red"} variant="subtle">
+                      {e.status}
+                    </Badge>
+                  ),
+                },
+                { header: "ms", render: (e: UsageActivityRow) => e.durationMs },
+              ]}
+            />
           </Card.Body>
         </Card.Root>
       </VStack>

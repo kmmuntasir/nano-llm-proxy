@@ -1,7 +1,6 @@
 import { useState } from "react"
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query"
 import {
-  Box,
   Button,
   Card,
   Code,
@@ -11,7 +10,6 @@ import {
   IconButton,
   Input,
   Switch,
-  Table,
   Text,
   VStack,
 } from "@chakra-ui/react"
@@ -21,6 +19,7 @@ import type { ClientKeyView } from "../api/types"
 import ConfirmDialog from "../components/ConfirmDialog"
 import KeyRevealDialog from "../components/KeyRevealDialog"
 import { toaster } from "../components/ui/toaster"
+import { DataTable } from "../components/DataTable"
 
 function fmtTs(ts: number) {
   return ts ? new Date(ts * 1000).toLocaleString() : "never"
@@ -111,67 +110,59 @@ export default function MyKeysPage() {
           <Heading size="sm">Keys</Heading>
         </Card.Header>
         <Card.Body pt={3}>
-        <Box overflowX="auto">
           {isLoading ? (
             <Text>Loading…</Text>
           ) : (
-            <Table.Root size="sm">
-              <Table.Header>
-                <Table.Row>
-                  <Table.ColumnHeader>Key</Table.ColumnHeader>
-                  <Table.ColumnHeader>Alias</Table.ColumnHeader>
-                  <Table.ColumnHeader>Requests</Table.ColumnHeader>
-                  <Table.ColumnHeader>Last used</Table.ColumnHeader>
-                  <Table.ColumnHeader>Enabled</Table.ColumnHeader>
-                  <Table.ColumnHeader />
-                </Table.Row>
-              </Table.Header>
-              <Table.Body>
-                {keys.length === 0 && (
-                  <Table.Row>
-                    <Table.Cell colSpan={6} color="fg.muted" textAlign="center">
-                      No keys yet — generate one above.
-                    </Table.Cell>
-                  </Table.Row>
-                )}
-                {keys.map((k) => (
-                  <Table.Row key={k.id}>
-                    <Table.Cell fontFamily="mono" fontSize="xs">
+            <DataTable
+              rows={keys}
+              rowKey={(k) => String(k.id)}
+              empty="No keys yet — generate one above."
+              columns={[
+                {
+                  header: "Key",
+                  render: (k) => (
+                    <Text fontFamily="mono" fontSize="xs">
                       {k.keyHint}…
-                    </Table.Cell>
-                    <Table.Cell>{k.alias || "—"}</Table.Cell>
-                    <Table.Cell>{k.requestCount}</Table.Cell>
-                    <Table.Cell whiteSpace="nowrap">{fmtTs(k.lastUsedAt)}</Table.Cell>
-                    <Table.Cell>
-                      <Switch.Root
-                        checked={!k.disabled}
-                        onCheckedChange={(e) =>
-                          toggle.mutate({ id: k.id, disabled: !e.checked })
-                        }
-                      >
-                        <Switch.HiddenInput />
-                        <Switch.Control>
-                          <Switch.Thumb />
-                        </Switch.Control>
-                      </Switch.Root>
-                    </Table.Cell>
-                    <Table.Cell textAlign="end">
-                      <IconButton
-                        variant="ghost"
-                        size="xs"
-                        aria-label="delete key"
-                        colorPalette="red"
-                        onClick={() => setToDelete(k)}
-                      >
-                        <Trash2 />
-                      </IconButton>
-                    </Table.Cell>
-                  </Table.Row>
-                ))}
-              </Table.Body>
-            </Table.Root>
+                    </Text>
+                  ),
+                },
+                { header: "Alias", render: (k) => k.alias || "—" },
+                { header: "Requests", render: (k) => k.requestCount },
+                { header: "Last used", render: (k) => fmtTs(k.lastUsedAt) },
+                {
+                  header: "Enabled",
+                  render: (k) => (
+                    <Switch.Root
+                      size="sm"
+                      checked={!k.disabled}
+                      onCheckedChange={(e) =>
+                        toggle.mutate({ id: k.id, disabled: !e.checked })
+                      }
+                    >
+                      <Switch.HiddenInput />
+                      <Switch.Control>
+                        <Switch.Thumb />
+                      </Switch.Control>
+                    </Switch.Root>
+                  ),
+                },
+                {
+                  header: "",
+                  render: (k) => (
+                    <IconButton
+                      variant="ghost"
+                      size="xs"
+                      aria-label="delete key"
+                      colorPalette="red"
+                      onClick={() => setToDelete(k)}
+                    >
+                      <Trash2 />
+                    </IconButton>
+                  ),
+                },
+              ]}
+            />
           )}
-        </Box>
         </Card.Body>
       </Card.Root>
 

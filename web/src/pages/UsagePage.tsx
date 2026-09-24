@@ -17,6 +17,7 @@ import {
 } from "@chakra-ui/react"
 import { api } from "../api/client"
 import type { UsageActivityRow, UsageKeyRow, UsageModelRow, UsageTotals, UsageUserRow } from "../api/types"
+import { DataTable } from "../components/DataTable"
 import { useSession } from "../App"
 
 interface UsageSummary {
@@ -213,37 +214,26 @@ export default function UsagePage() {
             <Heading size="sm">Most used models</Heading>
           </Card.Header>
           <Card.Body pt={3}>
-            <Box overflowX="auto">
-            <Table.Root size="sm">
-              <Table.Header>
-                <Table.Row>
-                  <Table.ColumnHeader>Model</Table.ColumnHeader>
-                  <Table.ColumnHeader>Requests</Table.ColumnHeader>
-                  <Table.ColumnHeader>Tokens (in/out)</Table.ColumnHeader>
-                </Table.Row>
-              </Table.Header>
-              <Table.Body>
-                {(summary.data?.topModels ?? []).length === 0 && (
-                  <Table.Row>
-                    <Table.Cell colSpan={3} color="fg.muted" textAlign="center">
-                      No usage in this range
-                    </Table.Cell>
-                  </Table.Row>
-                )}
-                {(summary.data?.topModels ?? []).map((m) => (
-                  <Table.Row key={m.key}>
-                    <Table.Cell fontFamily="mono" fontSize="xs" truncate maxW="260px">
+            <DataTable
+              rows={summary.data?.topModels ?? []}
+              rowKey={(m) => m.key}
+              empty="No usage in this range"
+              columns={[
+                {
+                  header: "Model",
+                  render: (m) => (
+                    <Text fontFamily="mono" fontSize="xs" truncate maxW="260px">
                       {m.key}
-                    </Table.Cell>
-                    <Table.Cell>{m.requests}</Table.Cell>
-                    <Table.Cell>
-                      {fmtTokens(m.inputTokens)} / {fmtTokens(m.outputTokens)}
-                    </Table.Cell>
-                  </Table.Row>
-                ))}
-              </Table.Body>
-            </Table.Root>
-            </Box>
+                    </Text>
+                  ),
+                },
+                { header: "Requests", render: (m) => m.requests },
+                {
+                  header: "Tokens (in / out)",
+                  render: (m) => `${fmtTokens(m.inputTokens)} / ${fmtTokens(m.outputTokens)}`,
+                },
+              ]}
+            />
           </Card.Body>
         </Card.Root>
 
@@ -252,37 +242,22 @@ export default function UsagePage() {
             <Heading size="sm">Providers</Heading>
           </Card.Header>
           <Card.Body pt={3}>
-            <Box overflowX="auto">
-            <Table.Root size="sm">
-              <Table.Header>
-                <Table.Row>
-                  <Table.ColumnHeader>Provider</Table.ColumnHeader>
-                  <Table.ColumnHeader>Requests</Table.ColumnHeader>
-                  <Table.ColumnHeader>Tokens (in/out)</Table.ColumnHeader>
-                </Table.Row>
-              </Table.Header>
-              <Table.Body>
-                {(summary.data?.providers ?? []).length === 0 && (
-                  <Table.Row>
-                    <Table.Cell colSpan={3} color="fg.muted" textAlign="center">
-                      No usage in this range
-                    </Table.Cell>
-                  </Table.Row>
-                )}
-                {(summary.data?.providers ?? []).map((p) => (
-                  <Table.Row key={p.key}>
-                    <Table.Cell>
-                      <Badge variant="outline">{p.key}</Badge>
-                    </Table.Cell>
-                    <Table.Cell>{p.requests}</Table.Cell>
-                    <Table.Cell>
-                      {fmtTokens(p.inputTokens)} / {fmtTokens(p.outputTokens)}
-                    </Table.Cell>
-                  </Table.Row>
-                ))}
-              </Table.Body>
-            </Table.Root>
-            </Box>
+            <DataTable
+              rows={summary.data?.providers ?? []}
+              rowKey={(p) => p.key}
+              empty="No usage in this range"
+              columns={[
+                {
+                  header: "Provider",
+                  render: (p) => <Badge variant="outline">{p.key}</Badge>,
+                },
+                { header: "Requests", render: (p) => p.requests },
+                {
+                  header: "Tokens (in / out)",
+                  render: (p) => `${fmtTokens(p.inputTokens)} / ${fmtTokens(p.outputTokens)}`,
+                },
+              ]}
+            />
           </Card.Body>
         </Card.Root>
       </SimpleGrid>
@@ -331,37 +306,20 @@ export default function UsagePage() {
           <Heading size="sm">By API key</Heading>
         </Card.Header>
         <Card.Body pt={3}>
-          <Box overflowX="auto">
-          <Table.Root size="sm">
-            <Table.Header>
-              <Table.Row>
-                <Table.ColumnHeader>Key</Table.ColumnHeader>
-                {isSuperadmin && <Table.ColumnHeader>Owner</Table.ColumnHeader>}
-                <Table.ColumnHeader>Requests</Table.ColumnHeader>
-                <Table.ColumnHeader>Tokens (in/out)</Table.ColumnHeader>
-              </Table.Row>
-            </Table.Header>
-            <Table.Body>
-              {(keys.data?.keys ?? []).length === 0 && (
-                <Table.Row>
-                  <Table.Cell colSpan={4} color="fg.muted" textAlign="center">
-                    No usage in this range
-                  </Table.Cell>
-                </Table.Row>
-              )}
-              {(keys.data?.keys ?? []).map((k) => (
-                <Table.Row key={k.keyId}>
-                  <Table.Cell>{k.alias || `#${k.keyId}`}</Table.Cell>
-                  {isSuperadmin && <Table.Cell>{k.email}</Table.Cell>}
-                  <Table.Cell>{k.requests}</Table.Cell>
-                  <Table.Cell>
-                    {fmtTokens(k.inputTokens)} / {fmtTokens(k.outputTokens)}
-                  </Table.Cell>
-                </Table.Row>
-              ))}
-            </Table.Body>
-          </Table.Root>
-          </Box>
+          <DataTable
+            rows={keys.data?.keys ?? []}
+            rowKey={(k) => String(k.keyId)}
+            empty="No usage in this range"
+            columns={[
+              { header: "Key", render: (k) => k.alias || `#${k.keyId}` },
+              ...(isSuperadmin ? [{ header: "Owner", render: (k: UsageKeyRow) => k.email }] : []),
+              { header: "Requests", render: (k) => k.requests },
+              {
+                header: "Tokens (in / out)",
+                render: (k) => `${fmtTokens(k.inputTokens)} / ${fmtTokens(k.outputTokens)}`,
+              },
+            ]}
+          />
         </Card.Body>
       </Card.Root>
 
@@ -373,51 +331,38 @@ export default function UsagePage() {
           </Text>
         </Card.Header>
         <Card.Body pt={3}>
-          <Box overflowX="auto">
-          <Table.Root size="sm">
-            <Table.Header>
-              <Table.Row>
-                <Table.ColumnHeader>Time</Table.ColumnHeader>
-                {isSuperadmin && <Table.ColumnHeader>User</Table.ColumnHeader>}
-                <Table.ColumnHeader>Key</Table.ColumnHeader>
-                <Table.ColumnHeader>Provider</Table.ColumnHeader>
-                <Table.ColumnHeader>Model</Table.ColumnHeader>
-                <Table.ColumnHeader>Tokens (in/out)</Table.ColumnHeader>
-                <Table.ColumnHeader>Status</Table.ColumnHeader>
-                <Table.ColumnHeader>ms</Table.ColumnHeader>
-              </Table.Row>
-            </Table.Header>
-            <Table.Body>
-              {(activity.data?.activity ?? []).length === 0 && (
-                <Table.Row>
-                  <Table.Cell colSpan={8} color="fg.muted" textAlign="center">
-                    No requests yet
-                  </Table.Cell>
-                </Table.Row>
-              )}
-              {(activity.data?.activity ?? []).map((e, i) => (
-                <Table.Row key={`${e.ts}-${i}`}>
-                  <Table.Cell whiteSpace="nowrap">{fmtTs(e.ts)}</Table.Cell>
-                  {isSuperadmin && <Table.Cell>{e.email}</Table.Cell>}
-                  <Table.Cell>{e.alias || "—"}</Table.Cell>
-                  <Table.Cell>{e.provider}</Table.Cell>
-                  <Table.Cell fontFamily="mono" fontSize="xs" truncate maxW="220px">
+          <DataTable
+            rows={activity.data?.activity ?? []}
+            rowKey={(e, i) => `${e.ts}-${i}`}
+            empty="No requests yet"
+            columns={[
+              { header: "Time", render: (e) => fmtTs(e.ts) },
+              ...(isSuperadmin ? [{ header: "User", render: (e: UsageActivityRow) => e.email }] : []),
+              { header: "Key", render: (e) => e.alias || "—" },
+              { header: "Provider", render: (e) => e.provider },
+              {
+                header: "Model",
+                render: (e) => (
+                  <Text fontFamily="mono" fontSize="xs" truncate maxW="220px">
                     {e.model}
-                  </Table.Cell>
-                  <Table.Cell>
-                    {fmtTokens(e.inputTokens)} / {fmtTokens(e.outputTokens)}
-                  </Table.Cell>
-                  <Table.Cell>
-                    <Badge colorPalette={e.status === 200 ? "green" : "red"} variant="subtle">
-                      {e.status}
-                    </Badge>
-                  </Table.Cell>
-                  <Table.Cell>{e.durationMs}</Table.Cell>
-                </Table.Row>
-              ))}
-            </Table.Body>
-          </Table.Root>
-          </Box>
+                  </Text>
+                ),
+              },
+              {
+                header: "Tokens (in / out)",
+                render: (e) => `${fmtTokens(e.inputTokens)} / ${fmtTokens(e.outputTokens)}`,
+              },
+              {
+                header: "Status",
+                render: (e) => (
+                  <Badge colorPalette={e.status === 200 ? "green" : "red"} variant="subtle">
+                    {e.status}
+                  </Badge>
+                ),
+              },
+              { header: "ms", render: (e) => e.durationMs },
+            ]}
+          />
         </Card.Body>
       </Card.Root>
     </VStack>

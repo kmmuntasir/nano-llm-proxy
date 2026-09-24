@@ -2,7 +2,6 @@ import { useState } from "react"
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query"
 import {
   Badge,
-  Box,
   Button,
   Card,
   Code,
@@ -11,9 +10,9 @@ import {
   HStack,
   IconButton,
   Input,
+  SimpleGrid,
   NativeSelect,
   Switch,
-  Table,
   Text,
   VStack,
 } from "@chakra-ui/react"
@@ -258,13 +257,22 @@ function ResetPasswordModal({
   )
 }
 
-// UserKeysRow renders an expandable sub-row with the user's client keys.
-function UserKeysRow({ userID, onClose }: { userID: number; onClose: () => void }) {
+// UserKeysModal manages one user's client keys.
+function UserKeysModal({
+  userID,
+  open,
+  onOpenChange,
+}: {
+  userID: number
+  open: boolean
+  onOpenChange: (o: boolean) => void
+}) {
   const qc = useQueryClient()
   const [revealed, setRevealed] = useState<string | null>(null)
   const { data } = useQuery({
     queryKey: ["userKeys", userID],
     queryFn: () => api<{ keys: ClientKeyView[] }>(`/api/users/${userID}/keys`),
+    enabled: open,
   })
 
   const create = useMutation({
@@ -272,19 +280,21 @@ function UserKeysRow({ userID, onClose }: { userID: number; onClose: () => void 
     onSuccess: async (res) => {
       setRevealed(res.key)
       await qc.invalidateQueries({ queryKey: ["userKeys", userID] })
+      await qc.invalidateQueries({ queryKey: ["users"] })
       toaster.create({ title: "Key created", type: "success" })
     },
     onError: (e) =>
-      toaster.create({ title: e instanceof ApiError ? e.message : "Failed to create the key", type: "error" }),
+      toaster.create({ title: e instanceof ApiError ? e.message : "create failed", type: "error" }),
   })
   const remove = useMutation({
     mutationFn: (id: number) => del(`/api/users/${userID}/keys/${id}`),
     onSuccess: async () => {
       await qc.invalidateQueries({ queryKey: ["userKeys", userID] })
+      await qc.invalidateQueries({ queryKey: ["users"] })
       toaster.create({ title: "Key deleted", type: "success" })
     },
     onError: (e) =>
-      toaster.create({ title: e instanceof ApiError ? e.message : "Failed to delete the key", type: "error" }),
+      toaster.create({ title: e instanceof ApiError ? e.message : "delete failed", type: "error" }),
   })
   const toggle = useMutation({
     mutationFn: ({ id, disabled }: { id: number; disabled: boolean }) =>
@@ -294,60 +304,64 @@ function UserKeysRow({ userID, onClose }: { userID: number; onClose: () => void 
       toaster.create({ title: "Key updated", type: "success" })
     },
     onError: (e) =>
-      toaster.create({ title: e instanceof ApiError ? e.message : "Failed to update the key", type: "error" }),
+      toaster.create({ title: e instanceof ApiError ? e.message : "update failed", type: "error" }),
   })
 
   return (
-    <Table.Row bg="bg.subtle">
-      <Table.Cell colSpan={7}>
-        <HStack mb={2}>
-          <Button size="xs" colorPalette="blue" onClick={() => create.mutate()}>
-            <Plus /> New key
-          </Button>
-          <Button size="xs" variant="ghost" onClick={onClose}>
-            Close
-          </Button>
-        </HStack>
-        <VStack align="stretch" gap={1}>
-          {(data?.keys ?? []).map((k) => (
-            <HStack key={k.id} gap={3} fontSize="sm">
-              <Code fontFamily="mono">{k.keyHint}…</Code>
-              <Text>{k.alias || "—"}</Text>
-              <Text color="fg.muted">{k.requestCount} reqs</Text>
-              <Switch.Root
-                size="sm"
-                checked={!k.disabled}
-                onCheckedChange={(e) => toggle.mutate({ id: k.id, disabled: !e.checked })}
-              >
-                <Switch.HiddenInput />
-                <Switch.Control>
-                  <Switch.Thumb />
-                </Switch.Control>
-              </Switch.Root>
-              <IconButton
-                variant="ghost"
-                size="xs"
-                aria-label="delete key"
-                colorPalette="red"
-                onClick={() => remove.mutate(k.id)}
-              >
-                <Trash2 />
-              </IconButton>
-            </HStack>
-          ))}
-          {(data?.keys ?? []).length === 0 && (
-            <Text fontSize="sm" color="fg.muted">
-              No keys for this user yet.
-            </Text>
-          )}
-        </VStack>
-        <KeyRevealDialog plaintext={revealed} onClose={() => setRevealed(null)} />
-      </Table.Cell>
-    </Table.Row>
+    <Dialog.Root open={open} onOpenChange={(e) => onOpenChange(e.open)} size="lg">
+      <Dialog.Backdrop />
+      <Dialog.Positioner>
+        <Dialog.Content>
+          <Dialog.Header pb={2}>
+            <Dialog.Title>Client keys</Dialog.Title>
+          </Dialog.Header>
+          <Dialog.Body>
+            <Button size="xs" colorPalette="blue" mb={3} onClick={() => create.mutate()}>
+              <Plus /> New key
+            </Button>
+            <VStack align="stretch" gap={1}>
+              {(data?.keys ?? []).map((k) => (
+                <HStack key={k.id} gap={3} fontSize="sm">
+                  <Code fontFamily="mono">{k.keyHint}…</Code>
+                  <Text>{k.alias || "—"}</Text>
+                  <Text color="fg.muted">{k.requestCount} reqs</Text>
+                  <Switch.Root
+                    size="sm"
+                    checked={!k.disabled}
+                    onCheckedChange={(e) => toggle.mutate({ id: k.id, disabled: !e.checked })}
+                  >
+                    <Switch.HiddenInput />
+                    <Switch.Control>
+                      <Switch.Thumb />
+                    </Switch.Control>
+                  </Switch.Root>
+                  <IconButton
+                    variant="ghost"
+                    size="xs"
+                    aria-label="delete key"
+                    colorPalette="red"
+                    onClick={() => remove.mutate(k.id)}
+                  >
+                    <Trash2 />
+                  </IconButton>
+                </HStack>
+              ))}
+              {(data?.keys ?? []).length === 0 && (
+                <Text fontSize="sm" color="fg.muted">
+                  No keys for this user yet.
+                </Text>
+              )}
+            </VStack>
+            <KeyRevealDialog plaintext={revealed} onClose={() => setRevealed(null)} />
+          </Dialog.Body>
+          <Dialog.CloseTrigger />
+        </Dialog.Content>
+      </Dialog.Positioner>
+    </Dialog.Root>
   )
 }
 
-function UserRow({ u, isSelf }: { u: UserView; isSelf: boolean }) {
+function UserCard({ u, isSelf }: { u: UserView; isSelf: boolean }) {
   const qc = useQueryClient()
   const [toDelete, setToDelete] = useState(false)
   const [managingKeys, setManagingKeys] = useState(false)
@@ -360,7 +374,7 @@ function UserRow({ u, isSelf }: { u: UserView; isSelf: boolean }) {
       toaster.create({ title: "User updated", type: "success" })
     },
     onError: (e) =>
-      toaster.create({ title: e instanceof ApiError ? e.message : "Failed to update the user", type: "error" }),
+      toaster.create({ title: e instanceof ApiError ? e.message : "update failed", type: "error" }),
   })
 
   const removeU = useMutation({
@@ -371,56 +385,56 @@ function UserRow({ u, isSelf }: { u: UserView; isSelf: boolean }) {
       toaster.create({ title: "User deleted", type: "success" })
     },
     onError: (e) =>
-      toaster.create({ title: e instanceof ApiError ? e.message : "Failed to delete the user", type: "error" }),
+      toaster.create({ title: e instanceof ApiError ? e.message : "delete failed", type: "error" }),
   })
 
   return (
-    <Table.Row opacity={u.disabled ? 0.5 : 1}>
-      <Table.Cell>{u.name}</Table.Cell>
-      <Table.Cell>{u.email}</Table.Cell>
-      <Table.Cell>
-        <Badge variant={u.role === "superadmin" ? "solid" : "subtle"}>
-          {u.role === "superadmin" ? "Superadmin" : "User"}
-        </Badge>
-      </Table.Cell>
-      <Table.Cell>{u.keyCount ?? 0}</Table.Cell>
-      <Table.Cell>{fmtTs(u.createdAt)}</Table.Cell>
-      <Table.Cell>
-        {isSelf ? (
-          <Text fontSize="xs" color="fg.muted">
-            you
-          </Text>
-        ) : (
-          <Switch.Root
-            checked={!u.disabled}
-            onCheckedChange={(e) => patchU.mutate({ disabled: !e.checked })}
-          >
-            <Switch.HiddenInput />
-            <Switch.Control>
-              <Switch.Thumb />
-            </Switch.Control>
-          </Switch.Root>
-        )}
-      </Table.Cell>
-      <Table.Cell textAlign="end">
-        <HStack justify="end">
-          <Button variant="ghost" size="xs" onClick={() => setManagingKeys((v) => !v)}>
+    <Card.Root size="sm" opacity={u.disabled ? 0.5 : 1}>
+      <Card.Body gap={2} px={4} py={3}>
+        <HStack justify="space-between" flexWrap="wrap" gap={2}>
+          <VStack align="start" gap={0}>
+            <HStack gap={2}>
+              <Text fontWeight="medium">{u.name}</Text>
+              <Badge variant={u.role === "superadmin" ? "solid" : "subtle"}>
+                {u.role === "superadmin" ? "Superadmin" : "User"}
+              </Badge>
+            </HStack>
+            <Text fontSize="xs" color="fg.muted">
+              {u.email} · {u.keyCount ?? 0} keys · created {fmtTs(u.createdAt)}
+            </Text>
+          </VStack>
+          <HStack gap={2} flexWrap="wrap">
+            {isSelf ? (
+              <Text fontSize="xs" color="fg.muted">
+                you
+              </Text>
+            ) : (
+              <Switch.Root
+                size="sm"
+                checked={!u.disabled}
+                onCheckedChange={(e) => patchU.mutate({ disabled: !e.checked })}
+              >
+                <Switch.HiddenInput />
+                <Switch.Control>
+                  <Switch.Thumb />
+                </Switch.Control>
+              </Switch.Root>
+            )}
+          </HStack>
+        </HStack>
+        <HStack gap={1} flexWrap="wrap">
+          <Button variant="ghost" size="2xs" onClick={() => setManagingKeys(true)}>
             Keys
           </Button>
           {!isSelf && (
-            <Button
-              variant="ghost"
-              size="xs"
-              onClick={() => setResetting(true)}
-              aria-label={`reset password for ${u.email}`}
-            >
+            <Button variant="ghost" size="2xs" onClick={() => setResetting(true)}>
               <KeyRound /> Reset password
             </Button>
           )}
           {!isSelf && (
             <IconButton
               variant="ghost"
-              size="xs"
+              size="2xs"
               aria-label="delete user"
               colorPalette="red"
               onClick={() => setToDelete(true)}
@@ -429,8 +443,8 @@ function UserRow({ u, isSelf }: { u: UserView; isSelf: boolean }) {
             </IconButton>
           )}
         </HStack>
-      </Table.Cell>
-      {managingKeys && <UserKeysRow userID={u.id} onClose={() => setManagingKeys(false)} />}
+      </Card.Body>
+      <UserKeysModal userID={u.id} open={managingKeys} onOpenChange={setManagingKeys} />
       <ResetPasswordModal user={u} open={resetting} onOpenChange={setResetting} />
       <ConfirmDialog
         open={toDelete}
@@ -442,7 +456,7 @@ function UserRow({ u, isSelf }: { u: UserView; isSelf: boolean }) {
         busy={removeU.isPending}
         onConfirm={() => removeU.mutate()}
       />
-    </Table.Row>
+    </Card.Root>
   )
 }
 
@@ -456,42 +470,21 @@ export default function UsersPage() {
 
   return (
     <VStack align="stretch" gap={6}>
-      <HStack justify="space-between">
+      <HStack justify="space-between" flexWrap="wrap" gap={2}>
         <Heading size="lg">Users</Heading>
         <Button colorPalette="blue" size="sm" onClick={() => setAdding(true)}>
           <Plus /> Add user
         </Button>
       </HStack>
-      <Card.Root>
-        <Card.Body pt={3}>
-        <Box overflowX="auto">
-          {isLoading ? (
-            <Text>Loading…</Text>
-          ) : error ? (
-            <Text color="red.fg">Failed to load users</Text>
-          ) : (
-            <Table.Root size="sm">
-              <Table.Header>
-                <Table.Row>
-                  <Table.ColumnHeader>Name</Table.ColumnHeader>
-                  <Table.ColumnHeader>Email</Table.ColumnHeader>
-                  <Table.ColumnHeader>Role</Table.ColumnHeader>
-                  <Table.ColumnHeader>Keys</Table.ColumnHeader>
-                  <Table.ColumnHeader>Created</Table.ColumnHeader>
-                  <Table.ColumnHeader>Enabled</Table.ColumnHeader>
-                  <Table.ColumnHeader />
-                </Table.Row>
-              </Table.Header>
-              <Table.Body>
-                {(data?.users ?? []).map((u) => (
-                  <UserRow key={u.id} u={u} isSelf={u.id === me?.user.id} />
-                ))}
-              </Table.Body>
-            </Table.Root>
-          )}
-        </Box>
-        </Card.Body>
-      </Card.Root>
+      {isLoading && <Text>Loading…</Text>}
+      {error && <Text color="red.fg">Failed to load users</Text>}
+      {!isLoading && !error && (
+        <SimpleGrid columns={{ base: 1, md: 2, xl: 3 }} gap={4}>
+          {(data?.users ?? []).map((u) => (
+            <UserCard key={u.id} u={u} isSelf={u.id === me?.user.id} />
+          ))}
+        </SimpleGrid>
+      )}
       <AddUserModal open={adding} onOpenChange={setAdding} />
     </VStack>
   )

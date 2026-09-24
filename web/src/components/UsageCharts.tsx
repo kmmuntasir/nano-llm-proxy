@@ -6,7 +6,6 @@ import {
   Bar,
   BarChart,
   CartesianGrid,
-  Cell,
   Legend,
   Line,
   LineChart,
@@ -15,7 +14,7 @@ import {
   XAxis,
   YAxis,
 } from "recharts"
-import { Button, Card, HStack, SimpleGrid, Text, VStack } from "@chakra-ui/react"
+import { Box, Button, Card, HStack, SimpleGrid, Text, VStack } from "@chakra-ui/react"
 import { api } from "../api/client"
 import type { UsageModelRow } from "../api/types"
 import { useColorMode } from "./ui/color-mode"
@@ -229,23 +228,43 @@ export default function UsageCharts() {
             <Text fontSize="sm" color="fg.muted">
               Top models (total tokens)
             </Text>
-            <ResponsiveContainer width="100%" height={200}>
-              <BarChart
-                data={topModels.map((m) => ({ key: m.key, tokens: m.inputTokens + m.outputTokens }))}
-                layout="vertical"
-                margin={{ top: 4, right: 48, left: 8, bottom: 0 }}
-              >
-                <CartesianGrid stroke={c.grid} horizontal={false} />
-                <XAxis type="number" {...axis} tickFormatter={fmtCompact} />
-                <YAxis type="category" dataKey="key" width={200} tick={{ fill: c.tick, fontSize: 10 }} tickLine={false} axisLine={{ stroke: c.axis }} />
-                <Tooltip {...tooltipProps} cursor={{ fill: c.grid, fillOpacity: 0.3 }} />
-                <Bar dataKey="tokens" name="tokens" barSize={16} radius={[0, 4, 4, 0]}>
-                  {topModels.map((m) => (
-                    <Cell key={m.key} fill={c.s1} />
-                  ))}
-                </Bar>
-              </BarChart>
-            </ResponsiveContainer>
+            <VStack align="stretch" gap={2} pt={2}>
+              {topModels.length === 0 && (
+                <Text fontSize="sm" color="fg.muted">
+                  No usage yet
+                </Text>
+              )}
+              {topModels.map((m) => {
+                const total = m.inputTokens + m.outputTokens
+                const max = Math.max(...topModels.map((x) => x.inputTokens + x.outputTokens), 1)
+                return (
+                  <HStack key={m.key} gap={3} align="center">
+                    <Text
+                      fontFamily="mono"
+                      fontSize="xs"
+                      w="220px"
+                      flexShrink={0}
+                      truncate
+                      title={m.key}
+                    >
+                      {m.key}
+                    </Text>
+                    <Box flex={1} h="8px" bg="bg.subtle" rounded="full" overflow="hidden">
+                      <Box
+                        h="100%"
+                        w={`${max > 0 ? (total / max) * 100 : 0}%`}
+                        minW={total > 0 ? "4px" : undefined}
+                        bg={c.s1}
+                        rounded="full"
+                      />
+                    </Box>
+                    <Text fontSize="xs" color="fg.muted" w="64px" textAlign="right">
+                      {fmtCompact(total)} tok
+                    </Text>
+                  </HStack>
+                )
+              })}
+            </VStack>
           </VStack>
         </SimpleGrid>
         {(series.data?.points ?? []).length === 0 && (
