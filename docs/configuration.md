@@ -47,7 +47,7 @@ block is server-owned).
 | `anthropic.fallbackModel` | empty | Target for literal `claude-*` requests (background tasks clients self-issue) on `/v1/messages`; empty = pass through untouched |
 | `zen.userAgent` | `opencode/1.18.32` | Client user agent; must satisfy the upstream's 1.18.0 floor. Validated on save (HTTP 400) and at boot (fatal) |
 | `zen.injectTools` | true | Append the client-shape tool stubs to every zen request |
-| `zen.responsesModels` | empty | Model IDs served on the Responses surface. The surface selection also self-corrects: a signature 503 flips it for subsequent requests |
+| `zen.responsesModels` | — | *Removed.* Responses support is a per-model flag on `modelMeta` entries; toggle it per model on the Providers page (zen models). Sync preserves the flag across catalog refreshes |
 | `zen.freeOnly` | false | Restrict the zen catalog in `/v1/models` to models flagged as free upstream |
 | `zen.modelMeta` | empty | Per-model metadata (context window, max output, modalities, reasoning, description) shown in `/v1/models`; unknown models get conservative defaults |
 | `zen.modelMetaAutoSync` | false | Refresh `modelMeta` from models.dev once a day in the background |
@@ -76,7 +76,7 @@ ecosystem publishes. The sync (Settings → Zen → *Sync now*, or daily when
 - leaves manual entries for ids models.dev doesn't know untouched,
 - prunes meta whose model no longer appears in zen's live catalog (a
   re-added model comes back on the next sync),
-- never touches `zen.responsesModels`,
+- never touches the per-model `responsesApi` flags,
 - on any fetch/parse/persist failure changes nothing and records the error in
   the sync status shown in the GUI.
 

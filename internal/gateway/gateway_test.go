@@ -55,7 +55,9 @@ func testGateway(t *testing.T, handler http.Handler) *gateway {
 		Kilo: config.KiloProviderConfig{BaseURL: up.URL},
 	}
 	rs := testRuntime()
-	rs.Zen.ResponsesModels = []string{"muse-test-free"}
+	rs.Zen.ModelMeta["muse-test-free"] = settings.ModelMeta{
+		ContextWindow: 262144, MaxOutputTokens: 8192, ResponsesAPI: true,
+	}
 	kf := &config.KeyFile{
 		Zen:  []config.KeyFileEntry{{Label: "a", Key: "sk-zen-a"}, {Label: "b", Key: "sk-zen-b"}, {Label: "c", Key: "sk-zen-c"}},
 		Kilo: []config.KeyFileEntry{{Label: "a", Key: "sk-kilo-a"}, {Label: "b", Key: "sk-kilo-b"}},
@@ -294,7 +296,9 @@ func TestResponsesTranslationNonStream(t *testing.T) {
 		Kilo: config.KiloProviderConfig{BaseURL: up.URL},
 	}
 	rs := testRuntime()
-	rs.Zen.ResponsesModels = []string{"muse-test-free"}
+	rs.Zen.ModelMeta["muse-test-free"] = settings.ModelMeta{
+		ContextWindow: 262144, MaxOutputTokens: 8192, ResponsesAPI: true,
+	}
 	kf := &config.KeyFile{Zen: []config.KeyFileEntry{{Label: "a", Key: "sk-a"}}}
 	g := newGateway(cfg, rs, kf)
 
@@ -345,7 +349,9 @@ func TestResponsesEndpointAggregation(t *testing.T) {
 		Kilo: config.KiloProviderConfig{BaseURL: up.URL},
 	}
 	rs := testRuntime()
-	rs.Zen.ResponsesModels = []string{"muse-test-free"}
+	rs.Zen.ModelMeta["muse-test-free"] = settings.ModelMeta{
+		ContextWindow: 262144, MaxOutputTokens: 8192, ResponsesAPI: true,
+	}
 	kf := &config.KeyFile{Zen: []config.KeyFileEntry{{Label: "a", Key: "sk-a"}}}
 	g := newGateway(cfg, rs, kf)
 
@@ -400,7 +406,7 @@ func TestResponsesEndpointRejectsChatSurfaceModel(t *testing.T) {
 	kf := &config.KeyFile{Zen: []config.KeyFileEntry{{Label: "a", Key: "sk-a"}}}
 	g := newGateway(cfg, rs, kf)
 
-	// chat-surface zen model (not in ResponsesModels)
+	// chat-surface zen model (flag not set)
 	r := httptest.NewRequest("POST", "/v1/responses",
 		strings.NewReader(`{"model":"zen/mimo-test-free","input":"hi"}`))
 	rec := httptest.NewRecorder()
@@ -434,7 +440,9 @@ func TestResponsesToolCallTranslation(t *testing.T) {
 		Kilo: config.KiloProviderConfig{BaseURL: up.URL},
 	}
 	rs := testRuntime()
-	rs.Zen.ResponsesModels = []string{"muse-test-free"}
+	rs.Zen.ModelMeta["muse-test-free"] = settings.ModelMeta{
+		ContextWindow: 262144, MaxOutputTokens: 8192, ResponsesAPI: true,
+	}
 	kf := &config.KeyFile{Zen: []config.KeyFileEntry{{Label: "a", Key: "sk-a"}}}
 	g := newGateway(cfg, rs, kf)
 

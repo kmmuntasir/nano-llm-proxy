@@ -1,4 +1,4 @@
-import { Suspense, lazy, useEffect, useState } from "react"
+import { useEffect, useState } from "react"
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query"
 import {
   Button,
@@ -14,17 +14,17 @@ import {
 } from "@chakra-ui/react"
 import { RefreshCw } from "lucide-react"
 import { api, post, put, ApiError } from "../api/client"
-import type { ModelMetaSyncStatusView, RuntimeSettingsView } from "../api/types"
+import type {
+  ModelMetaSyncStatusView,
+  ModelMetaView,
+  RuntimeSettingsView,
+} from "../api/types"
 import { toaster } from "../components/ui/toaster"
 
-// CodeMirror is heavy — only the Settings page needs it, so it loads on
-// demand and stays out of the initial bundle everyone else downloads.
-const JsonEditor = lazy(() => import("../components/JsonEditor"))
-
-// Editing form for the runtime settings document. responsesModels and
-// modelMeta are kept as JSON text while editing (CodeMirror editors) and
-// parsed on save; everything else round-trips as-is. modelMetaSyncStatus is
-// server-owned and never sent.
+// Editing form for the runtime settings document. The Zen model catalog is
+// sync-managed (models.dev) and rendered as read-only model cards; the
+// Responses-API list is a picker over that catalog. Nothing here is edited
+// as raw JSON anymore. modelMetaSyncStatus is server-owned and never sent.
 
 interface SettingsForm {
   rotation: "priority" | "lru"
@@ -33,9 +33,9 @@ interface SettingsForm {
   userAgent: string
   injectTools: boolean
   zenFreeOnly: boolean
-  responsesModelsJSON: string
   modelMetaAutoSync: boolean
-  modelMetaJSON: string
+  /** sync-managed; the Models page reads it — saved back untouched */
+  modelMeta: Record<string, ModelMetaView>
   kiloFreeOnly: boolean
 }
 
@@ -47,9 +47,8 @@ function hydrate(s: RuntimeSettingsView): SettingsForm {
     userAgent: s.zen.userAgent,
     injectTools: s.zen.injectTools,
     zenFreeOnly: s.zen.freeOnly,
-    responsesModelsJSON: JSON.stringify(s.zen.responsesModels ?? [], null, 2),
     modelMetaAutoSync: s.zen.modelMetaAutoSync,
-    modelMetaJSON: JSON.stringify(s.zen.modelMeta ?? {}, null, 2),
+    modelMeta: { ...(s.zen.modelMeta ?? {}) },
     kiloFreeOnly: s.kilo.freeOnly,
   }
 }
@@ -57,22 +56,6 @@ function hydrate(s: RuntimeSettingsView): SettingsForm {
 function buildPayload(
   f: SettingsForm,
 ): { ok: true; value: RuntimeSettingsView } | { ok: false; error: string } {
-  let modelMeta: RuntimeSettingsView["zen"]["modelMeta"]
-  let responsesModels: string[]
-  try {
-    modelMeta = JSON.parse(f.modelMetaJSON || "{}")
-  } catch (e) {
-    return { ok: false, error: `modelMeta is not valid JSON: ${e instanceof Error ? e.message : "parse error"}` }
-  }
-  try {
-    const parsed = JSON.parse(f.responsesModelsJSON || "[]")
-    if (!Array.isArray(parsed) || parsed.some((m) => typeof m !== "string")) {
-      return { ok: false, error: "responsesModels must be a JSON array of strings" }
-    }
-    responsesModels = parsed
-  } catch (e) {
-    return { ok: false, error: `responsesModels is not valid JSON: ${e instanceof Error ? e.message : "parse error"}` }
-  }
   return {
     ok: true,
     value: {
@@ -82,9 +65,8 @@ function buildPayload(
       zen: {
         userAgent: f.userAgent,
         injectTools: f.injectTools,
-        responsesModels,
         freeOnly: f.zenFreeOnly,
-        modelMeta,
+        modelMeta: f.modelMeta,
         modelMetaAutoSync: f.modelMetaAutoSync,
       },
       kilo: { freeOnly: f.kiloFreeOnly },
@@ -109,7 +91,7 @@ function SyncCard({ status }: { status?: ModelMetaSyncStatusView }) {
       }
     },
     onError: (e) =>
-      toaster.create({ title: e instanceof ApiError ? e.message : "Failed to run the sync", type: "error" }),
+      toaster.create({ title: e instanceof ApiError ? e.message : "sync failed", type: "error" }),
   })
 
   return (
@@ -360,35 +342,7 @@ export default function SettingsPage() {
                 <Switch.Label>Auto-sync modelMeta daily</Switch.Label>
               </Switch.Root>
             </HStack>
-            <Field.Root>
-              <Field.Label>Responses-API models (JSON array)</Field.Label>
-              <Text fontSize="xs" color="fg.muted" mb={1}>
-                Which zen models speak /v1/responses.
-              </Text>
-              <Suspense fallback={<Text fontSize="sm" color="fg.muted">Loading editor…</Text>}>
-                <JsonEditor
-                  value={form.responsesModelsJSON}
-                  onChange={(v) => set({ responsesModelsJSON: v })}
-                  label="Zen Responses-API models"
-                  height="160px"
-                />
-              </Suspense>
-            </Field.Root>
-            <Field.Root>
-              <Field.Label>modelMeta (JSON)</Field.Label>
-              <Text fontSize="xs" color="fg.muted" mb={1}>
-                Per-model corrections over the catalog defaults; validated on
-                save.
-              </Text>
-              <Suspense fallback={<Text fontSize="sm" color="fg.muted">Loading editor…</Text>}>
-                <JsonEditor
-                  value={form.modelMetaJSON}
-                  onChange={(v) => set({ modelMetaJSON: v })}
-                  label="Zen modelMeta"
-                  height="260px"
-                />
-              </Suspense>
-            </Field.Root>
+
           </VStack>
         </Card.Body>
       </Card.Root>
@@ -425,6 +379,7 @@ export default function SettingsPage() {
       >
         Save settings
       </Button>
+
     </VStack>
   )
 }

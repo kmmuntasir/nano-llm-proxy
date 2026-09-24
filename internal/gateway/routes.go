@@ -46,10 +46,12 @@ func (g *gateway) RegisterRoutes(mux *http.ServeMux, webFS fs.FS) {
 	mux.HandleFunc("PATCH /api/users/{id}/keys/{keyId}", g.requireSession(g.requireSuperadmin(g.handlePatchUserKey)))
 	mux.HandleFunc("DELETE /api/users/{id}/keys/{keyId}", g.requireSession(g.requireSuperadmin(g.handleDeleteUserKey)))
 
+	mux.HandleFunc("GET /api/models", g.requireSession(g.handleAllModels))
 	mux.HandleFunc("GET /api/providers", g.requireSession(g.requireSuperadmin(g.handleListProviders)))
 	mux.HandleFunc("POST /api/providers", g.requireSession(g.requireSuperadmin(g.handleCreateProvider)))
 	mux.HandleFunc("PATCH /api/providers/{id}", g.requireSession(g.requireSuperadmin(g.handlePatchProvider)))
 	mux.HandleFunc("DELETE /api/providers/{id}", g.requireSession(g.requireSuperadmin(g.handleDeleteProvider)))
+	mux.HandleFunc("GET /api/providers/{id}/models", g.requireSession(g.requireSuperadmin(g.handleProviderModels)))
 	mux.HandleFunc("POST /api/providers/{id}/keys", g.requireSession(g.requireSuperadmin(g.handleAddProviderKey)))
 	mux.HandleFunc("PATCH /api/providers/{id}/keys/{keyId}", g.requireSession(g.requireSuperadmin(g.handlePatchProviderKey)))
 	mux.HandleFunc("DELETE /api/providers/{id}/keys/{keyId}", g.requireSession(g.requireSuperadmin(g.handleDeleteProviderKey)))
@@ -57,6 +59,7 @@ func (g *gateway) RegisterRoutes(mux *http.ServeMux, webFS fs.FS) {
 	mux.HandleFunc("GET /api/settings", g.requireSession(g.requireSuperadmin(g.handleGetSettings)))
 	mux.HandleFunc("PUT /api/settings", g.requireSession(g.requireSuperadmin(g.handlePutSettings)))
 	mux.HandleFunc("POST /api/settings/model-meta/sync", g.requireSession(g.requireSuperadmin(g.handleSyncModelMeta)))
+	mux.HandleFunc("PUT /api/settings/responses-api", g.requireSession(g.requireSuperadmin(g.handleSetResponsesAPI)))
 
 	mux.HandleFunc("GET /api/dashboard", g.requireSession(g.handleDashboard))
 
@@ -206,7 +209,7 @@ func (g *gateway) fetchUpstreamModels(ref providerRef) ([]any, error) {
 			entry["context_window"] = ctx
 			entry["max_output_tokens"] = mo
 			entry["reasoning"] = meta.Reasoning
-			entry["responses_api"] = meta.ResponsesAPI || slices.Contains(g.rs().Zen.ResponsesModels, id)
+			entry["responses_api"] = meta.ResponsesAPI
 			if len(meta.InputModalities) > 0 {
 				entry["input_modalities"] = meta.InputModalities
 			}
@@ -268,9 +271,9 @@ func (g *gateway) fetchUpstreamModels(ref providerRef) ([]any, error) {
 	return out, nil
 }
 
-// handleModels serves the merged, prefixed catalog (10-minute cache,
-// invalidated by provider CRUD and settings writes).
-func (g *gateway) handleModels(w http.ResponseWriter, r *http.Request) {
+// mergedCatalog returns the cached merged catalog body, refreshing it when
+// older than 10 minutes. ok=false means every provider fetch failed.
+func (g *gateway) mergedCatalog() ([]byte, bool) {
 	g.catMu.Lock()
 	defer g.catMu.Unlock()
 	if g.catalog == nil || time.Since(g.catalogAt) > 10*time.Minute {
@@ -286,15 +289,36 @@ func (g *gateway) handleModels(w http.ResponseWriter, r *http.Request) {
 			merged = append(merged, models...)
 		}
 		if len(merged) == 0 && len(failed) > 0 {
-			writeErr(w, http.StatusBadGateway, "Catalog fetch failed: "+strings.Join(failed, " "))
-			return
+			return nil, false
 		}
 		body, _ := json.Marshal(map[string]any{"object": "list", "data": merged})
 		g.catalog = body
 		g.catalogAt = time.Now()
 	}
+	return g.catalog, true
+}
+
+// handleModels serves the merged, prefixed catalog to API clients.
+func (g *gateway) handleModels(w http.ResponseWriter, r *http.Request) {
+	body, ok := g.mergedCatalog()
+	if !ok {
+		writeErr(w, http.StatusBadGateway, "Catalog fetch failed: all providers unavailable")
+		return
+	}
 	w.Header().Set("Content-Type", "application/json")
-	w.Write(g.catalog)
+	w.Write(body)
+}
+
+// handleAllModels serves the same merged catalog to the admin GUI's Models
+// page (session auth instead of a client key).
+func (g *gateway) handleAllModels(w http.ResponseWriter, r *http.Request) {
+	body, ok := g.mergedCatalog()
+	if !ok {
+		apiErr(w, http.StatusBadGateway, "Catalog fetch failed: all providers unavailable")
+		return
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.Write(body)
 }
 
 func hasFreeSuffix(id string) bool {

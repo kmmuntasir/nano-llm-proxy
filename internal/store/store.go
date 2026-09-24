@@ -664,6 +664,15 @@ func scanProvider(row interface{ Scan(...any) error }) (*Provider, error) {
 	return p, nil
 }
 
+// GetProvider returns one provider by id, or (nil, nil) when absent.
+func (s *Store) GetProvider(id int64) (*Provider, error) {
+	p, err := scanProvider(s.db.QueryRow(`SELECT `+providerCols+` FROM providers WHERE id=?`, id))
+	if errors.Is(err, sql.ErrNoRows) {
+		return nil, nil
+	}
+	return p, err
+}
+
 func (s *Store) ListProviders() ([]Provider, error) {
 	rows, err := s.db.Query(`SELECT ` + providerCols + ` FROM providers ORDER BY sort_order, id`)
 	if err != nil {
