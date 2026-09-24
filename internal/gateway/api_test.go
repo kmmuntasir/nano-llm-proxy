@@ -515,7 +515,6 @@ func TestSettingsPutValidation(t *testing.T) {
 		`{"retry":{"maxRequestsPerKeyPerDay":-5}}`,
 		`{"anthropic":{"fallbackModel":"noslash"}}`,
 		`{"zen":{"userAgent":"opencode/1.0.0"}}`,
-		`{"zen":{"responsesModels":[" "]}}`,
 		`{"zen":{"modelMeta":{"m":{"contextWindow":0}}}}`,
 	} {
 		rec := httptest.NewRecorder()
@@ -729,12 +728,12 @@ func TestSyncModelMetaMerge(t *testing.T) {
 	g, st := testStoreGateway(t, zen.URL)
 
 	// pre-seed: a stale entry (dead id -> pruned), a manual entry for a live
-	// model models.dev doesn't know (survives), and a responsesModels list
-	// (never auto-touched)
+	// model models.dev doesn't know (survives), and a responses flag on the
+	// glm-5 entry (survives the catalog overwrite)
 	if err := st.UpdateSettings(func(rs *settings.RuntimeSettings) *settings.RuntimeSettings {
 		rs.Zen.ModelMeta["stale-model"] = settings.ModelMeta{ContextWindow: 1, MaxOutputTokens: 1}
 		rs.Zen.ModelMeta["manual-only"] = settings.ModelMeta{ContextWindow: 5000, MaxOutputTokens: 100}
-		rs.Zen.ResponsesModels = []string{"glm-5"}
+		rs.Zen.ModelMeta["glm-5"] = settings.ModelMeta{ContextWindow: 9, MaxOutputTokens: 9, ResponsesAPI: true}
 		return rs
 	}); err != nil {
 		t.Fatalf("seed: %v", err)
@@ -744,8 +743,8 @@ func TestSyncModelMetaMerge(t *testing.T) {
 	if !status.OK {
 		t.Fatalf("sync not ok: %+v", status)
 	}
-	if status.Added != 1 || status.Updated != 0 || status.Pruned != 1 {
-		t.Fatalf("counts = %+v, want added=1 updated=0 pruned=1", status)
+	if status.Added != 0 || status.Updated != 1 || status.Pruned != 1 {
+		t.Fatalf("counts = %+v, want added=0 updated=1 pruned=1", status)
 	}
 
 	got, err := st.LoadRuntimeSettings()
@@ -765,8 +764,8 @@ func TestSyncModelMetaMerge(t *testing.T) {
 	if _, exists := got.Zen.ModelMeta["stale-model"]; exists {
 		t.Fatal("stale-model should have been pruned")
 	}
-	if len(got.Zen.ResponsesModels) != 1 || got.Zen.ResponsesModels[0] != "glm-5" {
-		t.Fatalf("responsesModels was auto-touched: %v", got.Zen.ResponsesModels)
+	if !got.Zen.ModelMeta["glm-5"].ResponsesAPI {
+		t.Fatal("responses flag lost after catalog overwrite")
 	}
 	// the in-memory snapshot the hot path reads must reflect the sync
 	if g.rs().Zen.ModelMeta["glm-5"].ContextWindow != 200000 {

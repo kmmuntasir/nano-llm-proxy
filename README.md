@@ -199,10 +199,11 @@ Served by the same binary at `/`.
 | Page | Who | What |
 | --- | --- | --- |
 | Dashboard | everyone | Uptime, 24h requests/tokens/errors, usage charts (Today / 7d / 30d: requests, tokens, providers, top models), recent requests |
+| Models | everyone | Every live model across providers — search, and filter by provider, context window, reasoning, Responses API, and input modalities |
 | Usage | everyone | Date-range usage: totals, top models, providers, per-key (admins also get per-user), recent activity — scoped to the signed-in user |
 | Profile | everyone | Account info, self-service password reset, own client keys (create/disable/delete) |
 | Users | superadmin | User CRUD, roles, password resets, per-user key management |
-| Providers | superadmin | Add generic providers, edit base URLs, add/remove/toggle upstream keys |
+| Providers | superadmin | Add generic providers, edit base URLs, add/remove/toggle upstream keys, browse each provider's live model catalog (zen cards carry a Responses-API toggle) |
 | Settings | superadmin | Rotation, retries/cooldowns, daily cap, Claude fallback, adapter knobs, Zen model-catalog sync |
 
 First boot requires `ADMIN_EMAIL` and `ADMIN_PASSWORD` (environment variables

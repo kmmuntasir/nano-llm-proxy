@@ -6,6 +6,7 @@ import {
   Card,
   Code,
   Collapsible,
+  Dialog,
   Field,
   Heading,
   HStack,
@@ -16,8 +17,9 @@ import {
   Text,
   VStack,
 } from "@chakra-ui/react"
-import { ChevronDown, ChevronUp, Plus, Trash2 } from "lucide-react"
-import { api, del, patch, post, ApiError } from "../api/client"
+import { ChevronDown, ChevronUp, List, Plus, Trash2 } from "lucide-react"
+import { api, del, patch, post, put, ApiError } from "../api/client"
+import ModelCard from "../components/ModelCard"
 import type { ProviderKeyView, ProviderView } from "../api/types"
 import ConfirmDialog from "../components/ConfirmDialog"
 import StatusBadge from "../components/StatusBadge"
@@ -180,12 +182,145 @@ function ProviderKeyRow({ provider, k }: { provider: ProviderView; k: ProviderKe
   )
 }
 
+interface ProviderCatalogEntry {
+  id: string
+  owned_by?: string
+  context_window?: number
+  max_output_tokens?: number
+  input_modalities?: string[]
+  reasoning?: boolean
+  responses_api?: boolean
+  free?: boolean
+  description?: string
+}
+
+// ModelsListModal shows the provider's live catalog as model cards. For the
+// zen builtin, each card carries a Responses-API toggle (written straight to
+// the per-model flag in settings); generic providers are view-only.
+function ModelsListModal({
+  provider,
+  open,
+  onOpenChange,
+}: {
+  provider: ProviderView
+  open: boolean
+  onOpenChange: (o: boolean) => void
+}) {
+  const qc = useQueryClient()
+  const isZen = provider.name === "zen"
+  const [filter, setFilter] = useState("")
+  const { data, isLoading, error } = useQuery({
+    queryKey: ["providerModels", provider.id],
+    queryFn: () => api<{ models: ProviderCatalogEntry[] }>(`/api/providers/${provider.id}/models`),
+    enabled: open,
+  })
+
+  const toggle = useMutation({
+    mutationFn: ({ model, responsesApi }: { model: string; responsesApi: boolean }) =>
+      put("/api/settings/responses-api", { model, responsesApi }),
+    onSuccess: async () => {
+      await qc.invalidateQueries({ queryKey: ["providerModels", provider.id] })
+      await qc.invalidateQueries({ queryKey: ["settings"] })
+      await qc.invalidateQueries({ queryKey: ["models"] })
+      toaster.create({ title: "Responses API updated", type: "success" })
+    },
+    onError: (e) =>
+      toaster.create({ title: e instanceof ApiError ? e.message : "update failed", type: "error" }),
+  })
+
+  const models = data?.models ?? []
+  const visible = models.filter(
+    (m) => filter === "" || m.id.toLowerCase().includes(filter.toLowerCase()),
+  )
+  const bare = (id: string) => id.replace(/^[^/]+\//, "")
+
+  return (
+    <Dialog.Root open={open} onOpenChange={(e: { open: boolean }) => onOpenChange(e.open)} size="xl">
+      <Dialog.Backdrop />
+      <Dialog.Positioner>
+        <Dialog.Content>
+          <Dialog.Header pb={2}>
+            <Dialog.Title>Models — {provider.name}</Dialog.Title>
+          </Dialog.Header>
+          <Dialog.Body px={6}>
+            <HStack mb={4} flexWrap="wrap" gap={2} align="center">
+              <Input
+                placeholder="Search models…"
+                flex={1}
+                minW="200px"
+                value={filter}
+                onChange={(e) => setFilter(e.target.value)}
+              />
+              <Text fontSize="xs" color="fg.muted" whiteSpace="nowrap">
+                {models.length} models
+              </Text>
+            </HStack>
+            {isLoading && <Text fontSize="sm">Fetching catalog…</Text>}
+            {error && (
+              <Text color="red.fg" fontSize="sm">
+                Failed to fetch the catalog from upstream.
+              </Text>
+            )}
+            <VStack align="stretch" gap={3} maxH="58vh" overflowY="auto" pr={1}>
+              {visible.map((m) => {
+                const name = bare(m.id)
+                return (
+                  <ModelCard
+                    key={m.id}
+                    name={name}
+                    provider={provider.name}
+                    description={m.description}
+                    contextWindow={m.context_window}
+                    maxOutputTokens={m.max_output_tokens}
+                    inputModalities={m.input_modalities}
+                    reasoning={m.reasoning}
+                    responsesApi={m.responses_api}
+                    free={m.free}
+                    footer={
+                      isZen ? (
+                        <HStack justify="space-between" pt={1}>
+                          <Text fontSize="xs" color="fg.muted">
+                            Serve on /v1/responses
+                          </Text>
+                          <Switch.Root
+                            size="sm"
+                            checked={!!m.responses_api}
+                            onCheckedChange={(e) =>
+                              toggle.mutate({ model: name, responsesApi: e.checked })
+                            }
+                          >
+                            <Switch.HiddenInput />
+                            <Switch.Control>
+                              <Switch.Thumb />
+                            </Switch.Control>
+                          </Switch.Root>
+                        </HStack>
+                      ) : undefined
+                    }
+                  />
+                )
+              })}
+            </VStack>
+          </Dialog.Body>
+          <Dialog.Footer>
+            <Dialog.ActionTrigger asChild>
+              <Button type="button">Close</Button>
+            </Dialog.ActionTrigger>
+          </Dialog.Footer>
+          <Dialog.CloseTrigger />
+        </Dialog.Content>
+      </Dialog.Positioner>
+    </Dialog.Root>
+  )
+}
+
 function ProviderCard({ p }: { p: ProviderView }) {
   const qc = useQueryClient()
   const [newKey, setNewKey] = useState("")
   const [toDelete, setToDelete] = useState(false)
   const [editURL, setEditURL] = useState<string | null>(null)
   const [keysOpen, setKeysOpen] = useState(false)
+  const [modelsOpen, setModelsOpen] = useState(false)
   const invalidate = () => void qc.invalidateQueries({ queryKey: ["providers"] })
 
   const patchP = useMutation({
@@ -234,6 +369,14 @@ function ProviderCard({ p }: { p: ProviderView }) {
             </Badge>
           </HStack>
           <HStack gap={3}>
+            <Button
+              variant="ghost"
+              size="xs"
+              onClick={() => setModelsOpen(true)}
+              aria-label={`view models for ${p.name}`}
+            >
+              <List /> Models
+            </Button>
             {!p.builtin && (
               <IconButton
                 variant="ghost"
@@ -351,6 +494,7 @@ function ProviderCard({ p }: { p: ProviderView }) {
         </Collapsible.Root>
       </Card.Body>
 
+      <ModelsListModal provider={p} open={modelsOpen} onOpenChange={setModelsOpen} />
       <ConfirmDialog
         open={toDelete}
         onOpenChange={() => setToDelete(false)}

@@ -1,8 +1,10 @@
 package gateway
 
 import (
-	"github.com/kmmuntasir/nano-llm-proxy/internal/settings"
 	"net/http"
+	"strings"
+
+	"github.com/kmmuntasir/nano-llm-proxy/internal/settings"
 )
 
 // handleGetSettings serves the effective runtime settings document
@@ -52,10 +54,53 @@ func (g *gateway) handlePutSettings(w http.ResponseWriter, r *http.Request) {
 	}) {
 		return
 	}
-	// responsesModels edits invalidate the learned chat/responses surface
-	// flips so the new list takes full effect immediately
+	// modelMeta edits invalidate the learned chat/responses surface flips so
+	// the new flags take full effect immediately
 	g.mu.Lock()
 	g.surfaceOver = map[string]string{}
 	g.mu.Unlock()
 	writeJSON(w, http.StatusOK, map[string]any{"ok": true, "settings": rs})
+}
+
+// handleSetResponsesAPI serves PUT /api/settings/responses-api — flips the
+// per-model responsesApi flag on one catalog model. The sync preserves the
+// flag across catalog refreshes; the learned-surface cache is reset so the
+// new routing takes effect immediately.
+func (g *gateway) handleSetResponsesAPI(w http.ResponseWriter, r *http.Request) {
+	actor := contextUser(r)
+	var req struct {
+		Model        string `json:"model"`
+		ResponsesAPI bool   `json:"responsesApi"`
+	}
+	if !readJSON(w, r, &req) {
+		return
+	}
+	req.Model = strings.TrimSpace(req.Model)
+	if req.Model == "" {
+		apiErr(w, http.StatusBadRequest, "Model is required")
+		return
+	}
+	if !g.applyMutation(w, actor, "settings.responses.update", "", func() error {
+		return g.store.UpdateSettings(func(rs *settings.RuntimeSettings) *settings.RuntimeSettings {
+			meta := rs.Zen.ModelMeta
+			if meta == nil {
+				meta = map[string]settings.ModelMeta{}
+			}
+			entry, ok := meta[req.Model]
+			if !ok {
+				// not in the catalog yet — start from the enrichment defaults
+				entry = settings.ModelMeta{ContextWindow: 262144, MaxOutputTokens: 8192, Reasoning: true}
+			}
+			entry.ResponsesAPI = req.ResponsesAPI
+			meta[req.Model] = entry
+			rs.Zen.ModelMeta = meta
+			return rs
+		})
+	}) {
+		return
+	}
+	g.mu.Lock()
+	g.surfaceOver = map[string]string{}
+	g.mu.Unlock()
+	writeJSON(w, http.StatusOK, map[string]any{"ok": true})
 }

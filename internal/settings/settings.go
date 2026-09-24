@@ -74,7 +74,6 @@ type ModelMetaSyncStatus struct {
 type ZenSettings struct {
 	UserAgent           string               `json:"userAgent"`
 	InjectTools         bool                 `json:"injectTools"`
-	ResponsesModels     []string             `json:"responsesModels"`
 	FreeOnly            bool                 `json:"freeOnly"`
 	ModelMeta           map[string]ModelMeta `json:"modelMeta,omitempty"`
 	ModelMetaAutoSync   bool                 `json:"modelMetaAutoSync"`
@@ -105,10 +104,9 @@ func DefaultRuntimeSettings() *RuntimeSettings {
 		},
 		Anthropic: AnthropicSettings{},
 		Zen: ZenSettings{
-			UserAgent:       "opencode/1.18.32",
-			InjectTools:     true,
-			ResponsesModels: []string{},
-			ModelMeta:       map[string]ModelMeta{},
+			UserAgent:   "opencode/1.18.32",
+			InjectTools: true,
+			ModelMeta:   map[string]ModelMeta{},
 		},
 		Kilo: KiloSettings{},
 	}
@@ -126,9 +124,6 @@ func (rs *RuntimeSettings) ApplyDefaults() *RuntimeSettings {
 	}
 	if rs.Retry.MaxKeysPerRequest <= 0 {
 		rs.Retry.MaxKeysPerRequest = 3
-	}
-	if rs.Zen.ResponsesModels == nil {
-		rs.Zen.ResponsesModels = []string{}
 	}
 	if rs.Zen.UserAgent == "" {
 		rs.Zen.UserAgent = "opencode/1.18.32"
@@ -163,11 +158,6 @@ func (rs *RuntimeSettings) Validate() string {
 	if !UAVersionOK(rs.Zen.UserAgent) {
 		return fmt.Sprintf("Zen user agent %q fails the 1.18.0 floor — the whole pool would get 426s", rs.Zen.UserAgent)
 	}
-	for _, m := range rs.Zen.ResponsesModels {
-		if strings.TrimSpace(m) == "" {
-			return "Responses-API model names must not be empty"
-		}
-	}
 	for id, meta := range rs.Zen.ModelMeta {
 		if meta.ContextWindow <= 0 {
 			return fmt.Sprintf("Model meta for %q: context window must be a positive integer", id)
@@ -183,7 +173,6 @@ func (rs *RuntimeSettings) Validate() string {
 // from a snapshot without racing the next reader.
 func (rs *RuntimeSettings) Clone() *RuntimeSettings {
 	out := *rs
-	out.Zen.ResponsesModels = append([]string(nil), rs.Zen.ResponsesModels...)
 	out.Zen.ModelMeta = make(map[string]ModelMeta, len(rs.Zen.ModelMeta))
 	maps.Copy(out.Zen.ModelMeta, rs.Zen.ModelMeta)
 	return &out

@@ -24,8 +24,9 @@ import (
 //   - meta ids no longer live on zen     -> pruned (they come back on their
 //     own if zen re-adds the model)
 //
-// zen.responsesModels is never auto-touched; models.dev has no such concept.
-// Any fetch/parse/persist failure leaves the existing meta exactly as it was.
+// The per-model responsesApi flag is never auto-touched — models.dev has no
+// such concept, so sync overwrites preserve whatever the admin toggled. Any
+// fetch/parse/persist failure leaves the existing meta exactly as it was.
 
 const defaultModelsDevURL = "https://models.dev/api.json"
 
@@ -188,8 +189,10 @@ func (g *gateway) mergeModelMeta(ctx context.Context, models map[string]modelsDe
 		if !ok || dev.Limit.Context <= 0 || dev.Limit.Output <= 0 {
 			continue // unknown or unusable — keep whatever the admin curated
 		}
-		if _, exists := current.Zen.ModelMeta[id]; exists {
+		responses := false
+		if old, exists := current.Zen.ModelMeta[id]; exists {
 			st.Updated++
+			responses = old.ResponsesAPI // admin toggles survive catalog refreshes
 		} else {
 			st.Added++
 		}
@@ -197,6 +200,7 @@ func (g *gateway) mergeModelMeta(ctx context.Context, models map[string]modelsDe
 			ContextWindow:   dev.Limit.Context,
 			MaxOutputTokens: dev.Limit.Output,
 			Reasoning:       dev.Reasoning,
+			ResponsesAPI:    responses,
 			InputModalities: dev.Modalities.Input,
 			Description:     dev.Description,
 		}

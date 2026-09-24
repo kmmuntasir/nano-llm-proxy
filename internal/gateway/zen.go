@@ -32,7 +32,7 @@ func (g *gateway) surfaceFor(model string) string {
 	if s, ok := g.surfaceOver[model]; ok {
 		return s
 	}
-	if slices.Contains(g.rs().Zen.ResponsesModels, model) {
+	if meta, ok := g.rs().Zen.ModelMeta[model]; ok && meta.ResponsesAPI {
 		return "responses"
 	}
 	return "chat"

@@ -161,7 +161,6 @@ export interface RetrySettingsView {
 export interface ZenSettingsView {
   userAgent: string
   injectTools: boolean
-  responsesModels: string[]
   freeOnly: boolean
   modelMeta?: Record<string, ModelMetaView>
   modelMetaAutoSync: boolean

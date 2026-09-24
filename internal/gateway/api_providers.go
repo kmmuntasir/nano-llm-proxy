@@ -109,7 +109,7 @@ func (g *gateway) handleCreateProvider(w http.ResponseWriter, r *http.Request) {
 	name := req.Name
 	baseURL := req.BaseURL
 	if !providerNameRe.MatchString(name) {
-		apiErr(w, http.StatusBadRequest, "store.Provider name must be 1-32 characters of lowercase letters, digits, or dashes (it becomes the model prefix)")
+		apiErr(w, http.StatusBadRequest, "Provider name must be 1-32 characters of lowercase letters, digits, or dashes (it becomes the model prefix)")
 		return
 	}
 	if name == "zen" || name == "kilo" {
@@ -277,4 +277,34 @@ func (g *gateway) handleDeleteProviderKey(w http.ResponseWriter, r *http.Request
 		return
 	}
 	writeJSON(w, http.StatusOK, map[string]any{"ok": true})
+}
+
+// handleProviderModels serves GET /api/providers/{id}/models — the live,
+// enriched catalog of one provider, fetched on demand for the admin GUI.
+// Disabled providers are rejected: their pools are not in the registry.
+func (g *gateway) handleProviderModels(w http.ResponseWriter, r *http.Request) {
+	id, ok := pathID(w, r, "id")
+	if !ok {
+		return
+	}
+	p, err := g.store.GetProvider(id)
+	if err != nil {
+		apiErr(w, http.StatusInternalServerError, err.Error())
+		return
+	}
+	if p == nil {
+		apiErr(w, http.StatusNotFound, "That provider no longer exists (it may have been deleted)")
+		return
+	}
+	ref, inRegistry := g.provider(p.Name)
+	if !inRegistry {
+		apiErr(w, http.StatusConflict, "Provider is disabled — enable it to fetch its catalog")
+		return
+	}
+	models, err := g.fetchUpstreamModels(ref)
+	if err != nil {
+		apiErr(w, http.StatusBadGateway, "Catalog fetch failed: "+err.Error())
+		return
+	}
+	writeJSON(w, http.StatusOK, map[string]any{"models": models})
 }

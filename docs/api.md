@@ -131,6 +131,9 @@ Roles: `superadmin` (everything below) and `user` (own keys + dashboard).
 | `PUT /api/settings` | superadmin | Validate and replace the document; omitted fields fall back to defaults, the models.dev sync status is server-owned and preserved. Validation failures return 400 and change nothing. Applies in-request — pool mode and the `/v1/models` cache refresh before the response |
 | `POST /api/settings/model-meta/sync` | superadmin | Run the models.dev catalog sync now; returns the sync status (200 even when `ok:false` — the error is in the status block) |
 | `GET /api/dashboard` | user | Pool health, per-key counters, recent activity |
+| `GET /api/models` | user | The merged, enriched model catalog (same body `/v1/models` serves) — backs the Models page |
+| `GET /api/providers/{id}/models` | superadmin | One provider's live catalog, fetched on demand |
+| `PUT /api/settings/responses-api` | superadmin | Flip the per-model Responses-API flag (`{model, responsesApi}`); sync preserves the flag |
 | `GET /api/usage/summary?from=&to=` | user | Requests/errors/tokens totals, top models, per-provider (scoped to own user; superadmin sees all) |
 | `GET /api/usage/keys?from=&to=` | user | Per-client-key requests/tokens in range (scoped) |
 | `GET /api/usage/users?from=&to=` | superadmin | Per-user requests/tokens in range |
