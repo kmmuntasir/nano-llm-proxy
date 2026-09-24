@@ -30,9 +30,9 @@ interface UsageSummary {
 // their day, so the default window is the 7 full days before today. Custom
 // from/to edits set exact times.
 const RANGES = [
-  { label: "Yesterday", days: 1 },
-  { label: "7 days", days: 7 },
-  { label: "30 days", days: 30 },
+  { label: "Yesterday", days: 1, toEndOfDay: false },
+  { label: "7 days", days: 7, toEndOfDay: true },
+  { label: "30 days", days: 30, toEndOfDay: true },
 ]
 
 function startOfToday(): number {
@@ -115,10 +115,17 @@ export default function UsagePage() {
   const [custom, setCustom] = useState<{ from: string; to: string } | null>(null)
 
   const todayStart = startOfToday()
-  const days = RANGES.find((r) => r.label === range)?.days ?? 7
-  // defaults (and every preset) sit at 00:00:00: "to" is today's midnight,
-  // "from" is the midnight N days before it
-  const to = custom?.to ? new Date(custom.to).getTime() / 1000 : todayStart
+  const preset = RANGES.find((r) => r.label === range)
+  const days = preset?.days ?? 7
+  // Preset bounds are day boundaries: "from" is the midnight N days before
+  // today. "to" is today's midnight for Yesterday, but 23:59 today for the
+  // 7/30-day presets so the window includes the current day without a
+  // timestamp that goes stale a minute later.
+  const to = custom?.to
+    ? new Date(custom.to).getTime() / 1000
+    : preset?.toEndOfDay
+      ? todayStart + 86340 // 23:59 today
+      : todayStart
   const from = custom?.from
     ? new Date(custom.from).getTime() / 1000
     : todayStart - days * 86400

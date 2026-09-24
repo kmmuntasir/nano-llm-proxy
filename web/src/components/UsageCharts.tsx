@@ -154,7 +154,7 @@ export default function UsageCharts() {
               Requests
             </Text>
             <ResponsiveContainer width="100%" height={200}>
-              <AreaChart data={points} margin={{ top: 8, right: 8, left: -16, bottom: 0 }}>
+              <AreaChart data={points} margin={{ top: 8, right: 8, left: -16, bottom: 10 }}>
                 <defs>
                   <linearGradient id="reqFill" x1="0" y1="0" x2="0" y2="1">
                     <stop offset="0%" stopColor={c.s1} stopOpacity={0.18} />
@@ -162,7 +162,7 @@ export default function UsageCharts() {
                   </linearGradient>
                 </defs>
                 <CartesianGrid stroke={c.grid} vertical={false} />
-                <XAxis dataKey="x" {...axis} />
+                <XAxis dataKey="x" tickMargin={8} {...axis} />
                 <YAxis allowDecimals={false} {...axis} />
                 <Tooltip {...tooltipProps} />
                 <Area
@@ -184,9 +184,9 @@ export default function UsageCharts() {
               Tokens (input / output)
             </Text>
             <ResponsiveContainer width="100%" height={200}>
-              <LineChart data={points} margin={{ top: 8, right: 8, left: -16, bottom: 0 }}>
+              <LineChart data={points} margin={{ top: 8, right: 8, left: -16, bottom: 10 }}>
                 <CartesianGrid stroke={c.grid} vertical={false} />
-                <XAxis dataKey="x" {...axis} />
+                <XAxis dataKey="x" tickMargin={8} {...axis} />
                 <YAxis allowDecimals={false} {...axis} tickFormatter={fmtCompact} />
                 <Tooltip {...tooltipProps} />
                 <Legend
@@ -204,9 +204,9 @@ export default function UsageCharts() {
               Requests by provider
             </Text>
             <ResponsiveContainer width="100%" height={200}>
-              <BarChart data={providerRows} margin={{ top: 8, right: 8, left: -16, bottom: 0 }}>
+              <BarChart data={providerRows} margin={{ top: 8, right: 8, left: -16, bottom: 10 }}>
                 <CartesianGrid stroke={c.grid} vertical={false} />
-                <XAxis dataKey="x" {...axis} />
+                <XAxis dataKey="x" tickMargin={8} {...axis} />
                 <YAxis allowDecimals={false} {...axis} />
                 <Tooltip {...tooltipProps} />
                 <Legend wrapperStyle={{ fontSize: 12, color: c.ink2 }} />
@@ -237,7 +237,7 @@ export default function UsageCharts() {
               >
                 <CartesianGrid stroke={c.grid} horizontal={false} />
                 <XAxis type="number" {...axis} tickFormatter={fmtCompact} />
-                <YAxis type="category" dataKey="key" width={120} {...axis} />
+                <YAxis type="category" dataKey="key" width={200} tick={{ fill: c.tick, fontSize: 10 }} tickLine={false} axisLine={{ stroke: c.axis }} />
                 <Tooltip {...tooltipProps} cursor={{ fill: c.grid, fillOpacity: 0.3 }} />
                 <Bar dataKey="tokens" name="tokens" barSize={16} radius={[0, 4, 4, 0]}>
                   {topModels.map((m) => (
