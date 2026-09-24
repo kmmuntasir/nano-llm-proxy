@@ -301,7 +301,7 @@ export default function SettingsPage() {
           <Heading size="sm">Routing</Heading>
         </Card.Header>
         <Card.Body>
-          <Field.Root w="380px">
+          <Field.Root w={{ base: "full", md: "380px" }}>
             <Field.Label>Rotation strategy</Field.Label>
             <NativeSelect.Root size="sm">
               <NativeSelect.Field
@@ -327,7 +327,7 @@ export default function SettingsPage() {
         </Card.Header>
         <Card.Body>
           <HStack gap={4} align="end" flexWrap="wrap">
-            <Field.Root w="200px">
+            <Field.Root w={{ base: "full", sm: "200px" }}>
               <Field.Label>Max keys per request</Field.Label>
               <Input
                 type="number"
@@ -338,7 +338,7 @@ export default function SettingsPage() {
               />
               <Field.HelperText>Failover depth before the client sees 502.</Field.HelperText>
             </Field.Root>
-            <Field.Root w="200px">
+            <Field.Root w={{ base: "full", sm: "200px" }}>
               <Field.Label>Cooldown seconds</Field.Label>
               <Input
                 type="number"
@@ -349,7 +349,7 @@ export default function SettingsPage() {
               />
               <Field.HelperText>0 = only honor upstream Retry-After.</Field.HelperText>
             </Field.Root>
-            <Field.Root w="200px">
+            <Field.Root w={{ base: "full", sm: "200px" }}>
               <Field.Label>Daily cap per key</Field.Label>
               <Input
                 type="number"
@@ -388,7 +388,7 @@ export default function SettingsPage() {
           </Text>
         </Card.Header>
         <Card.Body>
-          <Field.Root w="380px">
+          <Field.Root w={{ base: "full", md: "380px" }}>
             <Field.Label>Fallback target</Field.Label>
             <ModelPicker
               models={catalogOptions}
@@ -411,7 +411,7 @@ export default function SettingsPage() {
         </Card.Header>
         <Card.Body>
           <VStack align="stretch" gap={4}>
-            <Field.Root w="380px">
+            <Field.Root w={{ base: "full", md: "380px" }}>
               <Field.Label>User agent</Field.Label>
               <Input
                 value={form.userAgent}

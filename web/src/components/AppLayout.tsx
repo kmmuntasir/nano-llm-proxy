@@ -1,8 +1,10 @@
+import { useState } from "react"
 import { NavLink, useNavigate } from "react-router-dom"
 import type { ComponentType, ReactNode } from "react"
 import { useMutation, useQueryClient } from "@tanstack/react-query"
 import {
   Box,
+  Drawer,
   Flex,
   Heading,
   HStack,
@@ -63,10 +65,10 @@ function ColorModeMenu() {
         <Menu.Positioner>
           <Menu.Content>
             <Menu.Item value="light" onClick={() => setTheme("light")}>
-              <Sun /> Light
+              <Moon /> Light
             </Menu.Item>
             <Menu.Item value="dark" onClick={() => setTheme("dark")}>
-              <Moon /> Dark
+              <Sun /> Dark
             </Menu.Item>
             <Menu.Item value="system" onClick={() => setTheme("system")}>
               <MenuIcon /> System
@@ -78,10 +80,64 @@ function ColorModeMenu() {
   )
 }
 
-export default function AppLayout({ children }: { children: ReactNode }) {
+// SidebarContent is the shared nav: the desktop aside renders it inline, the
+// mobile drawer renders the same thing behind a hamburger. onNavigate fires
+// after a link is tapped so the drawer can close itself.
+function SidebarContent({
+  items,
+  showBrand = false,
+  onNavigate,
+}: {
+  items: NavItem[]
+  showBrand?: boolean
+  onNavigate?: () => void
+}) {
+  return (
+    <>
+      {showBrand && (
+        <Heading size="md" mb={6} px={2}>
+          Nano LLM Proxy
+        </Heading>
+      )}
+      <VStack align="stretch" gap={1}>
+        {items.map((item) => (
+          <NavLink
+            key={item.to}
+            to={item.to}
+            end={item.to === "/"}
+            onClick={onNavigate}
+          >
+            {({ isActive }) => (
+              <Box
+                p={2}
+                px={3}
+                rounded="md"
+                display="flex"
+                alignItems="center"
+                gap={2}
+                fontSize="sm"
+                bg={isActive ? "bg.emphasized" : undefined}
+                fontWeight={isActive ? "medium" : undefined}
+                _hover={{ bg: "bg.subtle" }}
+              >
+                <item.icon />
+                {item.label}
+              </Box>
+            )}
+          </NavLink>
+        ))}
+      </VStack>
+      <Box mt="auto" pt={6}>
+        <SidebarFooter />
+      </Box>
+    </>
+  )
+}
+
+function SidebarFooter() {
   const { data } = useSession()
-  const qc = useQueryClient()
   const navigate = useNavigate()
+  const qc = useQueryClient()
   const logout = useMutation({
     mutationFn: () => post("/api/auth/logout"),
     onSuccess: () => {
@@ -91,6 +147,90 @@ export default function AppLayout({ children }: { children: ReactNode }) {
     },
     onError: () => toaster.create({ title: "Logout failed", type: "error" }),
   })
+
+  return (
+    <>
+      <Text fontSize="xs" color="fg.muted" px={2} mb={2} truncate>
+        {data?.user.email}
+      </Text>
+      <HStack px={1}>
+        <ColorModeMenu />
+        <IconButton
+          variant="ghost"
+          size="sm"
+          aria-label="log out"
+          title="log out"
+          onClick={() => logout.mutate()}
+        >
+          <LogOut />
+        </IconButton>
+      </HStack>
+    </>
+  )
+}
+
+// MobileSidebar is the full left sidebar, opened by the hamburger on small
+// screens — same nav, same theme switcher, same logout as the desktop rail.
+function MobileSidebar({
+  items,
+  open,
+  onOpenChange,
+}: {
+  items: NavItem[]
+  open: boolean
+  onOpenChange: (o: boolean) => void
+}) {
+  return (
+    <Drawer.Root open={open} onOpenChange={(e) => onOpenChange(e.open)}>
+      <Drawer.Backdrop />
+      <Drawer.Positioner>
+        <Drawer.Content maxW="260px" bg="bg" minH="100vh">
+          <Drawer.Header pt={5}>
+            <Heading size="md">Nano LLM Proxy</Heading>
+          </Drawer.Header>
+          <Drawer.Body flex={1}>
+            <VStack align="stretch" gap={1}>
+              {items.map((item) => (
+                <NavLink
+                  key={item.to}
+                  to={item.to}
+                  end={item.to === "/"}
+                  onClick={() => onOpenChange(false)}
+                >
+                  {({ isActive }) => (
+                    <Box
+                      p={2}
+                      px={3}
+                      rounded="md"
+                      display="flex"
+                      alignItems="center"
+                      gap={2}
+                      fontSize="sm"
+                      bg={isActive ? "bg.emphasized" : undefined}
+                      fontWeight={isActive ? "medium" : undefined}
+                      _hover={{ bg: "bg.subtle" }}
+                    >
+                      <item.icon />
+                      {item.label}
+                    </Box>
+                  )}
+                </NavLink>
+              ))}
+            </VStack>
+          </Drawer.Body>
+          <Drawer.Footer pb={5}>
+            <SidebarFooter />
+          </Drawer.Footer>
+          <Drawer.CloseTrigger />
+        </Drawer.Content>
+      </Drawer.Positioner>
+    </Drawer.Root>
+  )
+}
+
+export default function AppLayout({ children }: { children: ReactNode }) {
+  const { data } = useSession()
+  const [mobileOpen, setMobileOpen] = useState(false)
 
   const isSuperadmin = data?.user.role === "superadmin"
   const items = navItems.filter((i) => !i.superadminOnly || isSuperadmin)
@@ -112,84 +252,42 @@ export default function AppLayout({ children }: { children: ReactNode }) {
         overflowY="auto"
         flexShrink={0}
       >
-        <HStack gap={2} mb={6} px={2} align="center">
-          <img src={logoUrl} alt="Nano LLM Proxy logo" width={28} height={28} />
-          <Heading size="md">Nano LLM Proxy</Heading>
-        </HStack>
-        {items.map((item) => (
-          <NavLink key={item.to} to={item.to} end={item.to === "/"}>
-            {({ isActive }) => (
-              <Box
-                p={2}
-                px={3}
-                rounded="md"
-                display="flex"
-                alignItems="center"
-                gap={2}
-                fontSize="sm"
-                bg={isActive ? "bg.emphasized" : undefined}
-                fontWeight={isActive ? "medium" : undefined}
-                _hover={{ bg: "bg.subtle" }}
-              >
-                <item.icon />
-                {item.label}
-              </Box>
-            )}
-          </NavLink>
-        ))}
-        <Box mt="auto" pt={6}>
-          <Text fontSize="xs" color="fg.muted" px={2} mb={2} truncate>
-            {data?.user.email}
-          </Text>
-          <HStack px={1}>
-            <ColorModeMenu />
-            <IconButton
-              variant="ghost"
-              size="sm"
-              aria-label="log out"
-              title="log out"
-              onClick={() => logout.mutate()}
-            >
-              <LogOut />
-            </IconButton>
-          </HStack>
-        </Box>
+        <SidebarContent items={items} showBrand />
       </VStack>
 
-      {/* mobile menu */}
-      <Box display={{ base: "block", md: "none" }} position="fixed" top={2} right={2} zIndex={10}>
-        <Menu.Root>
-          <Menu.Trigger asChild>
-            <IconButton variant="outline" aria-label="menu">
-              <MenuIcon />
-            </IconButton>
-          </Menu.Trigger>
-          <Portal>
-            <Menu.Positioner>
-              <Menu.Content>
-                {items.map((item) => (
-                  <Menu.Item key={item.to} value={item.to} onClick={() => navigate(item.to)}>
-                    {item.label}
-                  </Menu.Item>
-                ))}
-                <Menu.Separator />
-                <Menu.Item
-                  value="logout"
-                  onClick={() => {
-                    logout.mutate()
-                  }}
-                >
-                  <LogOut /> Log out
-                </Menu.Item>
-              </Menu.Content>
-            </Menu.Positioner>
-          </Portal>
-        </Menu.Root>
+      <Box flex={1} minW={0} display="flex" flexDirection="column">
+        {/* mobile top bar: brand + hamburger opening the full sidebar */}
+        <HStack
+          display={{ base: "flex", md: "none" }}
+          position="sticky"
+          top={0}
+          zIndex={20}
+          bg="bg"
+          px={4}
+          py={3}
+          justifyContent="space-between"
+          borderBottomWidth="1px"
+        >
+          <HStack gap={2} align="center">
+            <img src={logoUrl} alt="Nano LLM Proxy logo" width={24} height={24} />
+            <Heading size="sm">Nano LLM Proxy</Heading>
+          </HStack>
+          <IconButton
+            variant="ghost"
+            size="sm"
+            aria-label="open menu"
+            onClick={() => setMobileOpen(true)}
+          >
+            <MenuIcon />
+          </IconButton>
+        </HStack>
+
+        <Box as="main" flex={1} p={{ base: 4, md: 6 }} minW={0} w="full">
+          {children}
+        </Box>
       </Box>
 
-      <Box as="main" flex={1} p={6} minW={0}>
-        {children}
-      </Box>
+      <MobileSidebar items={items} open={mobileOpen} onOpenChange={setMobileOpen} />
     </Flex>
   )
 }

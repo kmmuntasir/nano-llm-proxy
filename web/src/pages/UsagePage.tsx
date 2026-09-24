@@ -2,6 +2,7 @@ import { useState } from "react"
 import { useQuery } from "@tanstack/react-query"
 import {
   Badge,
+  Box,
   Button,
   Card,
   Field,
@@ -212,6 +213,7 @@ export default function UsagePage() {
             <Heading size="sm">Most used models</Heading>
           </Card.Header>
           <Card.Body pt={3}>
+            <Box overflowX="auto">
             <Table.Root size="sm">
               <Table.Header>
                 <Table.Row>
@@ -241,6 +243,7 @@ export default function UsagePage() {
                 ))}
               </Table.Body>
             </Table.Root>
+            </Box>
           </Card.Body>
         </Card.Root>
 
@@ -249,6 +252,7 @@ export default function UsagePage() {
             <Heading size="sm">Providers</Heading>
           </Card.Header>
           <Card.Body pt={3}>
+            <Box overflowX="auto">
             <Table.Root size="sm">
               <Table.Header>
                 <Table.Row>
@@ -278,6 +282,7 @@ export default function UsagePage() {
                 ))}
               </Table.Body>
             </Table.Root>
+            </Box>
           </Card.Body>
         </Card.Root>
       </SimpleGrid>
@@ -288,6 +293,7 @@ export default function UsagePage() {
             <Heading size="sm">By user</Heading>
           </Card.Header>
           <Card.Body pt={3}>
+            <Box overflowX="auto">
             <Table.Root size="sm">
               <Table.Header>
                 <Table.Row>
@@ -315,6 +321,7 @@ export default function UsagePage() {
                 ))}
               </Table.Body>
             </Table.Root>
+            </Box>
           </Card.Body>
         </Card.Root>
       )}
@@ -324,6 +331,7 @@ export default function UsagePage() {
           <Heading size="sm">By API key</Heading>
         </Card.Header>
         <Card.Body pt={3}>
+          <Box overflowX="auto">
           <Table.Root size="sm">
             <Table.Header>
               <Table.Row>
@@ -353,6 +361,7 @@ export default function UsagePage() {
               ))}
             </Table.Body>
           </Table.Root>
+          </Box>
         </Card.Body>
       </Card.Root>
 
@@ -364,6 +373,7 @@ export default function UsagePage() {
           </Text>
         </Card.Header>
         <Card.Body pt={3}>
+          <Box overflowX="auto">
           <Table.Root size="sm">
             <Table.Header>
               <Table.Row>
@@ -407,6 +417,7 @@ export default function UsagePage() {
               ))}
             </Table.Body>
           </Table.Root>
+          </Box>
         </Card.Body>
       </Card.Root>
     </VStack>

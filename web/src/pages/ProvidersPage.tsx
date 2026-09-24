@@ -2,6 +2,7 @@ import { useState } from "react"
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query"
 import {
   Badge,
+  Box,
   Button,
   Card,
   Code,
@@ -357,8 +358,8 @@ function ProviderCard({ p }: { p: ProviderView }) {
   return (
     <Card.Root>
       <Card.Body pt={4} gap={3}>
-        <HStack justify="space-between">
-          <HStack gap={2}>
+        <HStack justify="space-between" flexWrap="wrap" gap={2}>
+          <HStack gap={2} flexWrap="wrap">
             <Heading size="sm" fontFamily="mono">
               {p.name}
             </Heading>
@@ -458,6 +459,7 @@ function ProviderCard({ p }: { p: ProviderView }) {
               </HStack>
             </Collapsible.Trigger>
             <Collapsible.Content>
+              <Box overflowX="auto">
               <Stack gap={0} px={4} pb={4}>
                 {p.keys.map((k) => (
                   <ProviderKeyRow key={k.id} provider={p} k={k} />
@@ -489,6 +491,7 @@ function ProviderCard({ p }: { p: ProviderView }) {
                   </HStack>
                 </form>
               </Stack>
+              </Box>
             </Collapsible.Content>
           </Card.Root>
         </Collapsible.Root>
