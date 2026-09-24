@@ -1,6 +1,7 @@
 import { useEffect, useState } from "react"
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query"
 import {
+  Box,
   Button,
   Card,
   Field,
@@ -22,9 +23,112 @@ import type {
 import { toaster } from "../components/ui/toaster"
 
 // Editing form for the runtime settings document. The Zen model catalog is
-// sync-managed (models.dev) and rendered as read-only model cards; the
-// Responses-API list is a picker over that catalog. Nothing here is edited
-// as raw JSON anymore. modelMetaSyncStatus is server-owned and never sent.
+// sync-managed (models.dev) and browsable on the Models page; the Responses
+// API flag is toggled per model on the Providers page. modelMetaSyncStatus
+// is server-owned and never sent.
+
+
+// ModelPicker is a searchable dropdown over the merged model catalog.
+// Options are catalog ids with cosmetic suffixes stripped (the gateway
+// strips them anyway), so a picked value reads like a clean provider/model.
+function ModelPicker({
+  models,
+  value,
+  onChange,
+  placeholder,
+}: {
+  models: string[]
+  value: string
+  onChange: (v: string) => void
+  placeholder?: string
+}) {
+  const [query, setQuery] = useState("")
+  const [open, setOpen] = useState(false)
+  const filtered = models.filter((m) => m.toLowerCase().includes(query.toLowerCase()))
+
+  return (
+    <Box position="relative">
+      <Input
+        placeholder={placeholder}
+        value={open ? query : value}
+        fontFamily="mono"
+        onChange={(e) => {
+          setQuery(e.target.value)
+          setOpen(true)
+        }}
+        onFocus={() => {
+          setQuery("")
+          setOpen(true)
+        }}
+        onBlur={() => setTimeout(() => setOpen(false), 150)}
+      />
+      {open && (
+        <Box
+          position="absolute"
+          zIndex={20}
+          top="100%"
+          left={0}
+          right={0}
+          mt={1}
+          bg="bg.panel"
+          borderWidth="1px"
+          rounded="md"
+          boxShadow="md"
+          maxH="240px"
+          overflowY="auto"
+        >
+          <Box
+            px={3}
+            py={2}
+            fontSize="sm"
+            cursor="pointer"
+            _hover={{ bg: "bg.subtle" }}
+            onClick={() => {
+              onChange("")
+              setOpen(false)
+            }}
+          >
+            None — pass claude-* through untouched
+          </Box>
+          {filtered.length === 0 && (
+            <Text px={3} py={2} fontSize="sm" color="fg.muted">
+              No models match “{query}”
+            </Text>
+          )}
+          {filtered.map((m) => (
+            <Box
+              key={m}
+              px={3}
+              py={2}
+              fontSize="sm"
+              fontFamily="mono"
+              cursor="pointer"
+              _hover={{ bg: "bg.subtle" }}
+              onClick={() => {
+                onChange(m)
+                setOpen(false)
+              }}
+            >
+              {m}
+            </Box>
+          ))}
+        </Box>
+      )}
+    </Box>
+  )
+}
+
+// cosmetic context/modality suffix the gateway strips anyway
+const SUFFIX_RE = /-\d+(?:\.\d+)?[KMG](?:-txt|-img|-vid|-aud|-pdf)*$/
+
+interface CatalogEntry {
+  id: string
+}
+
+function cleanModelId(id: string): string {
+  const [prov, ...rest] = id.split("/")
+  return rest.length > 0 ? `${prov}/${rest.join("/").replace(SUFFIX_RE, "")}` : id
+}
 
 interface SettingsForm {
   rotation: "priority" | "lru"
@@ -139,6 +243,11 @@ export default function SettingsPage() {
     queryKey: ["settings"],
     queryFn: () => api<{ settings: RuntimeSettingsView }>("/api/settings"),
   })
+  const catalog = useQuery({
+    queryKey: ["models"],
+    queryFn: () => api<{ data: CatalogEntry[] }>("/api/models"),
+    staleTime: 5 * 60_000,
+  })
   const [form, setForm] = useState<SettingsForm | null>(null)
   const [saveError, setSaveError] = useState("")
 
@@ -166,6 +275,10 @@ export default function SettingsPage() {
 
   if (isLoading || (!form && !error)) return <Text>Loading…</Text>
   if (error || !form) return <Text color="red.fg">Failed to load settings</Text>
+  const catalogOptions = [
+    ...new Set((catalog.data?.data ?? []).map((e) => cleanModelId(e.id))),
+  ].sort()
+
   const set = (patch: Partial<SettingsForm>) => setForm({ ...form, ...patch })
   const setRetry = (patch: Partial<SettingsForm["retry"]>) =>
     setForm({ ...form, retry: { ...form.retry, ...patch } })
@@ -277,11 +390,11 @@ export default function SettingsPage() {
         <Card.Body>
           <Field.Root w="380px">
             <Field.Label>Fallback target</Field.Label>
-            <Input
-              placeholder="zen/mimo-v2.6-flash-free"
+            <ModelPicker
+              models={catalogOptions}
               value={form.fallbackModel}
-              fontFamily="mono"
-              onChange={(e) => set({ fallbackModel: e.target.value })}
+              onChange={(v) => set({ fallbackModel: v })}
+              placeholder="zen/mimo-v2.6-flash-free"
             />
             <Field.HelperText>
               Any model starting with <code>claude-</code> (without an explicit{" "}
