@@ -29,6 +29,7 @@ import { useTheme } from "next-themes"
 import { post } from "../api/client"
 import { toaster } from "./ui/toaster"
 import { useSession } from "../App"
+import logoUrl from "../assets/logo.png"
 
 interface NavItem {
   to: string
@@ -109,9 +110,10 @@ export default function AppLayout({ children }: { children: ReactNode }) {
         overflowY="auto"
         flexShrink={0}
       >
-        <Heading size="md" mb={6} px={2}>
-          nano-llm-proxy
-        </Heading>
+        <HStack gap={2} mb={6} px={2} align="center">
+          <img src={logoUrl} alt="Nano LLM Proxy logo" width={28} height={28} />
+          <Heading size="md">Nano LLM Proxy</Heading>
+        </HStack>
         {items.map((item) => (
           <NavLink key={item.to} to={item.to} end={item.to === "/"}>
             {({ isActive }) => (
