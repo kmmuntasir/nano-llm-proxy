@@ -281,21 +281,11 @@ cd web && npm ci && npm run dev       # GUI dev server
 
 | Path | Responsibility |
 | --- | --- |
-| `main.go` | wiring, route table, `/v1/models` catalog, `/health`, SPA serving |
-| `gateway.go` | gateway assembly, hot-path rebuild, chat entry, failure classifier |
-| `pool.go` | key state machine, priority/LRU selection, cooldowns, session forging |
-| `zen.go` | zen adapter: client-shape injection, surface map, chat → Responses requests |
-| `responses.go`, `responses_endpoint.go` | Responses ↔ chat translation; native `/v1/responses` |
-| `anthropic.go`, `anthropic_handler.go` | Anthropic Messages conversion, `claude-*` fallback, `[1m]` handling |
-| `generic.go` | generic OpenAI-compatible proxy |
-| `store.go` | SQLite: migrations, bootstrap, users/keys/providers/settings CRUD, usage log |
-| `settings.go` | runtime-settings document: defaults, validation, store plumbing |
-| `auth.go` | sessions, bcrypt, roles, Origin checks, login backoff |
-| `api_*.go` | `/api` JSON handlers |
-| `modelmeta_sync.go` | models.dev sync for the Zen model catalog |
-| `clientkeys.go`, `usage.go` | client-key cache, usage tracker, usage-event buffer |
-| `modelid.go`, `sse.go` | ID suffix grammar, streaming helpers |
-| `dotenv.go`, `config.go` | .env parser, env bootstrap, `ModelMeta` schema |
+| `main.go` | bootstrap wiring: .env, store open, route registration, listen |
+| `internal/gateway/` | the runtime: gateway assembly, hot-path rebuild, failure classifier, key pools (priority/LRU + daily cap), zen/kilo/generic adapters, Responses ↔ chat and Anthropic conversions, admin API handlers, sessions/auth, models.dev sync |
+| `internal/store/` | SQLite: migrations, bootstrap, users/keys/providers/settings CRUD, usage log |
+| `internal/settings/` | runtime-settings document: defaults, validation, `ModelMeta` schema |
+| `internal/config/` | .env parser, env bootstrap, legacy key-file schema |
 | `web/` | React 19 + Chakra UI admin GUI (Vite, TypeScript) |
 
 ## Troubleshooting
