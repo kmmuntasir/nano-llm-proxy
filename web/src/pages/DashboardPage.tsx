@@ -2,6 +2,7 @@ import { Suspense, lazy } from "react"
 import { useQuery } from "@tanstack/react-query"
 import {
   Badge,
+  Box,
   Card,
   Heading,
   SimpleGrid,
@@ -116,6 +117,7 @@ export default function DashboardPage() {
         <Heading size="md">Recent activity</Heading>
         <Card.Root>
           <Card.Body pt={3}>
+            <Box overflowX="auto">
             <Table.Root size="sm">
               <Table.Header>
                 <Table.Row>
@@ -159,6 +161,7 @@ export default function DashboardPage() {
                 ))}
               </Table.Body>
             </Table.Root>
+            </Box>
           </Card.Body>
         </Card.Root>
       </VStack>

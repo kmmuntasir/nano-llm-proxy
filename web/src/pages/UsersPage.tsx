@@ -2,6 +2,7 @@ import { useState } from "react"
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query"
 import {
   Badge,
+  Box,
   Button,
   Card,
   Code,
@@ -463,6 +464,7 @@ export default function UsersPage() {
       </HStack>
       <Card.Root>
         <Card.Body pt={3}>
+        <Box overflowX="auto">
           {isLoading ? (
             <Text>Loading…</Text>
           ) : error ? (
@@ -487,6 +489,7 @@ export default function UsersPage() {
               </Table.Body>
             </Table.Root>
           )}
+        </Box>
         </Card.Body>
       </Card.Root>
       <AddUserModal open={adding} onOpenChange={setAdding} />

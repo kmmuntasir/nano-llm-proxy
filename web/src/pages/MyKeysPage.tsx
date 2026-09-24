@@ -1,6 +1,7 @@
 import { useState } from "react"
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query"
 import {
+  Box,
   Button,
   Card,
   Code,
@@ -110,6 +111,7 @@ export default function MyKeysPage() {
           <Heading size="sm">Keys</Heading>
         </Card.Header>
         <Card.Body pt={3}>
+        <Box overflowX="auto">
           {isLoading ? (
             <Text>Loading…</Text>
           ) : (
@@ -169,6 +171,7 @@ export default function MyKeysPage() {
               </Table.Body>
             </Table.Root>
           )}
+        </Box>
         </Card.Body>
       </Card.Root>
 
