@@ -23,11 +23,11 @@ control plane around just to front a few API keys.
 | Per-key rate limits interrupt long agent sessions | Requests fail over across the pool: cooldowns, `Retry-After`, health tracking |
 | Clients speak different protocols | The same pool serves OpenAI chat, OpenAI Responses, and Anthropic Messages |
 | Provider quirks (API surface splits, client-shape checks) | Built-in adapters normalize the odd ones; the generic adapter covers any OpenAI-compatible URL |
-| Admin usually means YAML edits + restarts | Embedded web GUI: users, client keys, providers, upstream keys, live dashboard |
+| Admin usually means YAML edits + restarts | Embedded web GUI: users, client keys, providers, upstream keys, usage charts, live dashboard |
 
 ## Features
 
-- Single static binary (~10 MB, pure Go, no cgo); idles around 15 MB of RAM
+- Single static binary (~12 MB, pure Go, no cgo); idles around 15 MB of RAM
 - Three request surfaces — `/v1/chat/completions`, `/v1/responses`,
   `/v1/messages` — plus a merged `/v1/models` catalog and an open `/health`
 - Streaming everywhere; non-streaming clients get aggregated responses
@@ -38,7 +38,8 @@ control plane around just to front a few API keys.
   with an actionable hint
 - Embedded admin GUI (React, served by the same binary): users and roles,
   per-user client keys (stored hashed, plaintext shown once), provider and
-  upstream-key management, live dashboard with a recent-activity ring
+  upstream-key management, self-service profiles, usage dashboards with
+  charts, and a live recent-activity feed
 - SQLite (WAL) is the source of truth; memory is the hot path — every GUI
   mutation rebuilds the pools in the same request
 - Self-describing model catalog: entries carry context window, max output,
@@ -50,9 +51,9 @@ control plane around just to front a few API keys.
   aggregations over date ranges (90-day retention), persisted recent activity
 - Runtime settings live in the database and are editable in the GUI with no
   restart: rotation mode, retry/cooldown knobs, an optional per-key daily cap,
-  Anthropic aliases, adapter knobs, and a models.dev-backed Zen model catalog
-  that syncs itself
-- 51 tests (`go test -race ./...`) against scripted mock upstreams — no
+  a Claude `claude-*` fallback model, adapter knobs, and a models.dev-backed
+  Zen model catalog that syncs itself
+- 56 tests (`go test -race ./...`) against scripted mock upstreams — no
   network or Node required
 
 ## Quickstart (from source)
@@ -74,7 +75,7 @@ Then:
 2. **Providers** → add a provider: a name (it becomes the model prefix, e.g.
    `openai`), a base URL (e.g. `https://api.openai.com/v1`), and one or more
    API keys.
-3. **My Keys** → create a client key (`fg-…`).
+3. **Profile → My API Keys** → create a client key (`fg-…`).
 4. Talk to it:
 
 ```bash
@@ -165,7 +166,8 @@ filters, the Zen model catalog) live in the GUI under Settings — see
 
 Claude Code enforces a known-model catalog client-side and lets
 `~/.claude/settings.json` `env` override the process environment — so the
-integration uses env slots plus the gateway's model aliases:
+integration uses env slots for your main models plus the gateway's
+`claude-*` fallback for everything else:
 
 ```json
 {
@@ -196,7 +198,7 @@ Served by the same binary at `/`.
 
 | Page | Who | What |
 | --- | --- | --- |
-| Dashboard | everyone | Uptime, 24h requests/tokens/errors, busiest models, per-provider pool health, recent requests |
+| Dashboard | everyone | Uptime, 24h requests/tokens/errors, usage charts (Today / 7d / 30d: requests, tokens, providers, top models), recent requests |
 | Usage | everyone | Date-range usage: totals, top models, providers, per-key (admins also get per-user), recent activity — scoped to the signed-in user |
 | Profile | everyone | Account info, self-service password reset, own client keys (create/disable/delete) |
 | Users | superadmin | User CRUD, roles, password resets, per-user key management |
@@ -237,9 +239,9 @@ real environment always wins; see `.env.example`). Full reference in
 | `NANO_TRUSTED_ORIGINS` | empty | Extra Origins allowed on GUI mutations behind a reverse proxy |
 
 **Runtime** — everything you tune while it runs (rotation, retries, daily
-cap, aliases, adapter knobs, the Zen model catalog) lives in the database and
-is edited in the GUI under **Settings**. Changes apply in-request; no
-restarts.
+cap, the Claude fallback, adapter knobs, the Zen model catalog) lives in the
+database and is edited in the GUI under **Settings**. Changes apply
+in-request; no restarts.
 
 ## Deploying
 
@@ -257,7 +259,7 @@ After=network-online.target
 DynamicUser=yes
 StateDirectory=nano-llm-proxy
 WorkingDirectory=/var/lib/nano-llm-proxy
-EnvironmentFile=/opt/nano-llm-proxy/.env
+EnvironmentFile=/etc/nano-llm-proxy/nano.env
 ExecStart=/usr/local/bin/nano-llm-proxy
 Restart=on-failure
 ProtectSystem=strict
@@ -284,14 +286,14 @@ cd web && npm ci && npm run dev       # GUI dev server
 | `pool.go` | key state machine, priority/LRU selection, cooldowns, session forging |
 | `zen.go` | zen adapter: client-shape injection, surface map, chat → Responses requests |
 | `responses.go`, `responses_endpoint.go` | Responses ↔ chat translation; native `/v1/responses` |
-| `anthropic.go`, `anthropic_handler.go` | Anthropic Messages conversion, aliases, `[1m]` handling |
+| `anthropic.go`, `anthropic_handler.go` | Anthropic Messages conversion, `claude-*` fallback, `[1m]` handling |
 | `generic.go` | generic OpenAI-compatible proxy |
-| `store.go` | SQLite: migrations, bootstrap, users/keys/providers/settings CRUD |
+| `store.go` | SQLite: migrations, bootstrap, users/keys/providers/settings CRUD, usage log |
 | `settings.go` | runtime-settings document: defaults, validation, store plumbing |
 | `auth.go` | sessions, bcrypt, roles, Origin checks, login backoff |
 | `api_*.go` | `/api` JSON handlers |
 | `modelmeta_sync.go` | models.dev sync for the Zen model catalog |
-| `clientkeys.go` | client-key cache + usage tracker |
+| `clientkeys.go`, `usage.go` | client-key cache, usage tracker, usage-event buffer |
 | `modelid.go`, `sse.go` | ID suffix grammar, streaming helpers |
 | `dotenv.go`, `config.go` | .env parser, env bootstrap, `ModelMeta` schema |
 | `web/` | React 19 + Chakra UI admin GUI (Vite, TypeScript) |
@@ -300,14 +302,14 @@ cd web && npm ci && npm run dev       # GUI dev server
 
 | Symptom | Cause | Fix |
 | --- | --- | --- |
-| 401 on `/v1/*` | missing or wrong client key | create one in the GUI (My Keys) |
+| 401 on `/v1/*` | missing or wrong client key | create one in the GUI (Profile → My API Keys) |
 | 502 with a client-shape hint | provider rejected the adapted request | check the adapter's config (`userAgent`, injection flags) |
-| 502 "no healthy keys" | all keys cooling or disabled | check Dashboard → Providers; re-enable or wait out cooldowns |
+| 502 "no healthy keys" | all keys cooling or disabled | check the Providers page; re-enable or wait out cooldowns |
 | Boot refuses to start: "zen.userAgent ... fails the 1.18.0 floor" | the DB holds a too-old user agent | fix it in Settings → Zen, or reset all settings: `sqlite3 gateway.db "DELETE FROM settings WHERE key='runtime_settings'"` |
 | GUI login loop over plain HTTP | `NANO_COOKIE_SECURE=true` without TLS | set it false locally, or serve over HTTPS |
 | GUI mutations 403 behind a reverse proxy | browser Origin differs from backend Host | add your public host to `NANO_TRUSTED_ORIGINS` |
 | Empty model replies, `finish_reason: "length"` | output budget consumed by hidden reasoning | raise `max_tokens` (≥ 500) |
-| Claude Code: "Unknown Model" before any request | CC validates model names client-side | use `ANTHROPIC_DEFAULT_*_MODEL` slots or a `claude-*` alias |
+| Claude Code: "Unknown Model" before any request | CC validates model names client-side | use `ANTHROPIC_DEFAULT_*_MODEL` slots; set the gateway's Claude fallback for background `claude-*` calls |
 
 ## Responsible use
 

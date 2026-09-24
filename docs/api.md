@@ -9,7 +9,7 @@ Authorization: Bearer fg-...
 x-api-key: fg-...          (also accepted)
 ```
 
-Client keys are created in the admin GUI (My Keys, or per-user under Users),
+Client keys are created in the admin GUI (Profile → My API Keys, or per-user under Users),
 stored sha256-hashed server-side, and cached in memory — revocation applies
 to the very next request. `GET /health` is open.
 
@@ -127,7 +127,7 @@ Roles: `superadmin` (everything below) and `user` (own keys + dashboard).
 | `GET/POST /api/users/{id}/keys`, `PATCH/DELETE /api/users/{id}/keys/{keyId}` | superadmin | Per-user client keys |
 | `GET/POST /api/providers`, `PATCH/DELETE /api/providers/{id}` | superadmin | Providers (generic CRUD; built-ins cannot be deleted) |
 | `POST /api/providers/{id}/keys`, `PATCH/DELETE /api/providers/{id}/keys/{keyId}` | superadmin | Upstream keys |
-| `GET /api/settings` | superadmin | Effective runtime settings document (rotation, retries, aliases, adapter knobs, model catalog) |
+| `GET /api/settings` | superadmin | Effective runtime settings document (rotation, retries, Claude fallback, adapter knobs, model catalog) |
 | `PUT /api/settings` | superadmin | Validate and replace the document; omitted fields fall back to defaults, the models.dev sync status is server-owned and preserved. Validation failures return 400 and change nothing. Applies in-request — pool mode and the `/v1/models` cache refresh before the response |
 | `POST /api/settings/model-meta/sync` | superadmin | Run the models.dev catalog sync now; returns the sync status (200 even when `ok:false` — the error is in the status block) |
 | `GET /api/dashboard` | user | Pool health, per-key counters, recent activity |

@@ -5,8 +5,8 @@
 1. **Bootstrap** — the handful of values needed before the database opens.
    Environment variables, optionally seeded from a `.env` file in the working
    directory. There is no config file.
-2. **Runtime** — everything you tune while it runs (rotation, retries,
-   aliases, adapter knobs, the model catalog). A single JSON document in the
+2. **Runtime** — everything you tune while it runs (rotation, retries, the
+   Claude fallback, adapter knobs, the model catalog). A single JSON document in the
    SQLite `settings` table, edited in the admin GUI under **Settings** (or via
    `PUT /api/settings`). Every change applies in-request — no restarts.
 
