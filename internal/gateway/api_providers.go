@@ -393,7 +393,8 @@ func (g *gateway) handleDeleteProviderKey(w http.ResponseWriter, r *http.Request
 
 // handleProviderKeyUsage serves GET /api/providers/{id}/keys/{keyId}/usage —
 // fetches the key's live quota/usage from the provider's per-key usage
-// endpoint (Z.ai coding plans: plan tier, 5-hour and weekly windows) and
+// endpoint (Z.ai coding plans: plan tier, 5-hour and weekly windows, monthly
+// MCP tool quota) and
 // passes the upstream data object through verbatim. On demand only — the GUI
 // calls this per key when the user opens the usage modal, never on a timer.
 func (g *gateway) handleProviderKeyUsage(w http.ResponseWriter, r *http.Request) {
