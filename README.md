@@ -72,8 +72,8 @@ database for.
   (native fetch + obscura headless-browser rendering) with SSRF protection,
   per-user metering, and an idempotent installer (`scripts/install-web-tools.sh`)
   — no paid search APIs
-- 141 tests (`go test -race ./...`) against scripted mock upstreams and
-  local fixture servers — no network or Node required
+- Full test suite (`go test -race ./...`) against scripted mock upstreams and
+  local fixture servers — no network, no Node, no API keys required
 
 ## How it compares
 
