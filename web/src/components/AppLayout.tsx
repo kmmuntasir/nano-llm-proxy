@@ -17,6 +17,7 @@ import {
 import {
   Activity,
   BarChart3,
+  BookOpen,
   List,
   LogOut,
   Menu as MenuIcon,
@@ -44,6 +45,7 @@ interface NavItem {
 const navItems: NavItem[] = [
   { to: "/", label: "Dashboard", icon: Activity },
   { to: "/models", label: "Models", icon: List },
+  { to: "/docs", label: "Guide", icon: BookOpen },
   { to: "/usage", label: "Usage", icon: BarChart3 },
   { to: "/profile", label: "Profile", icon: User },
   { to: "/users", label: "Users", icon: Users, superadminOnly: true },
