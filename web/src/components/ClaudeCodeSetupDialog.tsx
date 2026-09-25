@@ -1,14 +1,5 @@
 import { useMemo, useState } from "react"
-import {
-  Box,
-  Button,
-  Code,
-  Field,
-  HStack,
-  Input,
-  Text,
-  VStack,
-} from "@chakra-ui/react"
+import { Button, Code, Field, Text, VStack } from "@chakra-ui/react"
 import {
   DialogBody,
   DialogCloseTrigger,
@@ -19,7 +10,8 @@ import {
   DialogTitle,
 } from "./ui/dialog"
 import { PasswordInput } from "./ui/password-input"
-import CopyButton from "./CopyButton"
+import ComboSelect from "./ComboSelect"
+import JsonBlock from "./JsonBlock"
 import { cleanModelId } from "./ModelCard"
 
 // ClaudeCodeSetupDialog generates the `env` block for Claude Code's
@@ -43,91 +35,40 @@ const SLOTS = [
 
 type SlotKey = (typeof SLOTS)[number]["key"]
 
-// SlotPicker is the searchable dropdown for one model slot. Options show
-// clean ids ("glm/glm-5.3"); the picked value keeps the full catalog entry.
+// SlotPicker is one model slot: the tier name inline in the input (the
+// options are long; a label above would waste a whole row), searchable,
+// keyboard-navigable (arrows + Enter).
 function SlotPicker({
   entries,
   value,
   onChange,
+  label,
 }: {
   entries: ClaudeCatalogEntry[]
   value: string // full catalog id, "" = none
   onChange: (id: string) => void
+  label: string
 }) {
-  const [query, setQuery] = useState("")
-  const [open, setOpen] = useState(false)
-  const filtered = entries.filter((e) => cleanModelId(e.id).toLowerCase().includes(query.toLowerCase()))
-
+  const options = entries.map((e) => ({
+    value: e.id,
+    label: cleanModelId(e.id),
+    search: e.id, // the raw id stays findable even with the suffix hidden
+  }))
   return (
-    <Box position="relative">
-      <Input
-        autoComplete="off"
-        placeholder="search models…"
-        fontFamily="mono"
-        value={open ? query : value ? cleanModelId(value) : ""}
-        onChange={(e) => {
-          setQuery(e.target.value)
-          setOpen(true)
-        }}
-        onFocus={() => {
-          setQuery("")
-          setOpen(true)
-        }}
-        onBlur={() => setTimeout(() => setOpen(false), 150)}
-      />
-      {open && (
-        <Box
-          position="absolute"
-          zIndex={20}
-          top="100%"
-          left={0}
-          right={0}
-          mt={1}
-          bg="bg.panel"
-          borderWidth="1px"
-          rounded="md"
-          boxShadow="md"
-          maxH="240px"
-          overflowY="auto"
-        >
-          <Box
-            px={3}
-            py={2}
-            fontSize="sm"
-            cursor="pointer"
-            _hover={{ bg: "bg.subtle" }}
-            onClick={() => {
-              onChange("")
-              setOpen(false)
-            }}
-          >
-            None — leave this slot unset
-          </Box>
-          {filtered.length === 0 && (
-            <Text px={3} py={2} fontSize="sm" color="fg.muted">
-              No models match “{query}”
-            </Text>
-          )}
-          {filtered.map((e) => (
-            <Box
-              key={e.id}
-              px={3}
-              py={2}
-              fontSize="sm"
-              fontFamily="mono"
-              cursor="pointer"
-              _hover={{ bg: "bg.subtle" }}
-              onClick={() => {
-                onChange(e.id)
-                setOpen(false)
-              }}
-            >
-              {cleanModelId(e.id)}
-            </Box>
-          ))}
-        </Box>
-      )}
-    </Box>
+    <ComboSelect
+      options={options}
+      value={value}
+      onChange={onChange}
+      noneLabel="None — leave this slot unset"
+      emptyText="No models match"
+      mono
+      ariaLabel={`${label} model`}
+      startElement={
+        <Text fontSize="xs" color="fg.muted" w="12" ml={1}>
+          {label}
+        </Text>
+      }
+    />
   )
 }
 
@@ -163,7 +104,7 @@ export default function ClaudeCodeSetupDialog({
   }, [entries, origin, token, picked])
 
   return (
-    <DialogRoot open={open} onOpenChange={(e) => onOpenChange(e.open)} size="lg">
+    <DialogRoot open={open} onOpenChange={(e) => onOpenChange(e.open)} size="xl">
       <DialogContent>
         <DialogHeader>
           <DialogTitle>Claude Code setup</DialogTitle>
@@ -192,14 +133,13 @@ export default function ClaudeCodeSetupDialog({
 
             <VStack align="stretch" gap={3}>
               {SLOTS.map((s) => (
-                <Field.Root key={s.key}>
-                  <Field.Label>{s.label}</Field.Label>
-                  <SlotPicker
-                    entries={entries}
-                    value={picked[s.key]}
-                    onChange={(id) => setPicked((cur) => ({ ...cur, [s.key]: id }))}
-                  />
-                </Field.Root>
+                <SlotPicker
+                  key={s.key}
+                  entries={entries}
+                  label={s.label}
+                  value={picked[s.key]}
+                  onChange={(id) => setPicked((cur) => ({ ...cur, [s.key]: id }))}
+                />
               ))}
             </VStack>
 
@@ -208,27 +148,7 @@ export default function ClaudeCodeSetupDialog({
               Claude Code reads it for context accounting and strips it before sending.
             </Text>
 
-            <Box borderWidth="1px" rounded="md" bg="bg.subtle">
-              <HStack justify="space-between" px={3} py={2} borderBottomWidth="1px">
-                <Text fontSize="xs" color="fg.muted" fontWeight="medium">
-                  settings.json
-                </Text>
-                <CopyButton text={json} label="copy env block" size="xs" />
-              </HStack>
-              <Code
-                as="pre"
-                p={3}
-                fontSize="xs"
-                fontFamily="mono"
-                whiteSpace="pre-wrap"
-                wordBreak="break-all"
-                display="block"
-                bg="transparent"
-                userSelect="all"
-              >
-                {json}
-              </Code>
-            </Box>
+            <JsonBlock code={json} title="settings.json" copyLabel="copy env block" />
           </VStack>
         </DialogBody>
         <DialogFooter>

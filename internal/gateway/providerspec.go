@@ -167,6 +167,7 @@ func zaiCatalog(g *gateway, ref providerRef, id string, entry, raw map[string]an
 	entry["max_output_tokens"] = out
 	entry["reasoning"] = meta.Reasoning
 	entry["responses_api"] = false // the coding plan has no Responses surface
+	entry["free"] = false          // a paid subscription plan, not a free tier
 	if len(meta.InputModalities) > 0 {
 		entry["input_modalities"] = meta.InputModalities
 	}

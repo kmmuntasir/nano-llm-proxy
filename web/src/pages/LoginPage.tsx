@@ -70,7 +70,9 @@ export default function LoginPage() {
               </Field.Root>
               <Field.Root required>
                 <Field.Label>Password <Field.RequiredIndicator /></Field.Label>
+                {/* native password field here: password managers may save/fill the login */}
                 <PasswordInput
+                  native
                   autoComplete="current-password"
                   value={password}
                   onChange={(e) => setPassword(e.target.value)}
