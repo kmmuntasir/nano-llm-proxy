@@ -9,7 +9,7 @@ import (
 )
 
 // proxyOpenAI is the rotation loop for plain OpenAI-compatible providers
-// (kilo builtin + any GUI-added provider): pick/classify/retry against
+// (a kilo preset or any GUI-added provider): pick/classify/retry against
 // <base_url>/chat/completions with a Bearer upstream key.
 func (g *gateway) proxyOpenAI(ref providerRef, w http.ResponseWriter, r *http.Request, body map[string]any, clientWantsStream bool, start time.Time) string {
 	model, _ := body["model"].(string)

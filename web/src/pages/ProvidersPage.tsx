@@ -13,6 +13,7 @@ import {
   HStack,
   IconButton,
   Input,
+  NativeSelect,
   Stack,
   Switch,
   Text,
@@ -21,16 +22,158 @@ import {
 import { ChevronDown, ChevronUp, List, Plus, Trash2 } from "lucide-react"
 import { api, del, patch, post, put, ApiError } from "../api/client"
 import ModelCard from "../components/ModelCard"
-import type { ProviderKeyView, ProviderView } from "../api/types"
+import type { PresetSpecView, ProviderKeyView, ProviderView } from "../api/types"
 import ConfirmDialog from "../components/ConfirmDialog"
 import StatusBadge from "../components/StatusBadge"
 import { toaster } from "../components/ui/toaster"
 
-// AddProviderCard creates a new generic openai-type provider. A provider needs
-// at least one endpoint root: OpenAI-compatible and/or Anthropic-compatible
-// (e.g. the Z.ai GLM Coding Plan exposes both). The two builtin providers
-// (zen/opencode, kilo/openai) are seeded and only editable.
-function AddProviderCard() {
+// AddPresetCard adds a provider from the curated preset registry with one
+// click: pick a preset, the name and endpoints come from the server (shown
+// read-only — they're release-managed), and only an API key is needed. The
+// preset id is stored on the provider row, so presets already added show as
+// disabled in the dropdown.
+function AddPresetCard({ added }: { added: Set<string> }) {
+  const qc = useQueryClient()
+  const [presetID, setPresetID] = useState("")
+  const [name, setName] = useState("")
+  const [key, setKey] = useState("")
+  const [error, setError] = useState("")
+
+  const { data } = useQuery({
+    queryKey: ["presets"],
+    queryFn: () => api<{ presets: PresetSpecView[] }>("/api/providers/presets"),
+  })
+  const presets = data?.presets ?? []
+  const spec = presets.find((p) => p.id === presetID)
+
+  const select = (id: string) => {
+    setPresetID(id)
+    // re-default the name on every switch (still editable afterwards)
+    setName(presets.find((p) => p.id === id)?.id ?? "")
+    setError("")
+  }
+
+  const create = useMutation({
+    mutationFn: () =>
+      post<{ id: number }>("/api/providers", {
+        name,
+        preset: presetID,
+        keys: [key],
+      }),
+    onSuccess: async () => {
+      setPresetID("")
+      setName("")
+      setKey("")
+      setError("")
+      await qc.invalidateQueries({ queryKey: ["providers"] })
+      toaster.create({ title: "Provider added", type: "success" })
+    },
+    onError: (e) => setError(e instanceof ApiError ? e.message : "Failed to create the provider"),
+  })
+
+  return (
+    <Card.Root>
+      <Card.Header>
+        <Heading size="sm">Add Provider</Heading>
+        <Text fontSize="xs" color="fg.muted">
+          Curated providers with preset endpoints — pick one, paste an API key.
+          Need a custom URL or an unlisted provider? Use{" "}
+          <Code fontFamily="mono">Add Custom Provider</Code> below.
+        </Text>
+      </Card.Header>
+      <Card.Body>
+        <form
+          onSubmit={(e) => {
+            e.preventDefault()
+            if (!presetID) {
+              setError("Choose a provider from the dropdown")
+              return
+            }
+            if (key.trim() === "") {
+              setError("An upstream API key is required")
+              return
+            }
+            create.mutate()
+          }}
+        >
+          <HStack gap={3} align="end" flexWrap="wrap">
+            <Field.Root required minW="220px">
+              <Field.Label>Provider</Field.Label>
+              <NativeSelect.Root size="sm">
+                <NativeSelect.Field
+                  value={presetID}
+                  onChange={(e) => select(e.target.value)}
+                >
+                  <option value="">Choose a provider…</option>
+                  {presets.map((p) => (
+                    <option key={p.id} value={p.id} disabled={added.has(p.id)}>
+                      {p.label}
+                      {added.has(p.id) ? " — added" : ""}
+                    </option>
+                  ))}
+                </NativeSelect.Field>
+                <NativeSelect.Indicator />
+              </NativeSelect.Root>
+            </Field.Root>
+            {spec && (
+              <Field.Root minW="180px" flex={1}>
+                <Field.Label>Name (model prefix)</Field.Label>
+                <Input
+                  value={name}
+                  onChange={(e) => setName(e.target.value.toLowerCase())}
+                  fontFamily="mono"
+                />
+              </Field.Root>
+            )}
+            <Field.Root required minW="220px" flex={1}>
+              <Field.Label>API key</Field.Label>
+              <Input
+                type="password"
+                value={key}
+                onChange={(e) => setKey(e.target.value)}
+                fontFamily="mono"
+              />
+            </Field.Root>
+            <Button type="submit" colorPalette="blue" loading={create.isPending}>
+              <Plus /> Add
+            </Button>
+          </HStack>
+          {spec && (
+            <Stack fontSize="xs" color="fg.muted" gap={1} mt={3}>
+              {spec.openaiBaseUrl && (
+                <HStack fontSize="xs" color="fg.muted">
+                  <Badge variant="subtle" colorPalette="blue" flexShrink={0}>
+                    openai
+                  </Badge>
+                  <Text fontFamily="mono">{spec.openaiBaseUrl}</Text>
+                </HStack>
+              )}
+              {spec.anthropicBaseUrl && (
+                <HStack fontSize="xs" color="fg.muted">
+                  <Badge variant="subtle" colorPalette="orange" flexShrink={0}>
+                    anthropic
+                  </Badge>
+                  <Text fontFamily="mono">{spec.anthropicBaseUrl}</Text>
+                </HStack>
+              )}
+            </Stack>
+          )}
+          {error && (
+            <Text color="red.fg" fontSize="sm" mt={2}>
+              {error}
+            </Text>
+          )}
+        </form>
+      </Card.Body>
+    </Card.Root>
+  )
+}
+
+// AddCustomProviderCard creates a new generic openai-type provider. A provider
+// needs at least one endpoint root: OpenAI-compatible and/or
+// Anthropic-compatible (e.g. the Z.ai GLM Coding Plan exposes both). Only zen
+// is builtin — everything else, preset or custom, comes from these forms.
+function AddCustomProviderCard() {
   const qc = useQueryClient()
   const [name, setName] = useState("")
   const [baseURL, setBaseURL] = useState("")
@@ -61,7 +204,7 @@ function AddProviderCard() {
   return (
     <Card.Root>
       <Card.Header>
-        <Heading size="sm">Add provider</Heading>
+        <Heading size="sm">Add Custom Provider</Heading>
         <Text fontSize="xs" color="fg.muted">
           The name becomes the model prefix (<Code fontFamily="mono">name/model-id</Code>).
           At least one endpoint is required — OpenAI-compatible, Anthropic-compatible, or
@@ -390,6 +533,7 @@ function ProviderCard({ p }: { p: ProviderView }) {
             </Heading>
             <Badge variant="outline">{p.type}</Badge>
             {p.builtin && <Badge variant="solid" colorPalette="purple">builtin</Badge>}
+            {p.preset && <Badge variant="subtle" colorPalette="teal">{p.preset}</Badge>}
             <Badge colorPalette={p.healthy > 0 ? "green" : "red"}>
               {p.healthy}/{p.total} healthy
             </Badge>
@@ -571,11 +715,14 @@ export default function ProvidersPage() {
     queryKey: ["providers"],
     queryFn: () => api<{ providers: ProviderView[] }>("/api/providers"),
   })
+  // presets already added (any provider row carrying that preset id)
+  const added = new Set((data?.providers ?? []).filter((p) => p.preset).map((p) => p.preset))
 
   return (
     <VStack align="stretch" gap={6}>
       <Heading size="lg">Providers</Heading>
-      <AddProviderCard />
+      <AddPresetCard added={added} />
+      <AddCustomProviderCard />
       {isLoading && <Text>Loading…</Text>}
       {error && <Text color="red.fg">Failed to load providers</Text>}
       <VStack align="stretch" gap={4}>

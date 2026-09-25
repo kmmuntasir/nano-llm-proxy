@@ -43,10 +43,20 @@ export interface ProviderView {
   anthropicBaseUrl: string
   enabled: boolean
   builtin: boolean
+  preset: string
   sortOrder: number
   healthy: number
   total: number
   keys: ProviderKeyView[]
+}
+
+// A curated preset from GET /api/providers/presets — release-managed
+// endpoints the GUI offers in the "Add Provider" dropdown.
+export interface PresetSpecView {
+  id: string
+  label: string
+  openaiBaseUrl: string
+  anthropicBaseUrl: string
 }
 
 export interface ActivityEntry {

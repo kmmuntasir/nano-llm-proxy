@@ -1,0 +1,383 @@
+package gateway
+
+import (
+	"encoding/json"
+	"net/http"
+	"net/http/httptest"
+	"slices"
+	"strings"
+	"sync"
+	"testing"
+
+	"github.com/kmmuntasir/nano-llm-proxy/internal/store"
+)
+
+// --- helpers ---
+
+// addPresetProvider inserts a store.Provider carrying a preset id and (with
+// rebuildPools) refreshes the hot path — the same thing a preset create via
+// the API does.
+func addPresetProvider(t *testing.T, st *store.Store, preset, name, baseURL string, keys ...string) *store.Provider {
+	t.Helper()
+	p := &store.Provider{Name: name, Type: "openai", BaseURL: baseURL, Enabled: true, Preset: preset, SortOrder: 100}
+	pks := make([]store.ProviderKey, 0, len(keys))
+	for _, k := range keys {
+		pks = append(pks, store.ProviderKey{Key: k})
+	}
+	if err := st.CreateProvider(p, pks); err != nil {
+		t.Fatalf("CreateProvider(%s): %v", name, err)
+	}
+	return p
+}
+
+// --- registry invariants ---
+
+func TestPresetRegistryInvariants(t *testing.T) {
+	var prevLabel string
+	for i, p := range presetRegistry {
+		if !providerNameRe.MatchString(p.ID) {
+			t.Errorf("preset %q violates providerNameRe", p.ID)
+		}
+		if p.BaseURL == "" && p.AnthropicBaseURL == "" {
+			t.Errorf("preset %q has no endpoint root", p.ID)
+		}
+		if i > 0 && strings.ToLower(p.Label) < strings.ToLower(prevLabel) {
+			t.Errorf("registry not sorted by label at %q (after %q)", p.Label, prevLabel)
+		}
+		prevLabel = p.Label
+	}
+	// every preset is lookable, unknown ids are not
+	if _, ok := lookupPreset("zai"); !ok {
+		t.Error("lookupPreset(zai) missing")
+	}
+	if p, ok := lookupPreset("nope"); ok || p.ID != "" {
+		t.Error("lookupPreset(nope) should miss")
+	}
+	// kilo carries the suffixed-catalog treatment; plain presets do not
+	if !presetSuffixed("kilo") || presetSuffixed("zai") || presetSuffixed("") {
+		t.Error("suffixed flags wrong: want kilo true, others false")
+	}
+	if presetCatalogHook("kilo") == nil {
+		t.Error("kilo must keep its catalog hook")
+	}
+	if presetCatalogHook("zai") != nil {
+		t.Error("zai should pass through generically")
+	}
+}
+
+// --- preset catalog enrichment (kilo hook) ---
+
+func TestKiloPresetCatalogEnrichment(t *testing.T) {
+	up := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		w.Write([]byte(`{"data":[
+			{"id":"qwen3.8-27b","context_length":262144,
+			 "top_provider":{"max_completion_tokens":16384},
+			 "architecture":{"input_modalities":["text","image"]},
+			 "output_modalities":["text"],
+			 "supported_parameters":["tools","temperature"],
+			 "description":"big model","isFree":true},
+			{"id":"paid-model","context_length":131072,"isFree":false}
+		]}`))
+	}))
+	defer up.Close()
+
+	g, st := testStoreGateway(t, up.URL)
+	addPresetProvider(t, st, "kilo", "mykilo", up.URL, "kk1")
+	if err := g.rebuildPools(); err != nil {
+		t.Fatalf("rebuildPools: %v", err)
+	}
+	ref, ok := g.provider("mykilo")
+	if !ok {
+		t.Fatal("kilo preset provider not in registry")
+	}
+
+	models, err := g.fetchUpstreamModels(ref)
+	if err != nil {
+		t.Fatalf("fetchUpstreamModels: %v", err)
+	}
+	var byID = map[string]map[string]any{}
+	for _, m := range models {
+		e := m.(map[string]any)
+		byID[e["id"].(string)] = e
+	}
+	free, ok := byID["mykilo/qwen3.8-27b-262K-txt-img"]
+	if !ok {
+		t.Fatalf("suffixed kilo entry missing: %v", byID)
+	}
+	if free["context_window"] != int64(262144) || free["max_output_tokens"] != int64(16384) {
+		t.Errorf("context/output not enriched: %v", free)
+	}
+	if free["description"] != "big model" || free["free"] != true {
+		t.Errorf("description/free not mapped: %v", free)
+	}
+	if _, ok := free["supported_parameters"]; !ok {
+		t.Errorf("supported_parameters not passed through: %v", free)
+	}
+	if _, ok := byID["mykilo/paid-model-131K"]; !ok {
+		t.Errorf("non-free entry dropped with freeOnly off: %v", byID)
+	}
+
+	// freeOnly=true (Settings → Kilo) filters through the same hook
+	adminCookie := loginAs(t, g, "admin@example.com", "super-secret-pass")
+	rec := httptest.NewRecorder()
+	req := httptest.NewRequest("PUT", "/api/settings", strings.NewReader(`{"kilo":{"freeOnly":true}}`))
+	req.AddCookie(adminCookie)
+	req.Header.Set("Origin", "https://gateway.example.com")
+	req.RemoteAddr = "10.9.9.9:5555"
+	g.requireSession(g.requireSuperadmin(g.handlePutSettings))(rec, req)
+	if rec.Code != 200 {
+		t.Fatalf("PUT settings: got %d: %s", rec.Code, rec.Body.String())
+	}
+
+	models, err = g.fetchUpstreamModels(ref)
+	if err != nil {
+		t.Fatalf("refetch: %v", err)
+	}
+	for _, m := range models {
+		id, _ := m.(map[string]any)["id"].(string)
+		if strings.Contains(id, "paid-model") {
+			t.Fatalf("freeOnly left a paid model in the catalog: %v", models)
+		}
+	}
+	if len(models) != 1 {
+		t.Fatalf("got %d models with freeOnly on, want 1", len(models))
+	}
+}
+
+// --- suffix stripping keyed on preset ---
+
+func TestKiloPresetSuffixStrippedOnRouting(t *testing.T) {
+	var mu sync.Mutex
+	var kiloModels, genericModels []string
+	up := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		var body struct {
+			Model string `json:"model"`
+		}
+		json.NewDecoder(r.Body).Decode(&body)
+		mu.Lock()
+		if strings.HasPrefix(r.URL.Path, "/kilo") {
+			kiloModels = append(kiloModels, body.Model)
+		} else {
+			genericModels = append(genericModels, body.Model)
+		}
+		mu.Unlock()
+		sseOK(w)
+	}))
+	defer up.Close()
+
+	g, st := testStoreGateway(t, up.URL)
+	addPresetProvider(t, st, "kilo", "mykilo", up.URL+"/kilo", "kk1")
+	addGenericProvider(t, st, "generic", up.URL+"/generic", "gk1")
+	if err := g.rebuildPools(); err != nil {
+		t.Fatalf("rebuildPools: %v", err)
+	}
+
+	rec := httptest.NewRecorder()
+	g.handleChat(rec, chatReq("mykilo", "m-262K-txt"))
+	if rec.Code != 200 {
+		t.Fatalf("kilo chat: got %d: %s", rec.Code, rec.Body.String())
+	}
+	rec = httptest.NewRecorder()
+	g.handleChat(rec, chatReq("generic", "m-262K-txt"))
+	if rec.Code != 200 {
+		t.Fatalf("generic chat: got %d: %s", rec.Code, rec.Body.String())
+	}
+
+	mu.Lock()
+	defer mu.Unlock()
+	// kilo preset: suffixed catalog ids are stripped before the upstream call
+	if len(kiloModels) != 1 || kiloModels[0] != "m" {
+		t.Fatalf("kilo upstream models = %v, want [m]", kiloModels)
+	}
+	// generic provider: the suffix could be a real id — only [1m] is stripped
+	if len(genericModels) != 1 || genericModels[0] != "m-262K-txt" {
+		t.Fatalf("generic upstream models = %v, want [m-262K-txt]", genericModels)
+	}
+}
+
+// --- presets endpoint ---
+
+func TestProviderPresetsEndpoint(t *testing.T) {
+	g, st := testStoreGateway(t, "http://127.0.0.1:1") // upstream never reached
+	insertPlainUser(t, st, "pi@example.com", "pi-password-123", "user")
+	handler := g.requireSession(g.requireSuperadmin(g.handleListPresets))
+
+	// no cookie -> 401
+	rec := httptest.NewRecorder()
+	handler(rec, httptest.NewRequest("GET", "/api/providers/presets", nil))
+	if rec.Code != 401 {
+		t.Fatalf("anonymous: got %d, want 401", rec.Code)
+	}
+
+	// plain user -> 403
+	userCookie := loginAs(t, g, "pi@example.com", "pi-password-123")
+	rec = httptest.NewRecorder()
+	req := httptest.NewRequest("GET", "/api/providers/presets", nil)
+	req.AddCookie(userCookie)
+	handler(rec, req)
+	if rec.Code != 403 {
+		t.Fatalf("plain user: got %d, want 403", rec.Code)
+	}
+
+	// superadmin -> the curated registry, label order preserved
+	adminCookie := loginAs(t, g, "admin@example.com", "super-secret-pass")
+	rec = httptest.NewRecorder()
+	req = httptest.NewRequest("GET", "/api/providers/presets", nil)
+	req.AddCookie(adminCookie)
+	handler(rec, req)
+	if rec.Code != 200 {
+		t.Fatalf("admin: got %d", rec.Code)
+	}
+	body := rec.Body.String()
+	for _, want := range []string{`"id":"kilo"`, "Z.ai (GLM Coding Plan)", "https://api.z.ai/api/anthropic", "https://openrouter.ai/api"} {
+		if !strings.Contains(body, want) {
+			t.Fatalf("presets body missing %q: %s", want, body)
+		}
+	}
+	if got := len(jsonExtractIDs(t, body)); got != len(presetRegistry) {
+		t.Fatalf("presets endpoint listed %d, registry has %d", got, len(presetRegistry))
+	}
+	// dropdown order == registry order
+	last := -1
+	for _, label := range []string{"Anthropic", "DeepSeek", "Kilo", "OpenAI", "xAI (Grok)", "Z.ai (GLM Coding Plan)"} {
+		idx := strings.Index(body, label)
+		if idx < 0 || idx < last {
+			t.Fatalf("preset %q out of order (idx %d, prev %d)", label, idx, last)
+		}
+		last = idx
+	}
+}
+
+func jsonExtractIDs(t *testing.T, body string) []string {
+	t.Helper()
+	var parsed struct {
+		Presets []struct {
+			ID string `json:"id"`
+		} `json:"presets"`
+	}
+	if err := json.Unmarshal([]byte(body), &parsed); err != nil {
+		t.Fatalf("parse presets: %v", err)
+	}
+	ids := make([]string, 0, len(parsed.Presets))
+	for _, p := range parsed.Presets {
+		ids = append(ids, p.ID)
+	}
+	return ids
+}
+
+// --- create-from-preset semantics ---
+
+func TestPresetProviderCreate(t *testing.T) {
+	g, st := testStoreGateway(t, "http://127.0.0.1:1")
+	adminCookie := loginAs(t, g, "admin@example.com", "super-secret-pass")
+
+	post := func(body string) *httptest.ResponseRecorder {
+		req := httptest.NewRequest("POST", "/api/providers", strings.NewReader(body))
+		req.AddCookie(adminCookie)
+		rec := httptest.NewRecorder()
+		g.requireSession(g.requireSuperadmin(g.handleCreateProvider))(rec, req)
+		return rec
+	}
+
+	// unknown preset -> 400
+	rec := post(`{"preset":"qwen","keys":["k1"]}`)
+	if rec.Code != 400 || !strings.Contains(rec.Body.String(), "Unknown provider preset") {
+		t.Fatalf("unknown preset: got %d: %s", rec.Code, rec.Body.String())
+	}
+
+	// zai from preset: name defaults to the id, both roots come from the registry
+	rec = post(`{"preset":"zai","keys":["k1"]}`)
+	if rec.Code != 201 {
+		t.Fatalf("zai create: got %d: %s", rec.Code, rec.Body.String())
+	}
+	p, err := st.Provider(mustID(t, rec))
+	if err != nil || p == nil {
+		t.Fatalf("zai row: %v", err)
+	}
+	if p.Name != "zai" || p.Preset != "zai" {
+		t.Fatalf("zai name/preset = %q/%q", p.Name, p.Preset)
+	}
+	if p.BaseURL != "https://api.z.ai/api/coding/paas/v4" || p.AnthropicBaseURL != "https://api.z.ai/api/anthropic" {
+		t.Fatalf("zai roots not defaulted from the registry: %+v", p)
+	}
+
+	// multiple providers from one preset are allowed (different names)
+	for _, name := range []string{"mykilo", "mykilo2"} {
+		rec = post(`{"preset":"kilo","name":"` + name + `","keys":["kk"]}`)
+		if rec.Code != 201 {
+			t.Fatalf("kilo preset %q: got %d: %s", name, rec.Code, rec.Body.String())
+		}
+	}
+
+	// zen is still reserved; kilo is no longer
+	rec = post(`{"name":"zen","baseUrl":"https://x.example/v1","keys":["k2"]}`)
+	if rec.Code != 409 {
+		t.Fatalf("zen name: got %d, want 409", rec.Code)
+	}
+	rec = post(`{"name":"kilo","baseUrl":"https://kilo.example/v1","keys":["k3"]}`)
+	if rec.Code != 201 {
+		t.Fatalf("kilo-as-custom name: got %d: %s", rec.Code, rec.Body.String())
+	}
+
+	// preset create whose defaulted name collides -> the usual 409
+	rec = post(`{"preset":"zai","keys":["k4"]}`)
+	if rec.Code != 409 || !strings.Contains(rec.Body.String(), "already exists") {
+		t.Fatalf("zai name collision: got %d: %s", rec.Code, rec.Body.String())
+	}
+
+	// preset is immutable: the PATCH struct has no preset field
+	rec = httptest.NewRecorder()
+	patchReq := httptest.NewRequest("PATCH", "/api/providers/2", strings.NewReader(`{"preset":"openai"}`))
+	patchReq.AddCookie(adminCookie)
+	patchReq.SetPathValue("id", "2")
+	g.requireSession(g.requireSuperadmin(g.handlePatchProvider))(rec, patchReq)
+	if rec.Code != 200 {
+		t.Fatalf("patch: got %d: %s", rec.Code, rec.Body.String())
+	}
+	p, _ = st.Provider(2)
+	if p.Preset != "zai" {
+		t.Fatalf("preset mutated by PATCH: %+v", p)
+	}
+
+	// the list carries the preset for the GUI's "already added" state
+	rec = httptest.NewRecorder()
+	listReq := httptest.NewRequest("GET", "/api/providers", nil)
+	listReq.AddCookie(adminCookie)
+	g.requireSession(g.requireSuperadmin(g.handleListProviders))(rec, listReq)
+	var listed struct {
+		Providers []struct {
+			Name   string `json:"name"`
+			Preset string `json:"preset"`
+		} `json:"providers"`
+	}
+	json.Unmarshal(rec.Body.Bytes(), &listed)
+	var zaiFound bool
+	for _, lp := range listed.Providers {
+		if lp.Name == "zai" && lp.Preset == "zai" {
+			zaiFound = true
+		}
+	}
+	if !zaiFound {
+		t.Fatalf("list missing preset field: %s", rec.Body.String())
+	}
+	if !slices.ContainsFunc(listed.Providers, func(lp struct {
+		Name   string `json:"name"`
+		Preset string `json:"preset"`
+	}) bool {
+		return lp.Name == "zen" && lp.Preset == ""
+	}) {
+		t.Fatalf("zen should list with an empty preset: %s", rec.Body.String())
+	}
+}
+
+func mustID(t *testing.T, rec *httptest.ResponseRecorder) int64 {
+	t.Helper()
+	var out struct {
+		ID int64 `json:"id"`
+	}
+	if err := json.Unmarshal(rec.Body.Bytes(), &out); err != nil || out.ID == 0 {
+		t.Fatalf("no id in create response (%v): %s", err, rec.Body.String())
+	}
+	return out.ID
+}
