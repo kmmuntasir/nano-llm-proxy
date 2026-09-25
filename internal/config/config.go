@@ -62,7 +62,7 @@ func (c *Config) applyDefaults() *Config {
 		c.Zen.BaseURL = "https://opencode.ai/zen/v1"
 	}
 	if c.Kilo.BaseURL == "" {
-		c.Kilo.BaseURL = "https://api.kilo.ai/api/gateway/v1"
+		c.Kilo.BaseURL = "https://api.kilo.ai/api/gateway"
 	}
 	return c
 }

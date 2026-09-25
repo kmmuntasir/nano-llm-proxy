@@ -206,7 +206,7 @@ var presetRegistry = []presetSpec{
 	{
 		ID:       "kilo",
 		Label:    "Kilo",
-		BaseURL:  "https://api.kilo.ai/api/gateway/v1",
+		BaseURL:  "https://api.kilo.ai/api/gateway",
 		DocsURL:  "https://kilo.ai/docs",
 		catalog:  kiloCatalog,
 		suffixed: true,
