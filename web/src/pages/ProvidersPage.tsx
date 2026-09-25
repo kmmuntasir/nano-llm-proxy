@@ -14,6 +14,7 @@ import {
   IconButton,
   Input,
   NativeSelect,
+  SimpleGrid,
   Stack,
   Switch,
   Text,
@@ -27,15 +28,20 @@ import ConfirmDialog from "../components/ConfirmDialog"
 import StatusBadge from "../components/StatusBadge"
 import { toaster } from "../components/ui/toaster"
 
-// AddPresetCard adds a provider from the curated preset registry with one
-// click: pick a preset, the name and endpoints come from the server (shown
-// read-only — they're release-managed), and only an API key is needed. The
-// preset id is stored on the provider row, so presets already added show as
-// disabled in the dropdown.
-function AddPresetCard({ added }: { added: Set<string> }) {
+// AddProviderCard creates a provider two ways: pick a curated preset (the
+// name and release-managed endpoints come from the server — shown read-only
+// below the form — and only an API key is needed) or choose "Custom
+// Provider…" and enter the endpoint roots yourself. At least one endpoint is
+// required for custom: OpenAI-compatible and/or Anthropic-compatible (e.g.
+// the Z.ai GLM Coding Plan exposes both; /v1/messages is served natively
+// when the Anthropic root is set). The preset id is stored on the provider
+// row, so presets already added show as disabled in the dropdown.
+function AddProviderCard({ added }: { added: Set<string> }) {
   const qc = useQueryClient()
-  const [presetID, setPresetID] = useState("")
+  const [presetID, setPresetID] = useState("") // "custom" = the custom form
   const [name, setName] = useState("")
+  const [baseURL, setBaseURL] = useState("")
+  const [anthropicURL, setAnthropicURL] = useState("")
   const [key, setKey] = useState("")
   const [error, setError] = useState("")
 
@@ -44,25 +50,34 @@ function AddPresetCard({ added }: { added: Set<string> }) {
     queryFn: () => api<{ presets: PresetSpecView[] }>("/api/providers/presets"),
   })
   const presets = data?.presets ?? []
+  const isCustom = presetID === "custom"
   const spec = presets.find((p) => p.id === presetID)
 
   const select = (id: string) => {
     setPresetID(id)
-    // re-default the name on every switch (still editable afterwards)
-    setName(presets.find((p) => p.id === id)?.id ?? "")
+    // presets default the name to the preset id (still editable); custom
+    // starts blank
+    setName(id === "custom" ? "" : (presets.find((p) => p.id === id)?.id ?? ""))
+    if (id !== "custom") {
+      setBaseURL("")
+      setAnthropicURL("")
+    }
     setError("")
   }
 
   const create = useMutation({
     mutationFn: () =>
-      post<{ id: number }>("/api/providers", {
-        name,
-        preset: presetID,
-        keys: [key],
-      }),
+      post<{ id: number }>(
+        "/api/providers",
+        isCustom
+          ? { name, baseUrl: baseURL, anthropicBaseUrl: anthropicURL, keys: [key] }
+          : { name, preset: presetID, keys: [key] },
+      ),
     onSuccess: async () => {
       setPresetID("")
       setName("")
+      setBaseURL("")
+      setAnthropicURL("")
       setKey("")
       setError("")
       await qc.invalidateQueries({ queryKey: ["providers"] })
@@ -76,9 +91,11 @@ function AddPresetCard({ added }: { added: Set<string> }) {
       <Card.Header>
         <Heading size="sm">Add Provider</Heading>
         <Text fontSize="xs" color="fg.muted">
-          Curated providers with preset endpoints — pick one, paste an API key.
-          Need a custom URL or an unlisted provider? Use{" "}
-          <Code fontFamily="mono">Add Custom Provider</Code> below.
+          The name becomes the model prefix (<Code fontFamily="mono">name/model-id</Code>).
+          Presets ship release-managed endpoints — just paste an API key. Custom
+          providers need at least one endpoint root; <Code fontFamily="mono">/v1/messages</Code>{" "}
+          is served natively when the Anthropic root is set. opencode-style providers can't
+          be added — zen is one of a kind.
         </Text>
       </Card.Header>
       <Card.Body>
@@ -87,6 +104,14 @@ function AddPresetCard({ added }: { added: Set<string> }) {
             e.preventDefault()
             if (!presetID) {
               setError("Choose a provider from the dropdown")
+              return
+            }
+            if (name.trim() === "") {
+              setError("A provider name is required (it becomes the model prefix)")
+              return
+            }
+            if (isCustom && baseURL.trim() === "" && anthropicURL.trim() === "") {
+              setError("At least one endpoint is required: base URL and/or Anthropic endpoint")
               return
             }
             if (key.trim() === "") {
@@ -100,10 +125,7 @@ function AddPresetCard({ added }: { added: Set<string> }) {
             <Field.Root required minW="220px">
               <Field.Label>Provider</Field.Label>
               <NativeSelect.Root size="sm">
-                <NativeSelect.Field
-                  value={presetID}
-                  onChange={(e) => select(e.target.value)}
-                >
+                <NativeSelect.Field value={presetID} onChange={(e) => select(e.target.value)}>
                   <option value="">Choose a provider…</option>
                   {presets.map((p) => (
                     <option key={p.id} value={p.id} disabled={added.has(p.id)}>
@@ -111,19 +133,41 @@ function AddPresetCard({ added }: { added: Set<string> }) {
                       {added.has(p.id) ? " — added" : ""}
                     </option>
                   ))}
+                  <option value="custom">Custom Provider…</option>
                 </NativeSelect.Field>
                 <NativeSelect.Indicator />
               </NativeSelect.Root>
             </Field.Root>
-            {spec && (
-              <Field.Root minW="180px" flex={1}>
-                <Field.Label>Name (model prefix)</Field.Label>
-                <Input
-                  value={name}
-                  onChange={(e) => setName(e.target.value.toLowerCase())}
-                  fontFamily="mono"
-                />
-              </Field.Root>
+            <Field.Root required minW="160px">
+              <Field.Label>Name</Field.Label>
+              <Input
+                placeholder={isCustom ? "e.g. together" : spec?.id}
+                value={name}
+                onChange={(e) => setName(e.target.value.toLowerCase())}
+                fontFamily="mono"
+              />
+            </Field.Root>
+            {isCustom && (
+              <>
+                <Field.Root minW="280px" flex={1}>
+                  <Field.Label>OpenAI-compatible endpoint</Field.Label>
+                  <Input
+                    placeholder="https://api.example.com/v1"
+                    value={baseURL}
+                    onChange={(e) => setBaseURL(e.target.value)}
+                    fontFamily="mono"
+                  />
+                </Field.Root>
+                <Field.Root minW="280px" flex={1}>
+                  <Field.Label>Anthropic-compatible endpoint</Field.Label>
+                  <Input
+                    placeholder="https://api.z.ai/api/anthropic"
+                    value={anthropicURL}
+                    onChange={(e) => setAnthropicURL(e.target.value)}
+                    fontFamily="mono"
+                  />
+                </Field.Root>
+              </>
             )}
             <Field.Root required minW="220px" flex={1}>
               <Field.Label>API key</Field.Label>
@@ -158,112 +202,6 @@ function AddPresetCard({ added }: { added: Set<string> }) {
               )}
             </Stack>
           )}
-          {error && (
-            <Text color="red.fg" fontSize="sm" mt={2}>
-              {error}
-            </Text>
-          )}
-        </form>
-      </Card.Body>
-    </Card.Root>
-  )
-}
-
-// AddCustomProviderCard creates a new generic openai-type provider. A provider
-// needs at least one endpoint root: OpenAI-compatible and/or
-// Anthropic-compatible (e.g. the Z.ai GLM Coding Plan exposes both). Only zen
-// is builtin — everything else, preset or custom, comes from these forms.
-function AddCustomProviderCard() {
-  const qc = useQueryClient()
-  const [name, setName] = useState("")
-  const [baseURL, setBaseURL] = useState("")
-  const [anthropicURL, setAnthropicURL] = useState("")
-  const [key, setKey] = useState("")
-  const [error, setError] = useState("")
-
-  const create = useMutation({
-    mutationFn: () =>
-      post<{ id: number }>("/api/providers", {
-        name,
-        baseUrl: baseURL,
-        anthropicBaseUrl: anthropicURL,
-        keys: [key],
-      }),
-    onSuccess: async () => {
-      setName("")
-      setBaseURL("")
-      setAnthropicURL("")
-      setKey("")
-      setError("")
-      await qc.invalidateQueries({ queryKey: ["providers"] })
-      toaster.create({ title: "Provider added", type: "success" })
-    },
-    onError: (e) => setError(e instanceof ApiError ? e.message : "Failed to create the provider"),
-  })
-
-  return (
-    <Card.Root>
-      <Card.Header>
-        <Heading size="sm">Add Custom Provider</Heading>
-        <Text fontSize="xs" color="fg.muted">
-          The name becomes the model prefix (<Code fontFamily="mono">name/model-id</Code>).
-          At least one endpoint is required — OpenAI-compatible, Anthropic-compatible, or
-          both (Z.ai GLM Coding Plan has each; /v1/messages is served natively when the
-          Anthropic root is set). opencode-style providers can't be added — zen is one of a kind.
-        </Text>
-      </Card.Header>
-      <Card.Body>
-        <form
-          onSubmit={(e) => {
-            e.preventDefault()
-            if (baseURL.trim() === "" && anthropicURL.trim() === "") {
-              setError("At least one endpoint is required: base URL and/or Anthropic endpoint")
-              return
-            }
-            create.mutate()
-          }}
-        >
-          <HStack gap={3} align="end" flexWrap="wrap">
-            <Field.Root required minW="140px">
-              <Field.Label>Name</Field.Label>
-              <Input
-                placeholder="e.g. together"
-                value={name}
-                onChange={(e) => setName(e.target.value.toLowerCase())}
-                fontFamily="mono"
-              />
-            </Field.Root>
-            <Field.Root minW="280px" flex={1}>
-              <Field.Label>OpenAI-compatible endpoint</Field.Label>
-              <Input
-                placeholder="https://api.example.com/v1"
-                value={baseURL}
-                onChange={(e) => setBaseURL(e.target.value)}
-                fontFamily="mono"
-              />
-            </Field.Root>
-            <Field.Root minW="280px" flex={1}>
-              <Field.Label>Anthropic-compatible endpoint</Field.Label>
-              <Input
-                placeholder="https://api.z.ai/api/anthropic"
-                value={anthropicURL}
-                onChange={(e) => setAnthropicURL(e.target.value)}
-                fontFamily="mono"
-              />
-            </Field.Root>
-            <Field.Root required minW="220px" flex={1}>
-              <Field.Label>API key</Field.Label>
-              <Input
-                type="password"
-                value={key}
-                onChange={(e) => setKey(e.target.value)}
-                fontFamily="mono"
-              />
-            </Field.Root>
-            <Button type="submit" colorPalette="blue" loading={create.isPending}>
-              <Plus /> Add
-            </Button>
-          </HStack>
           {error && (
             <Text color="red.fg" fontSize="sm" mt={2}>
               {error}
@@ -363,8 +301,9 @@ interface ProviderCatalogEntry {
 }
 
 // ModelsListModal shows the provider's live catalog as model cards. For the
-// zen builtin, each card carries a Responses-API toggle (written straight to
-// the per-model flag in settings); generic providers are view-only.
+// zen builtin (opencode-typed), models whose per-model Responses-API flag is
+// on carry a "Served on /v1/responses" footer with a toggle (written straight
+// to the flag in settings); everything else is view-only.
 function ModelsListModal({
   provider,
   open,
@@ -375,7 +314,7 @@ function ModelsListModal({
   onOpenChange: (o: boolean) => void
 }) {
   const qc = useQueryClient()
-  const isZen = provider.name === "zen"
+  const canToggleResponses = provider.type === "opencode"
   const [filter, setFilter] = useState("")
   const { data, isLoading, error } = useQuery({
     queryKey: ["providerModels", provider.id],
@@ -445,10 +384,10 @@ function ModelsListModal({
                     responsesApi={m.responses_api}
                     free={m.free}
                     footer={
-                      isZen ? (
+                      canToggleResponses && m.responses_api ? (
                         <HStack justify="space-between" pt={1}>
                           <Text fontSize="xs" color="fg.muted">
-                            Serve on /v1/responses
+                            Served on /v1/responses
                           </Text>
                           <Switch.Root
                             size="sm"
@@ -524,7 +463,7 @@ function ProviderCard({ p }: { p: ProviderView }) {
   })
 
   return (
-    <Card.Root>
+    <Card.Root height="100%">
       <Card.Body pt={4} gap={3}>
         <HStack justify="space-between" flexWrap="wrap" gap={2}>
           <HStack gap={2} flexWrap="wrap">
@@ -710,26 +649,96 @@ function ProviderCard({ p }: { p: ProviderView }) {
   )
 }
 
+// ProvidersPage: one add card on top (preset dropdown with a "Custom
+// Provider…" escape hatch), then a Models-page-style filter bar and the
+// provider cards in a responsive grid.
 export default function ProvidersPage() {
   const { data, isLoading, error } = useQuery({
     queryKey: ["providers"],
     queryFn: () => api<{ providers: ProviderView[] }>("/api/providers"),
   })
+  const [search, setSearch] = useState("")
+  const [show, setShow] = useState("all") // all | enabled | disabled | unhealthy
+  const [kind, setKind] = useState("all") // all | builtin | preset | custom
+
+  const providers = data?.providers ?? []
   // presets already added (any provider row carrying that preset id)
-  const added = new Set((data?.providers ?? []).filter((p) => p.preset).map((p) => p.preset))
+  const added = new Set(providers.filter((p) => p.preset).map((p) => p.preset))
+
+  const filtered = providers.filter((p) => {
+    if (show === "enabled" && !p.enabled) return false
+    if (show === "disabled" && p.enabled) return false
+    if (show === "unhealthy" && p.healthy > 0) return false
+    if (kind === "builtin" && !p.builtin) return false
+    if (kind === "preset" && !p.preset) return false
+    if (kind === "custom" && (p.builtin || p.preset)) return false
+    if (search !== "") {
+      const q = search.toLowerCase()
+      const hay = `${p.name} ${p.baseUrl} ${p.anthropicBaseUrl} ${p.preset}`.toLowerCase()
+      if (!hay.includes(q)) return false
+    }
+    return true
+  })
 
   return (
     <VStack align="stretch" gap={6}>
       <Heading size="lg">Providers</Heading>
-      <AddPresetCard added={added} />
-      <AddCustomProviderCard />
+      <AddProviderCard added={added} />
+      <Card.Root>
+        <Card.Body>
+          <HStack flexWrap="wrap" gap={3} align="end">
+            <Field.Root flex={1} minW="220px">
+              <Field.Label>Search</Field.Label>
+              <Input
+                placeholder="Name, endpoint, preset…"
+                value={search}
+                onChange={(e) => setSearch(e.target.value)}
+              />
+            </Field.Root>
+            <Field.Root minW="150px">
+              <Field.Label>Show</Field.Label>
+              <NativeSelect.Root size="sm">
+                <NativeSelect.Field value={show} onChange={(e) => setShow(e.target.value)}>
+                  <option value="all">All</option>
+                  <option value="enabled">Enabled</option>
+                  <option value="disabled">Disabled</option>
+                  <option value="unhealthy">Unhealthy</option>
+                </NativeSelect.Field>
+                <NativeSelect.Indicator />
+              </NativeSelect.Root>
+            </Field.Root>
+            <Field.Root minW="150px">
+              <Field.Label>Kind</Field.Label>
+              <NativeSelect.Root size="sm">
+                <NativeSelect.Field value={kind} onChange={(e) => setKind(e.target.value)}>
+                  <option value="all">All</option>
+                  <option value="builtin">Built-in</option>
+                  <option value="preset">Preset</option>
+                  <option value="custom">Custom</option>
+                </NativeSelect.Field>
+                <NativeSelect.Indicator />
+              </NativeSelect.Root>
+            </Field.Root>
+          </HStack>
+        </Card.Body>
+      </Card.Root>
       {isLoading && <Text>Loading…</Text>}
       {error && <Text color="red.fg">Failed to load providers</Text>}
-      <VStack align="stretch" gap={4}>
-        {(data?.providers ?? []).map((p) => (
+      {!isLoading && !error && (
+        <Text fontSize="sm" color="fg.muted">
+          {filtered.length} of {providers.length} providers
+        </Text>
+      )}
+      <SimpleGrid columns={{ base: 1, lg: 2 }} gap={4}>
+        {filtered.map((p) => (
           <ProviderCard key={p.id} p={p} />
         ))}
-      </VStack>
+      </SimpleGrid>
+      {!isLoading && !error && providers.length > 0 && filtered.length === 0 && (
+        <Text fontSize="sm" color="fg.muted">
+          No providers match the current filters.
+        </Text>
+      )}
     </VStack>
   )
 }

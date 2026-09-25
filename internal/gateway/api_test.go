@@ -103,6 +103,39 @@ func sseOK(w http.ResponseWriter) {
 	w.Write([]byte("data: {\"id\":\"x\",\"choices\":[{\"delta\":{\"content\":\"ok\"}}]}\n\ndata: [DONE]\n\n"))
 }
 
+// TestHealthProviderShape locks the /health contract: one {total, healthy}
+// entry per provider, no legacy flat zen_healthy/kilo_healthy fields.
+func TestHealthProviderShape(t *testing.T) {
+	g, _ := testStoreGateway(t, "http://127.0.0.1:1") // pools: zen + its keys
+	rec := httptest.NewRecorder()
+	g.handleHealth(rec, httptest.NewRequest("GET", "/health", nil))
+	if rec.Code != 200 {
+		t.Fatalf("health: got %d", rec.Code)
+	}
+	var parsed struct {
+		Status    string `json:"status"`
+		UptimeS   int    `json:"uptime_s"`
+		Providers map[string]struct {
+			Total   int `json:"total"`
+			Healthy int `json:"healthy"`
+		} `json:"providers"`
+	}
+	if err := json.Unmarshal(rec.Body.Bytes(), &parsed); err != nil {
+		t.Fatalf("parse health: %v: %s", err, rec.Body.String())
+	}
+	if parsed.Status != "ok" || parsed.UptimeS < 0 {
+		t.Fatalf("status/uptime wrong: %s", rec.Body.String())
+	}
+	zen, ok := parsed.Providers["zen"]
+	if !ok || zen.Total != 2 || zen.Healthy != 2 {
+		t.Fatalf("zen health = %+v (found=%v), want {2 2}", zen, ok)
+	}
+	body := rec.Body.String()
+	if strings.Contains(body, "zen_healthy") || strings.Contains(body, "kilo_healthy") {
+		t.Fatalf("legacy flat fields still present: %s", body)
+	}
+}
+
 // --- generic (GUI-added openai) providers ---
 
 func TestGenericProviderProxyRotation(t *testing.T) {
