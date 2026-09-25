@@ -157,8 +157,10 @@ install_searxng_deps() {
     if command -v apt-get >/dev/null 2>&1; then
         log "installing system packages (apt)"
         export DEBIAN_FRONTEND=noninteractive
-        apt-get update -qq
-        apt-get install -y -qq --no-install-recommends \
+        # ForceIPv4: containers with no IPv6 route hang on v6-preferring
+        # mirrors; v4 always works where apt works at all.
+        apt-get update -qq -o Acquire::ForceIPv4=true
+        apt-get install -y -qq --no-install-recommends -o Acquire::ForceIPv4=true \
             python3 python3-venv python3-dev git gcc libxml2-dev libxslt1-dev curl ca-certificates
     elif command -v dnf >/dev/null 2>&1; then
         log "installing system packages (dnf)"
