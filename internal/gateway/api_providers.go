@@ -3,6 +3,7 @@ package gateway
 import (
 	"crypto/sha256"
 	"encoding/hex"
+	"fmt"
 	"net/http"
 	"net/url"
 	"regexp"
@@ -18,6 +19,16 @@ import (
 // registry (providerspec.go) — set at creation, never patched.
 
 var providerNameRe = regexp.MustCompile(`^[a-z][a-z0-9-]{0,31}$`)
+
+// Upstream key labels are mandatory — they're how a pool of otherwise
+// identical secrets stays identifiable in the GUI.
+const maxKeyLabelLen = 64
+
+// sanitizeKeyLabel trims and validates an upstream key label.
+func sanitizeKeyLabel(label string) (string, bool) {
+	label = strings.TrimSpace(label)
+	return label, label != "" && len(label) <= maxKeyLabelLen
+}
 
 type providerKeyJSON struct {
 	ID        int64  `json:"id"`
@@ -114,12 +125,14 @@ func (g *gateway) handleListPresets(w http.ResponseWriter, r *http.Request) {
 func (g *gateway) handleCreateProvider(w http.ResponseWriter, r *http.Request) {
 	actor := contextUser(r)
 	var req struct {
-		Name             string   `json:"name"`
-		Preset           string   `json:"preset"`
-		BaseURL          string   `json:"baseUrl"`
-		AnthropicBaseURL string   `json:"anthropicBaseUrl"`
-		Keys             []string `json:"keys"`
-		FirstKey         string   `json:"firstKey"`
+		Name             string `json:"name"`
+		Preset           string `json:"preset"`
+		BaseURL          string `json:"baseUrl"`
+		AnthropicBaseURL string `json:"anthropicBaseUrl"`
+		Keys             []struct {
+			Key   string `json:"key"`
+			Label string `json:"label"`
+		} `json:"keys"`
 	}
 	if !readJSON(w, r, &req) {
 		return
@@ -174,24 +187,24 @@ func (g *gateway) handleCreateProvider(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 	}
-	keys := req.Keys
-	if len(keys) == 0 && req.FirstKey != "" {
-		keys = []string{req.FirstKey}
-	}
-	if len(keys) == 0 {
+	if len(req.Keys) == 0 {
 		apiErr(w, http.StatusBadRequest, "At least one upstream API key is required")
 		return
 	}
 	p := &store.Provider{Name: name, Type: "openai", BaseURL: baseURL, AnthropicBaseURL: anthropicURL, Enabled: true, Preset: spec.ID, SortOrder: 100}
-	pks := make([]store.ProviderKey, 0, len(keys))
-	for _, k := range keys {
-		if k != "" {
-			pks = append(pks, store.ProviderKey{Key: k})
+	pks := make([]store.ProviderKey, 0, len(req.Keys))
+	for i, k := range req.Keys {
+		key := strings.TrimSpace(k.Key)
+		if key == "" {
+			apiErr(w, http.StatusBadRequest, fmt.Sprintf("keys[%d]: the upstream API key is required", i))
+			return
 		}
-	}
-	if len(pks) == 0 {
-		apiErr(w, http.StatusBadRequest, "At least one upstream API key is required")
-		return
+		label, ok := sanitizeKeyLabel(k.Label)
+		if !ok {
+			apiErr(w, http.StatusBadRequest, fmt.Sprintf("keys[%d]: a label is required for every upstream API key (1-%d characters)", i, maxKeyLabelLen))
+			return
+		}
+		pks = append(pks, store.ProviderKey{Key: key, Label: label})
 	}
 	if !g.applyMutation(w, actor, "provider.create", "A provider with this name already exists", func() error { return g.store.CreateProvider(p, pks) }) {
 		return
@@ -312,10 +325,15 @@ func (g *gateway) handleAddProviderKey(w http.ResponseWriter, r *http.Request) {
 		apiErr(w, http.StatusBadRequest, "The upstream API key is required")
 		return
 	}
+	label, ok := sanitizeKeyLabel(req.Label)
+	if !ok {
+		apiErr(w, http.StatusBadRequest, fmt.Sprintf("A label is required for every upstream API key (1-%d characters)", maxKeyLabelLen))
+		return
+	}
 	var pk store.ProviderKey
 	if !g.applyMutation(w, actor, "provider.key.add", "This upstream key is already on this provider", func() error {
 		var err error
-		pk, err = g.store.AddProviderKey(id, req.Label, req.Key)
+		pk, err = g.store.AddProviderKey(id, label, req.Key)
 		return err
 	}) {
 		return
@@ -337,6 +355,15 @@ func (g *gateway) handlePatchProviderKey(w http.ResponseWriter, r *http.Request)
 	}
 	if !readJSON(w, r, &req) {
 		return
+	}
+	// labels are mandatory: a patch may rename a key but never blank it
+	if req.Label != nil {
+		label, ok := sanitizeKeyLabel(*req.Label)
+		if !ok {
+			apiErr(w, http.StatusBadRequest, fmt.Sprintf("A label is required for every upstream API key (1-%d characters)", maxKeyLabelLen))
+			return
+		}
+		req.Label = &label
 	}
 	if !g.applyMutation(w, actor, "provider.key.update", "", func() error {
 		return g.store.UpdateProviderKey(keyID, req.Label, req.Disabled)

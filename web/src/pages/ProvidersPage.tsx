@@ -43,6 +43,7 @@ function AddProviderCard({ added }: { added: Set<string> }) {
   const [baseURL, setBaseURL] = useState("")
   const [anthropicURL, setAnthropicURL] = useState("")
   const [key, setKey] = useState("")
+  const [keyLabel, setKeyLabel] = useState("")
   const [error, setError] = useState("")
 
   const { data } = useQuery({
@@ -70,8 +71,8 @@ function AddProviderCard({ added }: { added: Set<string> }) {
       post<{ id: number }>(
         "/api/providers",
         isCustom
-          ? { name, baseUrl: baseURL, anthropicBaseUrl: anthropicURL, keys: [key] }
-          : { name, preset: presetID, keys: [key] },
+          ? { name, baseUrl: baseURL, anthropicBaseUrl: anthropicURL, keys: [{ key, label: keyLabel }] }
+          : { name, preset: presetID, keys: [{ key, label: keyLabel }] },
       ),
     onSuccess: async () => {
       setPresetID("")
@@ -79,6 +80,7 @@ function AddProviderCard({ added }: { added: Set<string> }) {
       setBaseURL("")
       setAnthropicURL("")
       setKey("")
+      setKeyLabel("")
       setError("")
       await qc.invalidateQueries({ queryKey: ["providers"] })
       toaster.create({ title: "Provider added", type: "success" })
@@ -114,6 +116,10 @@ function AddProviderCard({ added }: { added: Set<string> }) {
               setError("At least one endpoint is required: base URL and/or Anthropic endpoint")
               return
             }
+            if (keyLabel.trim() === "") {
+              setError("Every API key needs a label (shown next to the key in the pool)")
+              return
+            }
             if (key.trim() === "") {
               setError("An upstream API key is required")
               return
@@ -122,7 +128,7 @@ function AddProviderCard({ added }: { added: Set<string> }) {
           }}
         >
           <HStack gap={3} align="end" flexWrap="wrap">
-            <Field.Root required minW="220px">
+            <Field.Root required w="220px">
               <Field.Label>Provider</Field.Label>
               <NativeSelect.Root size="sm">
                 <NativeSelect.Field value={presetID} onChange={(e) => select(e.target.value)}>
@@ -138,7 +144,7 @@ function AddProviderCard({ added }: { added: Set<string> }) {
                 <NativeSelect.Indicator />
               </NativeSelect.Root>
             </Field.Root>
-            <Field.Root required minW="160px">
+            <Field.Root required flex={1} minW="160px">
               <Field.Label>Name</Field.Label>
               <Input
                 placeholder={isCustom ? "e.g. together" : spec?.id}
@@ -176,6 +182,14 @@ function AddProviderCard({ added }: { added: Set<string> }) {
                 value={key}
                 onChange={(e) => setKey(e.target.value)}
                 fontFamily="mono"
+              />
+            </Field.Root>
+            <Field.Root required w="170px">
+              <Field.Label>Key label</Field.Label>
+              <Input
+                placeholder={isCustom ? "e.g. primary" : "e.g. glm"}
+                value={keyLabel}
+                onChange={(e) => setKeyLabel(e.target.value)}
               />
             </Field.Root>
             <Button type="submit" colorPalette="blue" loading={create.isPending}>
@@ -424,6 +438,7 @@ function ModelsListModal({
 function ProviderCard({ p }: { p: ProviderView }) {
   const qc = useQueryClient()
   const [newKey, setNewKey] = useState("")
+  const [newKeyLabel, setNewKeyLabel] = useState("")
   const [toDelete, setToDelete] = useState(false)
   const [editField, setEditField] = useState<null | "baseUrl" | "anthropicBaseUrl">(null)
   const [editURL, setEditURL] = useState("")
@@ -452,9 +467,10 @@ function ProviderCard({ p }: { p: ProviderView }) {
       toaster.create({ title: e instanceof ApiError ? e.message : "Failed to delete the provider", type: "error" }),
   })
   const addKey = useMutation({
-    mutationFn: () => post(`/api/providers/${p.id}/keys`, { key: newKey, label: "gui" }),
+    mutationFn: () => post(`/api/providers/${p.id}/keys`, { key: newKey, label: newKeyLabel }),
     onSuccess: async () => {
       setNewKey("")
+      setNewKeyLabel("")
       invalidate()
       toaster.create({ title: "Key added", type: "success" })
     },
@@ -612,14 +628,23 @@ function ProviderCard({ p }: { p: ProviderView }) {
                     addKey.mutate()
                   }}
                 >
-                  <HStack gap={2} mt={2}>
+                  <HStack gap={2} mt={2} flexWrap="wrap">
+                    <Input
+                      size="xs"
+                      placeholder="key label"
+                      value={newKeyLabel}
+                      onChange={(e) => setNewKeyLabel(e.target.value)}
+                      required
+                      maxW="160px"
+                    />
                     <Input
                       size="xs"
                       type="password"
-                      placeholder="add upstream API key"
+                      placeholder="upstream API key"
                       value={newKey}
                       onChange={(e) => setNewKey(e.target.value)}
                       fontFamily="mono"
+                      required
                       maxW="280px"
                     />
                     <Button size="2xs" type="submit" loading={addKey.isPending}>
@@ -695,7 +720,7 @@ export default function ProvidersPage() {
                 onChange={(e) => setSearch(e.target.value)}
               />
             </Field.Root>
-            <Field.Root minW="150px">
+            <Field.Root w="150px">
               <Field.Label>Show</Field.Label>
               <NativeSelect.Root size="sm">
                 <NativeSelect.Field value={show} onChange={(e) => setShow(e.target.value)}>
@@ -707,7 +732,7 @@ export default function ProvidersPage() {
                 <NativeSelect.Indicator />
               </NativeSelect.Root>
             </Field.Root>
-            <Field.Root minW="150px">
+            <Field.Root w="150px">
               <Field.Label>Kind</Field.Label>
               <NativeSelect.Root size="sm">
                 <NativeSelect.Field value={kind} onChange={(e) => setKind(e.target.value)}>

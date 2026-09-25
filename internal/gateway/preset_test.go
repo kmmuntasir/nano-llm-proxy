@@ -2,6 +2,7 @@ package gateway
 
 import (
 	"encoding/json"
+	"fmt"
 	"net/http"
 	"net/http/httptest"
 	"slices"
@@ -281,13 +282,13 @@ func TestPresetProviderCreate(t *testing.T) {
 	}
 
 	// unknown preset -> 400
-	rec := post(`{"preset":"qwen","keys":["k1"]}`)
+	rec := post(`{"preset":"qwen","keys":[{"key":"k1","label":"test"}]}`)
 	if rec.Code != 400 || !strings.Contains(rec.Body.String(), "Unknown provider preset") {
 		t.Fatalf("unknown preset: got %d: %s", rec.Code, rec.Body.String())
 	}
 
 	// zai from preset: name defaults to the id, both roots come from the registry
-	rec = post(`{"preset":"zai","keys":["k1"]}`)
+	rec = post(`{"preset":"zai","keys":[{"key":"k1","label":"test"}]}`)
 	if rec.Code != 201 {
 		t.Fatalf("zai create: got %d: %s", rec.Code, rec.Body.String())
 	}
@@ -304,24 +305,24 @@ func TestPresetProviderCreate(t *testing.T) {
 
 	// multiple providers from one preset are allowed (different names)
 	for _, name := range []string{"mykilo", "mykilo2"} {
-		rec = post(`{"preset":"kilo","name":"` + name + `","keys":["kk"]}`)
+		rec = post(`{"preset":"kilo","name":"` + name + `","keys":[{"key":"kk","label":"test"}]}`)
 		if rec.Code != 201 {
 			t.Fatalf("kilo preset %q: got %d: %s", name, rec.Code, rec.Body.String())
 		}
 	}
 
 	// zen is still reserved; kilo is no longer
-	rec = post(`{"name":"zen","baseUrl":"https://x.example/v1","keys":["k2"]}`)
+	rec = post(`{"name":"zen","baseUrl":"https://x.example/v1","keys":[{"key":"k2","label":"test"}]}`)
 	if rec.Code != 409 {
 		t.Fatalf("zen name: got %d, want 409", rec.Code)
 	}
-	rec = post(`{"name":"kilo","baseUrl":"https://kilo.example/v1","keys":["k3"]}`)
+	rec = post(`{"name":"kilo","baseUrl":"https://kilo.example/v1","keys":[{"key":"k3","label":"test"}]}`)
 	if rec.Code != 201 {
 		t.Fatalf("kilo-as-custom name: got %d: %s", rec.Code, rec.Body.String())
 	}
 
 	// preset create whose defaulted name collides -> the usual 409
-	rec = post(`{"preset":"zai","keys":["k4"]}`)
+	rec = post(`{"preset":"zai","keys":[{"key":"k4","label":"test"}]}`)
 	if rec.Code != 409 || !strings.Contains(rec.Body.String(), "already exists") {
 		t.Fatalf("zai name collision: got %d: %s", rec.Code, rec.Body.String())
 	}
@@ -368,6 +369,81 @@ func TestPresetProviderCreate(t *testing.T) {
 		return lp.Name == "zen" && lp.Preset == ""
 	}) {
 		t.Fatalf("zen should list with an empty preset: %s", rec.Body.String())
+	}
+}
+
+// Upstream key labels are mandatory on every write path: provider create,
+// add-key, and key PATCH (a rename may not blank the label).
+func TestProviderKeyLabelRequired(t *testing.T) {
+	g, _ := testStoreGateway(t, "http://127.0.0.1:1")
+	adminCookie := loginAs(t, g, "admin@example.com", "super-secret-pass")
+
+	create := func(body string) *httptest.ResponseRecorder {
+		req := httptest.NewRequest("POST", "/api/providers", strings.NewReader(body))
+		req.AddCookie(adminCookie)
+		rec := httptest.NewRecorder()
+		g.requireSession(g.requireSuperadmin(g.handleCreateProvider))(rec, req)
+		return rec
+	}
+
+	// create: key without a label -> 400
+	rec := create(`{"name":"glm","baseUrl":"https://x.example/v1","keys":[{"key":"k1"}]}`)
+	if rec.Code != 400 || !strings.Contains(rec.Body.String(), "label is required") {
+		t.Fatalf("create without label: got %d: %s", rec.Code, rec.Body.String())
+	}
+	// create: blank key entry -> 400
+	rec = create(`{"name":"glm","baseUrl":"https://x.example/v1","keys":[{"key":"","label":"l"}]}`)
+	if rec.Code != 400 || !strings.Contains(rec.Body.String(), "API key is required") {
+		t.Fatalf("create with a blank key: got %d: %s", rec.Code, rec.Body.String())
+	}
+
+	// valid create, then the later add/patch paths
+	rec = create(`{"name":"glm","baseUrl":"https://x.example/v1","keys":[{"key":"k1","label":"primary"}]}`)
+	if rec.Code != 201 {
+		t.Fatalf("create: got %d: %s", rec.Code, rec.Body.String())
+	}
+	provID := mustID(t, rec)
+
+	addKey := func(body string) *httptest.ResponseRecorder {
+		req := httptest.NewRequest("POST", fmt.Sprintf("/api/providers/%d/keys", provID), strings.NewReader(body))
+		req.AddCookie(adminCookie)
+		req.SetPathValue("id", fmt.Sprintf("%d", provID))
+		rec := httptest.NewRecorder()
+		g.requireSession(g.requireSuperadmin(g.handleAddProviderKey))(rec, req)
+		return rec
+	}
+	rec = addKey(`{"key":"k2"}`)
+	if rec.Code != 400 || !strings.Contains(rec.Body.String(), "label is required") {
+		t.Fatalf("add-key without label: got %d: %s", rec.Code, rec.Body.String())
+	}
+	rec = addKey(`{"key":"k2","label":"backup"}`)
+	if rec.Code != 201 {
+		t.Fatalf("add-key: got %d: %s", rec.Code, rec.Body.String())
+	}
+	var added struct {
+		Entry struct {
+			ID int64 `json:"id"`
+		} `json:"entry"`
+	}
+	json.Unmarshal(rec.Body.Bytes(), &added)
+
+	// patch: renaming is fine, blanking the label is not
+	patchKey := func(body string) *httptest.ResponseRecorder {
+		req := httptest.NewRequest("PATCH", fmt.Sprintf("/api/providers/%d/keys/%d", provID, added.Entry.ID), strings.NewReader(body))
+		req.AddCookie(adminCookie)
+		req.SetPathValue("id", fmt.Sprintf("%d", provID))
+		req.SetPathValue("keyId", fmt.Sprintf("%d", added.Entry.ID))
+		rec := httptest.NewRecorder()
+		g.requireSession(g.requireSuperadmin(g.handlePatchProviderKey))(rec, req)
+		return rec
+	}
+	rec = patchKey(`{"label":"   "}`)
+	if rec.Code != 400 || !strings.Contains(rec.Body.String(), "label is required") {
+		t.Fatalf("patch to a blank label: got %d: %s", rec.Code, rec.Body.String())
+	}
+	rec = patchKey(`{"label":"renamed"}`)
+	if rec.Code != 200 {
+		t.Fatalf("patch rename: got %d: %s", rec.Code, rec.Body.String())
 	}
 }
 
