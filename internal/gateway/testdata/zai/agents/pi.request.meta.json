@@ -1,0 +1,28 @@
+{
+ "id": 2,
+ "ts": "2026-09-25T06:47:25.730514057Z",
+ "method": "POST",
+ "path": "/chat/completions",
+ "query": "",
+ "agent_headers": {
+  "Accept": "application/json",
+  "X-Stainless-Timeout": "300",
+  "User-Agent": "pi (linux 7.0.0-34-generic; x64)",
+  "Accept-Language": "*",
+  "Sec-Fetch-Mode": "cors",
+  "Connection": "keep-alive",
+  "X-Stainless-Lang": "js",
+  "X-Stainless-Package-Version": "6.40.0",
+  "Content-Type": "application/json",
+  "Content-Length": "12064",
+  "X-Stainless-Retry-Count": "0",
+  "X-Stainless-Os": "Linux",
+  "X-Stainless-Arch": "x64",
+  "X-Stainless-Runtime": "node",
+  "Accept-Encoding": "gzip, deflate",
+  "X-Stainless-Runtime-Version": "v24.16.0",
+  "Authorization": "Bearer <REDACTED>"
+ },
+ "body_bytes": 12064,
+ "forwarded_auth": "bearer"
+}

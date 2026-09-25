@@ -1,0 +1,15 @@
+HTTP/2 200 
+date: Fri, 25 Sep 2026 06:34:39 GMT
+content-type: application/json
+content-length: 558
+alt-svc: h3=":443"; ma=3600
+set-cookie: acw_tc=ac11416617903180751034576e09e8c2d7ef1e572b1cad2baa533988594fae;path=/;HttpOnly;Max-Age=1800
+ga-traceid: 9716f5b891ac92e43de43093ad2330eb
+vary: Origin
+vary: Access-Control-Request-Method
+vary: Access-Control-Request-Headers
+x-log-id: 2026092514343529bbd3da1ab34e82
+x-process-time: 4.685262
+x-request-id: 9b0e25eb-3d44-43ac-b02f-64f962ba2848
+vary: Origin
+

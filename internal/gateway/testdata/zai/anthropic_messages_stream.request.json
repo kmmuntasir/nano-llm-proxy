@@ -1,0 +1,1 @@
+{"model":"glm-5.3-flash","max_tokens":64,"stream":true,"messages":[{"role":"user","content":"Say hi in exactly three words."}]}

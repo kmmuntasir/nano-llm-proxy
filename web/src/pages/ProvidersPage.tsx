@@ -26,21 +26,30 @@ import ConfirmDialog from "../components/ConfirmDialog"
 import StatusBadge from "../components/StatusBadge"
 import { toaster } from "../components/ui/toaster"
 
-// AddProviderCard creates a new generic openai-type provider. The two builtin
-// providers (zen/opencode, kilo/openai) are seeded and only editable.
+// AddProviderCard creates a new generic openai-type provider. A provider needs
+// at least one endpoint root: OpenAI-compatible and/or Anthropic-compatible
+// (e.g. the Z.ai GLM Coding Plan exposes both). The two builtin providers
+// (zen/opencode, kilo/openai) are seeded and only editable.
 function AddProviderCard() {
   const qc = useQueryClient()
   const [name, setName] = useState("")
   const [baseURL, setBaseURL] = useState("")
+  const [anthropicURL, setAnthropicURL] = useState("")
   const [key, setKey] = useState("")
   const [error, setError] = useState("")
 
   const create = useMutation({
     mutationFn: () =>
-      post<{ id: number }>("/api/providers", { name, baseUrl: baseURL, keys: [key] }),
+      post<{ id: number }>("/api/providers", {
+        name,
+        baseUrl: baseURL,
+        anthropicBaseUrl: anthropicURL,
+        keys: [key],
+      }),
     onSuccess: async () => {
       setName("")
       setBaseURL("")
+      setAnthropicURL("")
       setKey("")
       setError("")
       await qc.invalidateQueries({ queryKey: ["providers"] })
@@ -52,16 +61,22 @@ function AddProviderCard() {
   return (
     <Card.Root>
       <Card.Header>
-        <Heading size="sm">Add OpenAI-compatible provider</Heading>
+        <Heading size="sm">Add provider</Heading>
         <Text fontSize="xs" color="fg.muted">
           The name becomes the model prefix (<Code fontFamily="mono">name/model-id</Code>).
-          opencode-style providers can't be added — zen is one of a kind.
+          At least one endpoint is required — OpenAI-compatible, Anthropic-compatible, or
+          both (Z.ai GLM Coding Plan has each; /v1/messages is served natively when the
+          Anthropic root is set). opencode-style providers can't be added — zen is one of a kind.
         </Text>
       </Card.Header>
       <Card.Body>
         <form
           onSubmit={(e) => {
             e.preventDefault()
+            if (baseURL.trim() === "" && anthropicURL.trim() === "") {
+              setError("At least one endpoint is required: base URL and/or Anthropic endpoint")
+              return
+            }
             create.mutate()
           }}
         >
@@ -75,12 +90,21 @@ function AddProviderCard() {
                 fontFamily="mono"
               />
             </Field.Root>
-            <Field.Root required minW="280px" flex={1}>
-              <Field.Label>Base URL</Field.Label>
+            <Field.Root minW="280px" flex={1}>
+              <Field.Label>OpenAI-compatible endpoint</Field.Label>
               <Input
                 placeholder="https://api.example.com/v1"
                 value={baseURL}
                 onChange={(e) => setBaseURL(e.target.value)}
+                fontFamily="mono"
+              />
+            </Field.Root>
+            <Field.Root minW="280px" flex={1}>
+              <Field.Label>Anthropic-compatible endpoint</Field.Label>
+              <Input
+                placeholder="https://api.z.ai/api/anthropic"
+                value={anthropicURL}
+                onChange={(e) => setAnthropicURL(e.target.value)}
                 fontFamily="mono"
               />
             </Field.Root>
@@ -319,7 +343,8 @@ function ProviderCard({ p }: { p: ProviderView }) {
   const qc = useQueryClient()
   const [newKey, setNewKey] = useState("")
   const [toDelete, setToDelete] = useState(false)
-  const [editURL, setEditURL] = useState<string | null>(null)
+  const [editField, setEditField] = useState<null | "baseUrl" | "anthropicBaseUrl">(null)
+  const [editURL, setEditURL] = useState("")
   const [keysOpen, setKeysOpen] = useState(false)
   const [modelsOpen, setModelsOpen] = useState(false)
   const invalidate = () => void qc.invalidateQueries({ queryKey: ["providers"] })
@@ -327,7 +352,7 @@ function ProviderCard({ p }: { p: ProviderView }) {
   const patchP = useMutation({
     mutationFn: (body: Record<string, unknown>) => patch(`/api/providers/${p.id}`, body),
     onSuccess: async () => {
-      setEditURL(null)
+      setEditField(null)
       invalidate()
       toaster.create({ title: "Provider updated", type: "success" })
     },
@@ -401,34 +426,63 @@ function ProviderCard({ p }: { p: ProviderView }) {
           </HStack>
         </HStack>
 
-        <HStack fontSize="xs" color="fg.muted">
-          {editURL === null ? (
-            <>
-              <Text fontFamily="mono" truncate>
-                {p.baseUrl}
-              </Text>
-              <Button variant="ghost" size="2xs" onClick={() => setEditURL(p.baseUrl)}>
-                Edit
-              </Button>
-            </>
-          ) : (
-            <>
-              <Input
-                size="xs"
-                fontFamily="mono"
-                value={editURL}
-                onChange={(e) => setEditURL(e.target.value)}
-                maxW="360px"
-              />
-              <Button size="2xs" colorPalette="blue" onClick={() => patchP.mutate({ baseUrl: editURL })}>
-                Save
-              </Button>
-              <Button size="2xs" variant="ghost" onClick={() => setEditURL(null)}>
-                Cancel
-              </Button>
-            </>
-          )}
-        </HStack>
+        {/* endpoint roots: whichever are set route the matching surface */}
+        <Stack fontSize="xs" color="fg.muted" gap={1}>
+          {(["baseUrl", "anthropicBaseUrl"] as const).map((field) => {
+            const url = field === "baseUrl" ? p.baseUrl : p.anthropicBaseUrl
+            // builtins never use the anthropic root — don't offer it
+            if (field === "anthropicBaseUrl" && url === "" && p.builtin) return null
+            const editing = editField === field
+            return (
+              <HStack key={field} fontSize="xs" color="fg.muted">
+                <Badge
+                  variant="subtle"
+                  colorPalette={field === "baseUrl" ? "blue" : "orange"}
+                  flexShrink={0}
+                >
+                  {field === "baseUrl" ? "openai" : "anthropic"}
+                </Badge>
+                {editing ? (
+                  <>
+                    <Input
+                      size="xs"
+                      fontFamily="mono"
+                      value={editURL}
+                      onChange={(e) => setEditURL(e.target.value)}
+                      maxW="360px"
+                    />
+                    <Button
+                      size="2xs"
+                      colorPalette="blue"
+                      onClick={() => patchP.mutate({ [field]: editURL })}
+                    >
+                      Save
+                    </Button>
+                    <Button size="2xs" variant="ghost" onClick={() => setEditField(null)}>
+                      Cancel
+                    </Button>
+                  </>
+                ) : (
+                  <>
+                    <Text fontFamily="mono" truncate>
+                      {url || "not set"}
+                    </Text>
+                    <Button
+                      variant="ghost"
+                      size="2xs"
+                      onClick={() => {
+                        setEditField(field)
+                        setEditURL(url)
+                      }}
+                    >
+                      Edit
+                    </Button>
+                  </>
+                )}
+              </HStack>
+            )
+          })}
+        </Stack>
 
         {/* keys live in their own collapsed sub-card: builtin providers carry
             long key lists that would otherwise dwarf the card header */}

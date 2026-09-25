@@ -51,14 +51,19 @@ func (g *gateway) handleMessages(w http.ResponseWriter, r *http.Request) {
 	clientWantsStream, _ := req["stream"].(bool)
 	log.Printf("req anthropic provider=%s model=%s stream=%v", ref.name, upstreamModel, clientWantsStream)
 
-	chat := anthropicToChatBody(req)
-	chat["model"] = upstreamModel
-
 	var hint string
 	var tu tokenUsage
-	if ref.typ == "opencode" {
+	switch {
+	case ref.typ == "opencode":
+		chat := anthropicToChatBody(req)
+		chat["model"] = upstreamModel
 		hint, tu = g.messagesViaZen(ref, w, r, chat, upstreamModel, clientWantsStream, start)
-	} else {
+	case ref.anthropicBaseURL != "":
+		// native Anthropic endpoint: forward verbatim, no translation loss
+		hint, tu = g.messagesViaAnthropic(ref, w, r, req, upstreamModel, clientWantsStream, start)
+	default:
+		chat := anthropicToChatBody(req)
+		chat["model"] = upstreamModel
 		hint, tu = g.messagesViaOpenAI(ref, w, r, chat, upstreamModel, clientWantsStream, start)
 	}
 	if hint != "" {

@@ -1,0 +1,5 @@
+Claude Code (CLAUDE_CODE_ENABLE_GATEWAY_MODEL_DISCOVERY=1) probed before first turn:
+{"id":1,"ts":"2026-09-25T06:45:44.262860802Z","method":"GET","path":"/health","query":"","agent_headers":{"User-Agent":"curl/8.18.0","Accept":"*/*"},"body_bytes":0,"forwarded_auth":"x-api-key"}
+{"id":2,"ts":"2026-09-25T06:46:11.118652382Z","method":"HEAD","path":"/api/hello","query":"","agent_headers":{"Connection":"keep-alive","User-Agent":"Bun/1.4.3","Accept":"*/*","Accept-Encoding":"gzip, deflate, br, zstd"},"body_bytes":0,"forwarded_auth":"x-api-key"}
+{"id":3,"ts":"2026-09-25T06:46:11.198260651Z","method":"GET","path":"/v1/models","query":"limit=1000","agent_headers":{"User-Agent":"claude-code/2.1.281","Anthropic-Version":"2023-06-01","Connection":"keep-alive","Accept":"*/*","Accept-Encoding":"gzip, deflate, br, zstd","Authorization":"Bearer recorder-injects-real-key"},"body_bytes":0,"forwarded_auth":"x-api-key"}
+GET /v1/models response (anthropic base): {"data":[{"created_at":"2025-07-28T00:00:00Z","display_name":"GLM-4.5","id":"glm-4.5","type":"model"},{"created_at":"202...

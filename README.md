@@ -73,8 +73,9 @@ Then:
 
 1. Open `http://localhost:8787` and log in with those credentials.
 2. **Providers** → add a provider: a name (it becomes the model prefix, e.g.
-   `openai`), a base URL (e.g. `https://api.openai.com/v1`), and one or more
-   API keys.
+   `openai`), an endpoint root — OpenAI-compatible (e.g.
+   `https://api.openai.com/v1`), Anthropic-compatible (e.g.
+   `https://api.z.ai/api/anthropic`), or both — and one or more API keys.
 3. **Profile → My API Keys** → create a client key (`fg-…`).
 4. Talk to it:
 
@@ -156,11 +157,33 @@ until midnight; off by default.
 | --- | --- | --- |
 | `zen` | OpenCode Zen (`opencode.ai/zen/v1`) | Injects the client headers and tool stubs the API requires, routes each model to its Chat or Responses surface (self-correcting on the signature 503), and translates between the two shapes — including tool calls |
 | `kilo` | Kilo Code (`api.kilo.ai/api/gateway/v1`) | OpenAI-compatible passthrough with rotation |
-| generic | any OpenAI-compatible base URL | GUI-added providers (OpenAI, Groq, Together, vLLM, Ollama, …) — no code needed |
+| generic | any OpenAI- and/or Anthropic-compatible base URL | GUI-added providers (OpenAI, Groq, Together, vLLM, Ollama, Z.ai, …) — no code needed |
 
 Adapter-specific settings (user agent, fingerprint injection, free-only
 filters, the Zen model catalog) live in the GUI under Settings — see
 [docs/configuration.md](docs/configuration.md).
+
+## Dual-endpoint providers
+
+A GUI-added provider can carry both endpoint roots, and either alone is
+valid — at least one is required:
+
+- OpenAI root (`baseUrl`): serves `/v1/chat/completions` and the catalog.
+  Requests pass through as-is — no translation.
+- Anthropic root (`anthropicBaseUrl`): `/v1/messages` is forwarded
+  natively. The body, `anthropic-beta` headers, and SSE event framing go
+  upstream untouched — thinking blocks with signatures, interleaved
+  `system` messages, and the coding-agent fingerprint all survive; only
+  the credential is swapped for a pooled upstream key.
+- Anthropic-only providers still serve OpenAI clients: `/v1/chat/completions`
+  is translated to Messages on the way out (system messages, tools,
+  tool_calls, streamed `reasoning_content`) and the response back.
+- The model catalog prefers the OpenAI root and falls back to the
+  Anthropic root's `/v1/models` when that fails.
+
+Z.ai's GLM Coding Plan is the canonical case: one provider, two roots —
+`https://api.z.ai/api/coding/paas/v4` (OpenAI) and
+`https://api.z.ai/api/anthropic` (Anthropic).
 
 ## Using Claude Code
 

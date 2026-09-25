@@ -36,7 +36,7 @@ func testStoreGateway(t *testing.T, upURL string) (*gateway, *store.Store) {
 	provs, _ := st.ListProviders()
 	for _, p := range provs {
 		if p.Builtin {
-			if err := st.UpdateProvider(p.ID, nil, &upURL, nil); err != nil {
+			if err := st.UpdateProvider(p.ID, nil, &upURL, nil, nil); err != nil {
 				t.Fatalf("repoint builtin: %v", err)
 			}
 		}
@@ -255,7 +255,7 @@ func TestDisabledProviderUnknownPrefix(t *testing.T) {
 		t.Fatalf("enabled provider should route: got %d: %s", rec.Code, rec.Body.String())
 	}
 
-	if err := st.UpdateProvider(gen.ID, nil, nil, boolPtr(false)); err != nil {
+	if err := st.UpdateProvider(gen.ID, nil, nil, nil, boolPtr(false)); err != nil {
 		t.Fatalf("disable: %v", err)
 	}
 	if err := g.rebuildPools(); err != nil {

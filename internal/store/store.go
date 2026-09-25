@@ -62,14 +62,18 @@ type ClientKey struct {
 }
 
 type Provider struct {
-	ID        int64
-	Name      string // == routing prefix ("zen/model-id")
-	Type      string // "openai" | "opencode"
-	BaseURL   string
-	Enabled   bool
-	Builtin   bool
-	SortOrder int64
-	CreatedAt int64
+	ID      int64
+	Name    string // == routing prefix ("zen/model-id")
+	Type    string // "openai" | "opencode"
+	BaseURL string // OpenAI-compatible root; empty when anthropic-only
+	// AnthropicCompatible root ("/v1/messages" is appended). Optional: set it
+	// when the provider speaks the Anthropic protocol natively (e.g. the Z.ai
+	// GLM Coding Plan) so /v1/messages can be proxied without translation.
+	AnthropicBaseURL string
+	Enabled          bool
+	Builtin          bool
+	SortOrder        int64
+	CreatedAt        int64
 }
 
 type ProviderKey struct {
@@ -138,6 +142,11 @@ func (s *Store) Migrate() error {
 	}
 	if !version.Valid || version.Int64 < 2 {
 		if err := s.migrateV2(); err != nil {
+			return err
+		}
+	}
+	if !version.Valid || version.Int64 < 3 {
+		if err := s.migrateV3(); err != nil {
 			return err
 		}
 	}
@@ -240,6 +249,24 @@ func (s *Store) migrateV2() error {
 		}
 	}
 	if _, err := tx.Exec(`INSERT INTO schema_migrations (version, applied_at) VALUES (2, ?)`, time.Now().Unix()); err != nil {
+		return err
+	}
+	return tx.Commit()
+}
+
+// migrateV3 adds the optional Anthropic-compatible endpoint so one provider
+// row can serve both protocol surfaces (e.g. the Z.ai GLM Coding Plan, which
+// speaks OpenAI Chat Completions and Anthropic Messages from different roots).
+func (s *Store) migrateV3() error {
+	tx, err := s.db.Begin()
+	if err != nil {
+		return err
+	}
+	defer tx.Rollback()
+	if _, err := tx.Exec(`ALTER TABLE providers ADD COLUMN anthropic_base_url TEXT NOT NULL DEFAULT ''`); err != nil {
+		return err
+	}
+	if _, err := tx.Exec(`INSERT INTO schema_migrations (version, applied_at) VALUES (3, ?)`, time.Now().Unix()); err != nil {
 		return err
 	}
 	return tx.Commit()
@@ -652,12 +679,12 @@ func (s *Store) BumpClientKeyUsage(id int64, delta int64, lastUsed int64) error 
 
 // --- providers ---
 
-const providerCols = `id, name, type, base_url, enabled, builtin, sort_order, created_at`
+const providerCols = `id, name, type, base_url, anthropic_base_url, enabled, builtin, sort_order, created_at`
 
 func scanProvider(row interface{ Scan(...any) error }) (*Provider, error) {
 	p := &Provider{}
 	var enabled, builtin int
-	if err := row.Scan(&p.ID, &p.Name, &p.Type, &p.BaseURL, &enabled, &builtin, &p.SortOrder, &p.CreatedAt); err != nil {
+	if err := row.Scan(&p.ID, &p.Name, &p.Type, &p.BaseURL, &p.AnthropicBaseURL, &enabled, &builtin, &p.SortOrder, &p.CreatedAt); err != nil {
 		return nil, err
 	}
 	p.Enabled, p.Builtin = enabled != 0, builtin != 0
@@ -765,8 +792,8 @@ func (s *Store) CreateProvider(p *Provider, keys []ProviderKey) error {
 		return err
 	}
 	defer tx.Rollback()
-	res, err := tx.Exec(`INSERT INTO providers (name, type, base_url, enabled, builtin, sort_order, created_at)
-		VALUES (?, ?, ?, ?, 0, ?, ?)`, p.Name, p.Type, p.BaseURL, boolInt(p.Enabled), p.SortOrder, now)
+	res, err := tx.Exec(`INSERT INTO providers (name, type, base_url, anthropic_base_url, enabled, builtin, sort_order, created_at)
+		VALUES (?, ?, ?, ?, ?, 0, ?, ?)`, p.Name, p.Type, p.BaseURL, p.AnthropicBaseURL, boolInt(p.Enabled), p.SortOrder, now)
 	if err != nil {
 		return err
 	}
@@ -782,7 +809,7 @@ func (s *Store) CreateProvider(p *Provider, keys []ProviderKey) error {
 }
 
 // UpdateProvider patches only non-nil fields; callers enforce builtin rules.
-func (s *Store) UpdateProvider(id int64, name, baseURL *string, enabled *bool) error {
+func (s *Store) UpdateProvider(id int64, name, baseURL, anthropicBaseURL *string, enabled *bool) error {
 	var sets []string
 	args := []any{}
 	if name != nil {
@@ -790,6 +817,9 @@ func (s *Store) UpdateProvider(id int64, name, baseURL *string, enabled *bool) e
 	}
 	if baseURL != nil {
 		sets, args = append(sets, "base_url=?"), append(args, *baseURL)
+	}
+	if anthropicBaseURL != nil {
+		sets, args = append(sets, "anthropic_base_url=?"), append(args, *anthropicBaseURL)
 	}
 	if enabled != nil {
 		sets, args = append(sets, "enabled=?"), append(args, boolInt(*enabled))

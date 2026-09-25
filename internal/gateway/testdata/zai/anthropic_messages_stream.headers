@@ -1,0 +1,17 @@
+HTTP/2 200 
+date: Fri, 25 Sep 2026 06:34:34 GMT
+content-type: text/event-stream; charset=utf-8
+alt-svc: h3=":443"; ma=3600
+set-cookie: acw_tc=ac11416817903180727434092e0829b8d03b08557b5a7e46e8b8a75925f9f9;path=/;HttpOnly;Max-Age=1800
+ga-traceid: 6bdf3afa07aca4238317532ad888d94f
+vary: Origin
+vary: Access-Control-Request-Method
+vary: Access-Control-Request-Headers
+x-log-id: 20260925143432a2cf037219cf4e61
+cache-control: no-cache
+access-control-allow-origin: *
+access-control-allow-headers: *
+x-process-time: 0.971696
+x-request-id: 2505a44e-b500-4529-bb7f-d83aef84f03c
+vary: Origin
+
