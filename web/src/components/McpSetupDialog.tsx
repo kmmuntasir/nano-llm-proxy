@@ -54,6 +54,13 @@ export default function McpSetupDialog({
     [name, url, key],
   )
 
+  // Pi reads the standard shared global config via pi-mcp-adapter.
+  const piJson = useMemo(
+    () =>
+      JSON.stringify({ mcpServers: { [name]: { type: "http", url, headers: { Authorization: `Bearer ${key}` } } } }, null, 2),
+    [name, url, key],
+  )
+
   return (
     <DialogRoot open={open} onOpenChange={(e) => onOpenChange(e.open)} size="xl">
       <DialogContent>
@@ -95,6 +102,7 @@ export default function McpSetupDialog({
             <JsonBlock code={mcpJson} title=".mcp.json / Claude Desktop" copyLabel="copy .mcp.json" />
             <JsonBlock code={opencodeJson} title="opencode.json" copyLabel="copy opencode config" />
             <JsonBlock code={kiloJson} title="kilo.jsonc (mcpServers)" copyLabel="copy kilo config" />
+            <JsonBlock code={piJson} title="~/.config/mcp/mcp.json — Pi (pi-mcp-adapter)" copyLabel="copy pi config" />
           </VStack>
         </DialogBody>
         <DialogFooter>

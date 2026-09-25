@@ -114,6 +114,34 @@ export default function DocsPage() {
         null,
         2,
       ),
+      piCompatInstall: "pi install npm:@billjr99/pi-openai-compat",
+      piCompatJson: JSON.stringify(
+        {
+          providers: {
+            custom: {
+              displayName: "Nano",
+              baseUrl: `${origin}/v1`,
+              apiKey: FG_PLACEHOLDER,
+            },
+          },
+        },
+        null,
+        2,
+      ),
+      piMcpInstall: "pi install npm:pi-mcp-adapter",
+      piMcpJson: JSON.stringify(
+        {
+          mcpServers: {
+            "nano-web": {
+              type: "http",
+              url: `${origin}/mcp`,
+              headers: { Authorization: `Bearer ${FG_PLACEHOLDER}` },
+            },
+          },
+        },
+        null,
+        2,
+      ),
       codexToml: `model_provider = "nano"
 
 [model_providers.nano]
@@ -231,6 +259,31 @@ wire_api = "chat"          # the gateway also speaks "responses"`,
           tools, add this server to <Code fontFamily="mono">~/.config/kilo/kilo.jsonc</Code>:
         </Text>
         <JsonBlock code={snippets.kiloMcp} title="kilo.jsonc (mcpServers)" copyLabel="copy config" />
+      </Section>
+
+      <Section title="Pi coding agent">
+        <Text fontSize="sm">
+          Pi has no built-in custom-endpoint or MCP support — both come from
+          packages. <Text as="span" fontWeight="medium">1. Connect the gateway</Text>{" "}
+          with the OpenAI-compat extension:
+        </Text>
+        <JsonBlock code={snippets.piCompatInstall} title="install compat extension" copyLabel="copy" />
+        <Text fontSize="sm">
+          Then put this in <Code fontFamily="mono">~/.config/pi-openai-compat/config.json</Code>{" "}
+          and restart Pi — its models appear under the custom provider:
+        </Text>
+        <JsonBlock code={snippets.piCompatJson} title="pi-openai-compat config.json" copyLabel="copy config" />
+        <Text fontSize="sm">
+          <Text as="span" fontWeight="medium">2. MCP web tools</Text> via the
+          MCP adapter package (restart Pi after installing):
+        </Text>
+        <JsonBlock code={snippets.piMcpInstall} title="install MCP adapter" copyLabel="copy" />
+        <Text fontSize="sm">
+          Then add the server to <Code fontFamily="mono">~/.config/mcp/mcp.json</Code>{" "}
+          (Pi's global MCP config). Servers are lazy — Pi connects the first
+          time a tool is used; check status with <Code fontFamily="mono">/mcp</Code>:
+        </Text>
+        <JsonBlock code={snippets.piMcpJson} title="~/.config/mcp/mcp.json" copyLabel="copy config" />
       </Section>
 
       <Section title="Anything else (OpenAI-compatible)">
