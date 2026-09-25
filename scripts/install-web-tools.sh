@@ -73,17 +73,23 @@ done
 
 # --- check mode (read-only, no root) ----------------------------------------
 
-check_http() { # url  -> prints HTTP status + first body line
-    curl -fsS --max-time 8 "$1" 2>/dev/null | head -c 300
+check_http() { # url -> body on stdout (untruncated: callers json.load it)
+    curl -fsS --max-time 8 "$1" 2>/dev/null
+}
+
+check_http_timeout() { # timeout url  -> same, custom curl budget
+    local t="$1"; shift
+    curl -fsS --max-time "$t" "$1" 2>/dev/null
 }
 
 cmd_check() {
     local fail=0
 
-    # 1. SearXNG
+    # 1. SearXNG (45 s budget: the first search on a cold instance takes
+    # 30 s+ while engines warm up — an 8 s probe false-fails)
     printf '%-28s' "SearXNG (127.0.0.1:$SEARXNG_PORT)"
     local body
-    if body=$(check_http "http://127.0.0.1:$SEARXNG_PORT/search?q=searxng&format=json"); then
+    if body=$(check_http_timeout 45 "http://127.0.0.1:$SEARXNG_PORT/search?q=searxng&format=json"); then
         if printf '%s' "$body" | python3 -c 'import json,sys; d=json.load(sys.stdin); assert isinstance(d.get("results"), list)' 2>/dev/null; then
             echo "OK (JSON results present)"
         else
@@ -192,10 +198,20 @@ install_searxng() {
         mkdir -p "$SEARXNG_APP"
         git clone --quiet --no-checkout "$SEARXNG_REPO" "$SEARXNG_APP"
     fi
+    # safe.directory is only honored from PROTECTED config (system/global),
+    # never the repo's local config — --local here would be a silent no-op.
+    # Root needs it: the clone ends up owned by the searxng user, and git
+    # refuses to operate on it otherwise on every later run.
+    git config --global --add safe.directory "$SEARXNG_APP" 2>/dev/null || true
     if ! searxng_at_ref; then
-        git -C "$SEARXNG_APP" fetch --quiet --depth 1 origin "$SEARXNG_REF"
-        git -C "$SEARXNG_APP" checkout --quiet --force FETCH_HEAD
+        git -C "$SEARXNG_APP" fetch --depth 1 origin "$SEARXNG_REF"
+        git -C "$SEARXNG_APP" checkout --force FETCH_HEAD
     fi
+    # a --no-checkout clone whose checkout silently no-ops would fail pip
+    # with a baffling "not a Python project" — fail loudly here instead
+    # (upstream currently ships setup.py; accept pyproject.toml in case it moves)
+    [[ -f "$SEARXNG_APP/setup.py" || -f "$SEARXNG_APP/pyproject.toml" ]] \
+        || die "SearXNG checkout incomplete at $SEARXNG_APP — remove $SEARXNG_APP and re-run"
     chown -R "$SEARXNG_USER:$SEARXNG_USER" "$SEARXNG_APP"
 
     local upgrade_flag=""
@@ -203,6 +219,11 @@ install_searxng() {
 
     log "building virtualenv + dependencies (a few minutes on first run)"
     sudo -u "$SEARXNG_USER" python3 -m venv "$SEARXNG_VENV"
+    # --no-build-isolation needs the build deps in the venv itself: SearXNG's
+    # setup.py imports msgspec; Ubuntu 24.04 venvs ship without setuptools.
+    # Same set the upstream bare-metal docs pre-install.
+    sudo -u "$SEARXNG_USER" "$SEARXNG_VENV/bin/pip" install --quiet $upgrade_flag \
+        setuptools wheel pyyaml msgspec typing-extensions pybind11
     sudo -u "$SEARXNG_USER" "$SEARXNG_VENV/bin/pip" install --quiet --use-pep517 \
         --no-build-isolation $upgrade_flag -e "$SEARXNG_APP"
 
@@ -219,19 +240,32 @@ install_searxng() {
     fi
 
     log "writing systemd unit"
-    sed "s|@@SEARXNG_VENV@@|$SEARXNG_VENV|" "$TEMPLATE_DIR/searxng.service" > "$SEARXNG_UNIT"
-    chmod 0644 "$SEARXNG_UNIT"
+    local unit_new="$SEARXNG_UNIT.new" unit_changed=0
+    sed "s|@@SEARXNG_VENV@@|$SEARXNG_VENV|" "$TEMPLATE_DIR/searxng.service" > "$unit_new"
+    if ! cmp -s "$unit_new" "$SEARXNG_UNIT"; then
+        mv "$unit_new" "$SEARXNG_UNIT"
+        chmod 0644 "$SEARXNG_UNIT"
+        unit_changed=1
+    else
+        rm -f "$unit_new"
+    fi
     systemctl daemon-reload
     systemctl enable --quiet searxng
 
-    log "starting searxng"
-    systemctl restart searxng
+    # restart only when needed: a restart cold-starts the engines, and the
+    # first queries on a cold instance are slow (upstream CAPTCHAs, timeouts)
+    if [[ $unit_changed -eq 1 || $MODE == update ]] || ! systemctl is-active --quiet searxng; then
+        log "starting searxng"
+        systemctl restart searxng
+    fi
 
-    log "waiting for SearXNG to come up"
+    log "waiting for SearXNG readiness"
     local ok=0
     for _ in $(seq 1 30); do
-        if check_http "http://127.0.0.1:$SEARXNG_PORT/search?q=test&format=json" \
-            | python3 -c 'import json,sys; assert isinstance(json.load(sys.stdin).get("results"), list)' 2>/dev/null; then
+        # /config is served without touching search engines — a pure
+        # readiness signal (a fresh search query can take 30s+ cold)
+        if check_http "http://127.0.0.1:$SEARXNG_PORT/config" \
+            | python3 -c 'import json,sys; json.load(sys.stdin)' 2>/dev/null; then
             ok=1
             break
         fi
@@ -242,9 +276,17 @@ install_searxng() {
         warn "last journal lines:"
         journalctl -u searxng -n 20 --no-pager || true
         warn "is anything already on port $SEARXNG_PORT? ss -ltnp | grep $SEARXNG_PORT"
-        die "SearXNG did not become healthy — fix and re-run (safe to re-run)"
+        die "SearXNG did not become ready — fix and re-run (safe to re-run)"
     fi
-    log "SearXNG healthy on 127.0.0.1:$SEARXNG_PORT"
+
+    log "running one real search (first query on a cold instance can take ~30 s)"
+    if ! check_http_timeout 60 "http://127.0.0.1:$SEARXNG_PORT/search?q=searxng&format=json" \
+        | python3 -c 'import json,sys; assert isinstance(json.load(sys.stdin).get("results"), list)' 2>/dev/null; then
+        warn "SearXNG is up but the sample search returned no usable JSON — engines may be CAPTCHA-blocked from this IP"
+        warn "see docs/deployment.md (engine trimming) and check: curl 'http://127.0.0.1:$SEARXNG_PORT/search?q=test&format=json'"
+    else
+        log "SearXNG healthy on 127.0.0.1:$SEARXNG_PORT"
+    fi
 }
 
 obscura_arch() {
@@ -301,9 +343,9 @@ main() {
     [[ $SKIP_OBSCURA -eq 1 ]] || install_obscura
 
     log "done. Next steps:"
-    echo "    1. restart the gateway if it is running (obscura path changed)"
-    echo "    2. open the admin GUI → Settings → Web tools → enable + Test SearXNG / Test obscura"
-    echo "    3. re-verify any time with: ./scripts/install-web-tools.sh --check"
+    echo "    1. open the admin GUI → Settings → Web tools → enable + Test SearXNG / Test obscura"
+    echo "       (no gateway restart is needed: obscura is exec'd per fetch, settings hot-reload)"
+    echo "    2. re-verify any time with: ./scripts/install-web-tools.sh --check"
 }
 
 main
