@@ -59,8 +59,9 @@ Ranges enforced on save: `maxKeysPerRequest` 1–100, `cooldownSeconds`
 
 Base URLs are **not** part of this document — providers (and their base
 URLs) live in their own database table and are edited on the GUI Providers
-page. Only `zen` is built in; every other provider is added from the preset
-dropdown or the custom form.
+page. Only `zen` is built in; every other provider is added from the Add
+Provider dropdown — a curated preset, or its Custom Provider option for
+hand-typed endpoints.
 
 ## Zen model catalog sync
 

@@ -182,8 +182,9 @@ is one click plus an API key — no URL typing:
 | Z.ai (GLM Coding Plan) | `api.z.ai/api/coding/paas/v4` | `api.z.ai/api/anthropic` |
 
 Endpoints are release-managed (read-only in the GUI); anything unusual — a
-self-hosted gateway, a custom deployment — goes through **Add Custom
-Provider** instead. The preset id is stored on the provider row, which is
+self-hosted gateway, a custom deployment — goes through the same dropdown's
+**Custom Provider…** option, which reveals the endpoint inputs instead. The
+preset id is stored on the provider row, which is
 the hook for future per-provider behavior. Presets with special catalogs
 (like Kilo's rich metadata) carry their own enrichment logic in
 `internal/gateway/providerspec.go`; `GET /api/providers/presets` lists the
@@ -253,7 +254,7 @@ Served by the same binary at `/`.
 | Usage | everyone | Date-range usage: totals, top models, providers, per-key (admins also get per-user), recent activity — scoped to the signed-in user |
 | Profile | everyone | Account info, self-service password reset, own client keys (create/disable/delete) |
 | Users | superadmin | User CRUD, roles, password resets, per-user key management |
-| Providers | superadmin | Add preset providers (curated dropdown) or custom ones, edit base URLs, add/remove/toggle upstream keys, browse each provider's live model catalog (zen cards carry a Responses-API toggle) |
+| Providers | superadmin | Add providers from a curated preset dropdown (or its Custom Provider option), search/filter the provider card grid, edit base URLs, add/remove/toggle upstream keys, browse each provider's live model catalog (zen models with the Responses-API flag carry a toggle) |
 | Settings | superadmin | Rotation, retries/cooldowns, daily cap, Claude fallback, adapter knobs, Zen model-catalog sync |
 
 First boot requires `ADMIN_EMAIL` and `ADMIN_PASSWORD` (environment variables
