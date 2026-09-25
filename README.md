@@ -184,7 +184,7 @@ is one click plus an API key — no URL typing:
 | Anthropic | — | `api.anthropic.com` |
 | DeepSeek | `api.deepseek.com/v1` | `api.deepseek.com/anthropic` |
 | Groq | `api.groq.com/openai/v1` | — |
-| Kilo | `api.kilo.ai/api/gateway/v1` | — |
+| Kilo | `api.kilo.ai/api/gateway` | — |
 | Kimi (Moonshot) | `api.moonshot.ai/v1` | `api.moonshot.ai/anthropic` |
 | MiniMax | `api.minimax.io/v1` | `api.minimax.io/anthropic` |
 | OpenAI | `api.openai.com/v1` | — |
