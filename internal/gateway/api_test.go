@@ -843,6 +843,110 @@ func TestSyncModelMetaFailureKeepsMeta(t *testing.T) {
 	}
 }
 
+func TestSyncZaiModelMeta(t *testing.T) {
+	dev := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Write([]byte(`{
+			"opencode": {"models": {
+				"glm-5": {"limit":{"context":200000,"output":32000},"reasoning":true}
+			}},
+			"zai-coding-plan": {"models": {
+				"glm-5.3": {"limit":{"context":1000000,"output":131072},"reasoning":true,
+				             "description":"coding plan","modalities":{"input":["text"]}}
+			}},
+			"zhipuai-coding-plan": {"models": {}},
+			"zai": {"models": {
+				"glm-5.3": {"limit":{"context":999,"output":999},"description":"platform dup"},
+				"glm-4.5": {"limit":{"context":131072,"output":98304},"reasoning":true,
+				            "description":"older","modalities":{"input":["text"]}}
+			}},
+			"zhipuai": {"models": {
+				"glm-4.5v": {"limit":{"context":64000,"output":16384},
+				             "modalities":{"input":["text","image","video"]}}
+			}}
+		}`))
+	}))
+	zen := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		w.Write([]byte(`{"data":[{"id":"glm-5"}]}`))
+	}))
+	g, st := testStoreGateway(t, zen.URL)
+	if err := st.UpdateSettings(func(rs *settings.RuntimeSettings) *settings.RuntimeSettings {
+		rs.Zai.ModelMeta["glm-5.3"] = settings.ModelMeta{ContextWindow: 9, MaxOutputTokens: 9, ResponsesAPI: true}
+		rs.Zai.ModelMeta["glm-dead"] = settings.ModelMeta{ContextWindow: 1, MaxOutputTokens: 1}
+		return rs
+	}); err != nil {
+		t.Fatalf("seed: %v", err)
+	}
+
+	status := g.syncModelMeta(dev.URL)
+	if !status.OK {
+		t.Fatalf("sync not ok: %+v", status)
+	}
+	// added: zen glm-5 + zai glm-4.5 + glm-4.5v; updated: glm-5.3; pruned: glm-dead
+	if status.Added != 3 || status.Updated != 1 || status.Pruned != 1 {
+		t.Fatalf("counts = %+v, want added=3 updated=1 pruned=1", status)
+	}
+
+	got, err := st.LoadRuntimeSettings()
+	if err != nil {
+		t.Fatalf("load: %v", err)
+	}
+	// first hit wins: the coding-plan entry beats the platform duplicate
+	glm53 := got.Zai.ModelMeta["glm-5.3"]
+	if glm53.ContextWindow != 1_000_000 || glm53.MaxOutputTokens != 131_072 || glm53.Description != "coding plan" {
+		t.Fatalf("glm-5.3 merged wrong: %+v", glm53)
+	}
+	if !glm53.ResponsesAPI {
+		t.Fatal("zai responses flag lost after catalog overwrite")
+	}
+	if m := got.Zai.ModelMeta["glm-4.5"]; m.ContextWindow != 131072 || m.Description != "older" {
+		t.Fatalf("glm-4.5 merged wrong: %+v", m)
+	}
+	if m := got.Zai.ModelMeta["glm-4.5v"]; m.ContextWindow != 64000 || len(m.InputModalities) != 3 {
+		t.Fatalf("glm-4.5v merged wrong: %+v", m)
+	}
+	if _, exists := got.Zai.ModelMeta["glm-dead"]; exists {
+		t.Fatal("glm-dead should have been pruned from the zai meta")
+	}
+	// the zen merge still works alongside
+	if got.Zen.ModelMeta["glm-5"].ContextWindow != 200000 {
+		t.Fatalf("zen meta broken by the zai merge: %+v", got.Zen.ModelMeta)
+	}
+	// in-memory snapshot reflects the zai meta too
+	if g.rs().Zai.ModelMeta["glm-4.5"].ContextWindow != 131072 {
+		t.Fatal("rsPtr was not refreshed with the zai meta")
+	}
+}
+
+func TestSyncKeepsZaiMetaWithoutCatalogEntries(t *testing.T) {
+	dev := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Write([]byte(`{"opencode": {"models": {
+			"glm-5": {"limit":{"context":200000,"output":32000},"reasoning":true}
+		}}}`))
+	}))
+	zen := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		w.Write([]byte(`{"data":[{"id":"glm-5"}]}`))
+	}))
+	g, st := testStoreGateway(t, zen.URL)
+	if err := st.UpdateSettings(func(rs *settings.RuntimeSettings) *settings.RuntimeSettings {
+		rs.Zai.ModelMeta["glm-4.5"] = settings.ModelMeta{ContextWindow: 131072, MaxOutputTokens: 98304}
+		return rs
+	}); err != nil {
+		t.Fatalf("seed: %v", err)
+	}
+
+	status := g.syncModelMeta(dev.URL)
+	if !status.OK {
+		t.Fatalf("sync not ok: %+v", status)
+	}
+	// models.dev dropped its zai coverage — curated zai meta must survive
+	got, _ := st.LoadRuntimeSettings()
+	if m := got.Zai.ModelMeta["glm-4.5"]; m.ContextWindow != 131072 {
+		t.Fatalf("zai meta wiped by a catalog without zai entries: %+v", got.Zai.ModelMeta)
+	}
+}
+
 func TestAnthropicFallbackModel(t *testing.T) {
 	var mu sync.Mutex
 	var seenModels []string

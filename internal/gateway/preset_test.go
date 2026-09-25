@@ -58,15 +58,15 @@ func TestPresetRegistryInvariants(t *testing.T) {
 	if p, ok := lookupPreset("nope"); ok || p.ID != "" {
 		t.Error("lookupPreset(nope) should miss")
 	}
-	// kilo carries the suffixed-catalog treatment; plain presets do not
-	if !presetSuffixed("kilo") || presetSuffixed("zai") || presetSuffixed("") {
-		t.Error("suffixed flags wrong: want kilo true, others false")
+	// kilo and zai carry the suffixed-catalog treatment; plain presets do not
+	if !presetSuffixed("kilo") || !presetSuffixed("zai") || presetSuffixed("") {
+		t.Error("suffixed flags wrong: want kilo+zai true, others false")
 	}
 	if presetCatalogHook("kilo") == nil {
 		t.Error("kilo must keep its catalog hook")
 	}
-	if presetCatalogHook("zai") != nil {
-		t.Error("zai should pass through generically")
+	if presetCatalogHook("zai") == nil {
+		t.Error("zai must keep its catalog hook")
 	}
 }
 
@@ -150,20 +150,100 @@ func TestKiloPresetCatalogEnrichment(t *testing.T) {
 	}
 }
 
+// --- zai catalog enrichment (models.dev-backed meta + unknown-id fallback) ---
+
+func TestZaiPresetCatalogEnrichment(t *testing.T) {
+	up := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		w.Write([]byte(`{"data":[{"id":"glm-5.3"},{"id":"brand-new-model"}]}`))
+	}))
+	defer up.Close()
+
+	g, st := testStoreGateway(t, up.URL)
+	addPresetProvider(t, st, "zai", "glm", up.URL, "zk1")
+	// seed the meta through the PUT handler (it refreshes the in-memory
+	// snapshot the hot path reads, like a real admin edit would)
+	adminCookie := loginAs(t, g, "admin@example.com", "super-secret-pass")
+	rec := httptest.NewRecorder()
+	req := httptest.NewRequest("PUT", "/api/settings",
+		strings.NewReader(`{"zai":{"modelMeta":{"glm-5.3":{"contextWindow":1000000,"maxOutputTokens":131072,
+			"reasoning":true,"inputModalities":["text","image","video","pdf"],"description":"flagship"}}}}`))
+	req.AddCookie(adminCookie)
+	req.Header.Set("Origin", "https://gateway.example.com")
+	req.RemoteAddr = "10.9.9.9:5555"
+	g.requireSession(g.requireSuperadmin(g.handlePutSettings))(rec, req)
+	if rec.Code != 200 {
+		t.Fatalf("PUT settings: got %d: %s", rec.Code, rec.Body.String())
+	}
+	if err := g.rebuildPools(); err != nil {
+		t.Fatalf("rebuildPools: %v", err)
+	}
+	ref, ok := g.provider("glm")
+	if !ok {
+		t.Fatal("zai preset provider not in registry")
+	}
+
+	models, err := g.fetchUpstreamModels(ref)
+	if err != nil {
+		t.Fatalf("fetchUpstreamModels: %v", err)
+	}
+	byID := map[string]map[string]any{}
+	for _, m := range models {
+		e := m.(map[string]any)
+		byID[e["id"].(string)] = e
+	}
+
+	known, ok := byID["glm/glm-5.3-1M-txt-img-vid-pdf"]
+	if !ok {
+		t.Fatalf("suffixed known entry missing: %v", byID)
+	}
+	if known["context_window"] != int64(1_000_000) || known["max_output_tokens"] != int64(131_072) {
+		t.Errorf("known entry limits wrong: %v", known)
+	}
+	if known["reasoning"] != true || known["description"] != "flagship" || known["responses_api"] != false {
+		t.Errorf("known entry flags wrong: %v", known)
+	}
+	if m, ok := known["input_modalities"].([]string); !ok || len(m) != 4 {
+		t.Errorf("known entry modalities wrong: %v", known["input_modalities"])
+	}
+
+	// a model models.dev doesn't know yet falls back to 1M context — agents
+	// would otherwise default to 128K and truncate long sessions
+	unknown, ok := byID["glm/brand-new-model-1M"]
+	if !ok {
+		t.Fatalf("unknown entry missing: %v", byID)
+	}
+	if unknown["context_window"] != int64(1_048_576) || unknown["max_output_tokens"] != int64(131_072) {
+		t.Errorf("unknown entry fallback limits wrong: %v", unknown)
+	}
+	if unknown["reasoning"] != true {
+		t.Errorf("unknown entry should read as a reasoning model: %v", unknown)
+	}
+	if _, has := unknown["input_modalities"]; has {
+		t.Errorf("unknown entry must not invent modalities: %v", unknown)
+	}
+	if _, has := unknown["description"]; has {
+		t.Errorf("unknown entry must not invent a description: %v", unknown)
+	}
+}
+
 // --- suffix stripping keyed on preset ---
 
 func TestKiloPresetSuffixStrippedOnRouting(t *testing.T) {
 	var mu sync.Mutex
-	var kiloModels, genericModels []string
+	var kiloModels, zaiModels, genericModels []string
 	up := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		var body struct {
 			Model string `json:"model"`
 		}
 		json.NewDecoder(r.Body).Decode(&body)
 		mu.Lock()
-		if strings.HasPrefix(r.URL.Path, "/kilo") {
+		switch {
+		case strings.HasPrefix(r.URL.Path, "/kilo"):
 			kiloModels = append(kiloModels, body.Model)
-		} else {
+		case strings.HasPrefix(r.URL.Path, "/zai"):
+			zaiModels = append(zaiModels, body.Model)
+		default:
 			genericModels = append(genericModels, body.Model)
 		}
 		mu.Unlock()
@@ -173,6 +253,7 @@ func TestKiloPresetSuffixStrippedOnRouting(t *testing.T) {
 
 	g, st := testStoreGateway(t, up.URL)
 	addPresetProvider(t, st, "kilo", "mykilo", up.URL+"/kilo", "kk1")
+	addPresetProvider(t, st, "zai", "glm", up.URL+"/zai", "zk1")
 	addGenericProvider(t, st, "generic", up.URL+"/generic", "gk1")
 	if err := g.rebuildPools(); err != nil {
 		t.Fatalf("rebuildPools: %v", err)
@@ -182,6 +263,11 @@ func TestKiloPresetSuffixStrippedOnRouting(t *testing.T) {
 	g.handleChat(rec, chatReq("mykilo", "m-262K-txt"))
 	if rec.Code != 200 {
 		t.Fatalf("kilo chat: got %d: %s", rec.Code, rec.Body.String())
+	}
+	rec = httptest.NewRecorder()
+	g.handleChat(rec, chatReq("glm", "glm-5.3-1M"))
+	if rec.Code != 200 {
+		t.Fatalf("zai chat: got %d: %s", rec.Code, rec.Body.String())
 	}
 	rec = httptest.NewRecorder()
 	g.handleChat(rec, chatReq("generic", "m-262K-txt"))
@@ -194,6 +280,10 @@ func TestKiloPresetSuffixStrippedOnRouting(t *testing.T) {
 	// kilo preset: suffixed catalog ids are stripped before the upstream call
 	if len(kiloModels) != 1 || kiloModels[0] != "m" {
 		t.Fatalf("kilo upstream models = %v, want [m]", kiloModels)
+	}
+	// zai preset: same treatment — the advertised "-1M" never reaches upstream
+	if len(zaiModels) != 1 || zaiModels[0] != "glm-5.3" {
+		t.Fatalf("zai upstream models = %v, want [glm-5.3]", zaiModels)
 	}
 	// generic provider: the suffix could be a real id — only [1m] is stripped
 	if len(genericModels) != 1 || genericModels[0] != "m-262K-txt" {

@@ -182,6 +182,12 @@ export interface KiloSettingsView {
   freeOnly: boolean
 }
 
+// Sync-managed (models.dev, same sync as zen's) — Z.ai's /models only lists
+// ids, so preset providers enrich from this catalog. Saved back untouched.
+export interface ZaiSettingsView {
+  modelMeta?: Record<string, ModelMetaView>
+}
+
 export interface AnthropicSettingsView {
   fallbackModel: string
 }
@@ -192,6 +198,7 @@ export interface RuntimeSettingsView {
   anthropic: AnthropicSettingsView
   zen: ZenSettingsView
   kilo: KiloSettingsView
+  zai: ZaiSettingsView
 }
 
 // Z.ai coding-plan per-key usage (GET /api/providers/{id}/keys/{keyId}/usage

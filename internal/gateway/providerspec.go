@@ -4,6 +4,8 @@ import (
 	"bytes"
 	"regexp"
 	"time"
+
+	"github.com/kmmuntasir/nano-llm-proxy/internal/settings"
 )
 
 // Curated provider presets: the GUI's "Add Provider" dropdown. Each preset is
@@ -132,6 +134,49 @@ func kiloCatalog(g *gateway, ref providerRef, id string, entry, raw map[string]a
 	return true
 }
 
+// zaiCatalog is Z.ai's per-entry hook. Z.ai's /models advertises bare ids
+// only, so enrichment comes from Zai.ModelMeta — filled by the same models.dev
+// sync that keeps Zen's catalog fresh. Models the catalog doesn't know yet (a
+// brand-new GLM release) still advertise a usable shape: every current GLM
+// flagship carries a 1M-context window, and understating it makes coding
+// agents default to 128K and truncate long sessions. Output falls back to the
+// 131072 all of them share.
+const (
+	zaiUnknownContext = 1_048_576
+	zaiUnknownOutput  = 131_072
+)
+
+func zaiCatalog(g *gateway, ref providerRef, id string, entry, raw map[string]any) bool {
+	meta, known := g.rs().Zai.ModelMeta[id]
+	if !known {
+		meta = settings.ModelMeta{
+			ContextWindow:   zaiUnknownContext,
+			MaxOutputTokens: zaiUnknownOutput,
+			Reasoning:       true,
+		}
+	}
+	ctx := meta.ContextWindow
+	if ctx <= 0 {
+		ctx = zaiUnknownContext
+	}
+	out := meta.MaxOutputTokens
+	if out <= 0 {
+		out = zaiUnknownOutput
+	}
+	entry["context_window"] = ctx
+	entry["max_output_tokens"] = out
+	entry["reasoning"] = meta.Reasoning
+	entry["responses_api"] = false // the coding plan has no Responses surface
+	if len(meta.InputModalities) > 0 {
+		entry["input_modalities"] = meta.InputModalities
+	}
+	if meta.Description != "" {
+		entry["description"] = meta.Description
+	}
+	entry["id"] = ref.name + "/" + buildSuffixedID(id, ctx, meta.InputModalities)
+	return true
+}
+
 // presetRegistry lists the curated presets, ordered by label for the GUI
 // dropdown. Keep it sorted — a test enforces it.
 //
@@ -204,6 +249,8 @@ var presetRegistry = []presetSpec{
 		BaseURL:          "https://api.z.ai/api/coding/paas/v4",
 		AnthropicBaseURL: "https://api.z.ai/api/anthropic",
 		DocsURL:          "https://docs.z.ai",
+		catalog:          zaiCatalog,
+		suffixed:         true,
 		usageURL:         "https://api.z.ai/api/monitor/usage/quota/limit",
 	},
 }

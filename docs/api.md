@@ -111,7 +111,9 @@ Merged catalog of every enabled provider, enriched per entry:
 ```
 
 The ID suffix is cosmetic (context + input modalities); bare IDs are
-accepted on every endpoint.
+accepted on every endpoint. Z.ai entries are enriched from a models.dev-synced
+catalog; a model the catalog doesn't know yet still advertises a 1M context
+window so agents don't downshift to 128K.
 
 ## GET /health
 

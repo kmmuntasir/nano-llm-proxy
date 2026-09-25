@@ -52,6 +52,7 @@ block is server-owned).
 | `zen.modelMeta` | empty | Per-model metadata (context window, max output, modalities, reasoning, description) shown in `/v1/models`; unknown models get conservative defaults |
 | `zen.modelMetaAutoSync` | false | Refresh `modelMeta` from models.dev once a day in the background |
 | `kilo.freeOnly` | false | Same catalog restriction as `zen.freeOnly`, applied to Kilo preset providers |
+| `zai.modelMeta` | empty | Per-model metadata for Z.ai preset providers (context window, max output, modalities, reasoning, description); filled by the models.dev sync. Unknown models advertise a 1M context window so coding agents don't downshift to 128K |
 
 Ranges enforced on save: `maxKeysPerRequest` 1–100, `cooldownSeconds`
 0–86400, `maxRequestsPerKeyPerDay` 0 or 1–1000000, `fallbackModel` shaped
@@ -63,21 +64,26 @@ page. Only `zen` is built in; every other provider is added from the Add
 Provider dropdown — a curated preset, or its Custom Provider option for
 hand-typed endpoints.
 
-## Zen model catalog sync
+## Model catalog sync (models.dev)
 
-Zen's `/models` endpoint advertises ids only, so the context windows, output
-limits, reasoning flags, and descriptions shown in `/v1/models` come from
-[`models.dev`](https://models.dev) — the model directory the opencode
-ecosystem publishes. The sync (Settings → Zen → *Sync now*, or daily when
-`modelMetaAutoSync` is on):
+Zen's and Z.ai's `/models` endpoints advertise ids only, so the context
+windows, output limits, reasoning flags, and descriptions shown in
+`/v1/models` come from [`models.dev`](https://models.dev) — the model
+directory the opencode ecosystem publishes. One sync refreshes both catalogs
+(Settings → Model catalog → *Sync now*, or daily when `modelMetaAutoSync` is
+on). It fetches `https://models.dev/api.json` and then:
 
-- fetches `https://models.dev/api.json` and keeps only the `opencode`
-  provider's models,
-- overwrites `modelMeta` for live zen ids that models.dev knows (manual
-  curation of those ids is overwritten),
-- leaves manual entries for ids models.dev doesn't know untouched,
-- prunes meta whose model no longer appears in zen's live catalog (a
-  re-added model comes back on the next sync),
+- keeps the `opencode` provider's models for `zen.modelMeta`: overwrites the
+  meta of live zen ids models.dev knows (manual curation of those ids is
+  overwritten), leaves manual entries for unknown ids untouched, and prunes
+  meta whose model no longer appears in zen's live catalog (a re-added model
+  comes back on the next sync),
+- merges the `zai-coding-plan`, `zhipuai-coding-plan`, `zai`, and `zhipuai`
+  entries into `zai.modelMeta`, first hit winning per model id — the
+  coding-plan entries describe exactly what the coding endpoint serves and
+  the platform entries fill in older models; ids that vanish from all four
+  entries are pruned, and models the catalog doesn't know yet fall back to a
+  1M context window in `/v1/models`,
 - never touches the per-model `responsesApi` flags,
 - on any fetch/parse/persist failure changes nothing and records the error in
   the sync status shown in the GUI.

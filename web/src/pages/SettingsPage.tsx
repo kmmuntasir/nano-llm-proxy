@@ -140,6 +140,8 @@ interface SettingsForm {
   modelMetaAutoSync: boolean
   /** sync-managed; the Models page reads it — saved back untouched */
   modelMeta: Record<string, ModelMetaView>
+  /** sync-managed (models.dev, same sync as zen's) — saved back untouched */
+  zaiModelMeta: Record<string, ModelMetaView>
   kiloFreeOnly: boolean
 }
 
@@ -153,6 +155,7 @@ function hydrate(s: RuntimeSettingsView): SettingsForm {
     zenFreeOnly: s.zen.freeOnly,
     modelMetaAutoSync: s.zen.modelMetaAutoSync,
     modelMeta: { ...(s.zen.modelMeta ?? {}) },
+    zaiModelMeta: { ...(s.zai.modelMeta ?? {}) },
     kiloFreeOnly: s.kilo.freeOnly,
   }
 }
@@ -174,6 +177,7 @@ function buildPayload(
         modelMetaAutoSync: f.modelMetaAutoSync,
       },
       kilo: { freeOnly: f.kiloFreeOnly },
+      zai: { modelMeta: f.zaiModelMeta },
     },
   }
 }
@@ -201,12 +205,12 @@ function SyncCard({ status }: { status?: ModelMetaSyncStatusView }) {
   return (
     <Card.Root>
       <Card.Header>
-        <Heading size="sm">Zen model catalog (models.dev)</Heading>
+        <Heading size="sm">Model catalog (models.dev)</Heading>
         <Text fontSize="xs" color="fg.muted">
-          Zen's own /models only lists ids — context windows, output limits and
-          reasoning flags come from models.dev. Auto-sync refreshes them daily;
-          entries for models models.dev doesn't know are left as you wrote them,
-          and dead ids are pruned. Manual edits to catalog-known models are
+          Zen and Z.ai list bare model ids — context windows, output limits and
+          reasoning flags come from models.dev. Auto-sync refreshes both catalogs
+          daily; entries for models models.dev doesn't know are left as you wrote
+          them, and dead ids are pruned. Manual edits to catalog-known models are
           overwritten on the next sync.
         </Text>
       </Card.Header>
