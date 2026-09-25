@@ -1,0 +1,1 @@
+anthropic auth style: x-api-key

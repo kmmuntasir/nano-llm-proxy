@@ -1,0 +1,294 @@
+{
+ "model": "glm-5.3-flash",
+ "messages": [
+  {
+   "role": "system",
+   "content": "You are an expert coding assistant operating inside pi, a coding agent harness. You help users by reading files, executing commands, editing code, and writing new files.\n\n<tools>\n- read: Read file contents\n- bash: Execute bash commands (ls, grep, find, etc.)\n- edit: Make precise file edits with exact text replacement, including multiple disjoint edits in one call\n- write: Create or overwrite files\n- mcpScript: Batch multiple MCP tool calls in one JavaScript request (loop, filter, chain)\n- mcp: MCP gateway — install by URL, status, search, describe, auth, and single MCP tool calls\n\nIn addition to the tools above, you may have access to other custom tools depending on the project.\n</tools>\n\n<rules>\n- Use bash for file operations like ls, rg, find\n- Use read to examine files instead of cat or sed.\n- You can inspect PI_* environment variables for current model and session details.\n- Use edit for precise changes (edits[].oldText must match exactly)\n- When changing multiple separate locations in one file, use one edit call with multiple entries in edits[] instead of multiple edit calls\n- Each edits[].oldText is matched against the original file, not after earlier edits are applied. Do not emit overlapping or nested edits. Merge nearby changes into one edit.\n- Keep edits[].oldText as small as possible while still being unique in the file. Do not pad with large unchanged regions.\n- Use write only for new files or complete rewrites.\n- Be concise in your responses\n- Show file paths clearly when working with files\n</rules>\n\n<docs>\nPi documentation (read only when the user asks about pi itself, its SDK, extensions, themes, skills, or TUI):\n- Main documentation: /home/munna/.nvm/versions/node/v24.16.0/lib/node_modules/@earendil-works/pi-coding-agent/README.md\n- Additional docs: /home/munna/.nvm/versions/node/v24.16.0/lib/node_modules/@earendil-works/pi-coding-agent/docs\n- Examples: /home/munna/.nvm/versions/node/v24.16.0/lib/node_modules/@earendil-works/pi-coding-agent/examples (extensions, custom tools, SDK)\n- When reading pi docs or examples, resolve docs/... under Additional docs and examples/... under Examples, not the current working directory\n- When asked about: extensions (docs/extensions.md, examples/extensions/), themes (docs/themes.md), skills (docs/skills.md), prompt templates (docs/prompt-templates.md), TUI components (docs/tui.md), keybindings (docs/keybindings.md), SDK integrations (docs/sdk.md), custom providers (docs/custom-provider.md), adding models (docs/models.md), pi packages (docs/packages.md), environment variables (docs/environment-variables.md)\n- When working on pi topics, read the docs and examples, and follow .md cross-references before implementing\n- Always read pi .md files completely and follow links to related docs (e.g., tui.md for TUI API details)\n</docs>\n\n<skills>\nThe following skills provide specialized instructions for specific tasks.\nUse the read tool to load a skill's file when the task matches its description.\nWhen a skill file references a relative path, resolve it against the skill directory (parent of SKILL.md / dirname of the path) and use that absolute path in tool commands.\n\n<available_skills>\n  <skill>\n    <name>web-perf</name>\n    <description>Analyzes web performance using Chrome DevTools MCP. Measures Core Web Vitals (LCP, INP, CLS) and supplementary metrics (FCP, TBT, Speed Index), identifies render-blocking resources, network dependency chains, layout shifts, caching issues, and accessibility gaps. Use when asked to audit, profile, debug, or optimize page load performance, Lighthouse scores, or site speed. Biases towards retrieval from current documentation over pre-trained knowledge.</description>\n    <location>/home/munna/.pi/agent/skills/web-perf/SKILL.md</location>\n  </skill>\n</available_skills>\n</skills>\n\n<cwd>\n/tmp/zai-agent-pi\n</cwd>"
+  },
+  {
+   "role": "user",
+   "content": [
+    {
+     "type": "text",
+     "text": "Read the file note.txt with the read tool. Then run ls with the bash tool. Then tell me the secret word in one short sentence."
+    }
+   ]
+  }
+ ],
+ "stream": true,
+ "stream_options": {
+  "include_usage": true
+ },
+ "max_tokens": 131072,
+ "tools": [
+  {
+   "type": "function",
+   "function": {
+    "name": "read",
+    "description": "Read the contents of a file. Supports text files and images (jpg, png, gif, webp, bmp). Images are sent as attachments. For text files, output is truncated to 2000 lines or 50KB (whichever is hit first). Use offset/limit for large files. When you need the full file, continue with offset until complete.",
+    "parameters": {
+     "type": "object",
+     "required": [
+      "path",
+      "offset",
+      "limit"
+     ],
+     "properties": {
+      "path": {
+       "type": "string",
+       "description": "Path to the file to read (relative or absolute)"
+      },
+      "offset": {
+       "anyOf": [
+        {
+         "type": "number",
+         "description": "Line number to start reading from (1-indexed)"
+        },
+        {
+         "type": "null"
+        }
+       ]
+      },
+      "limit": {
+       "anyOf": [
+        {
+         "type": "number",
+         "description": "Maximum number of lines to read"
+        },
+        {
+         "type": "null"
+        }
+       ]
+      }
+     },
+     "additionalProperties": false
+    },
+    "strict": true
+   }
+  },
+  {
+   "type": "function",
+   "function": {
+    "name": "bash",
+    "description": "Execute a bash command in the current working directory. Returns stdout and stderr. Output is truncated to last 2000 lines or 50KB (whichever is hit first). If truncated, full output is saved to a temp file. Optionally provide a timeout in seconds.",
+    "parameters": {
+     "type": "object",
+     "required": [
+      "command",
+      "timeout"
+     ],
+     "properties": {
+      "command": {
+       "type": "string",
+       "description": "Shell command to execute"
+      },
+      "timeout": {
+       "anyOf": [
+        {
+         "type": "number",
+         "description": "Timeout in seconds (optional, no default timeout)"
+        },
+        {
+         "type": "null"
+        }
+       ]
+      }
+     },
+     "additionalProperties": false
+    },
+    "strict": true
+   }
+  },
+  {
+   "type": "function",
+   "function": {
+    "name": "edit",
+    "description": "Edit a single file using exact text replacement. Every edits[].oldText must match a unique, non-overlapping region of the original file. If two changes affect the same block or nearby lines, merge them into one edit instead of emitting overlapping edits. Do not include large unchanged regions just to connect distant changes.",
+    "parameters": {
+     "type": "object",
+     "required": [
+      "path",
+      "edits"
+     ],
+     "properties": {
+      "path": {
+       "type": "string",
+       "description": "Path to the file to edit (relative or absolute)"
+      },
+      "edits": {
+       "type": "array",
+       "items": {
+        "type": "object",
+        "required": [
+         "oldText",
+         "newText"
+        ],
+        "properties": {
+         "oldText": {
+          "type": "string",
+          "description": "Exact text for one targeted replacement. It must be unique in the original file and must not overlap with any other edits[].oldText in the same call."
+         },
+         "newText": {
+          "type": "string",
+          "description": "Replacement text for this targeted edit."
+         }
+        },
+        "additionalProperties": false
+       },
+       "description": "One or more targeted replacements. Each edit is matched against the original file, not incrementally. Do not include overlapping or nested edits. If two changes touch the same block or nearby lines, merge them into one edit instead."
+      }
+     },
+     "additionalProperties": false
+    },
+    "strict": true
+   }
+  },
+  {
+   "type": "function",
+   "function": {
+    "name": "write",
+    "description": "Write content to a file. Creates the file if it doesn't exist, overwrites if it does. Automatically creates parent directories.",
+    "parameters": {
+     "type": "object",
+     "required": [
+      "path",
+      "content"
+     ],
+     "properties": {
+      "path": {
+       "type": "string",
+       "description": "Path to the file to write (relative or absolute)"
+      },
+      "content": {
+       "type": "string",
+       "description": "Content to write to the file"
+      }
+     },
+     "additionalProperties": false
+    },
+    "strict": true
+   }
+  },
+  {
+   "type": "function",
+   "function": {
+    "name": "mcpScript",
+    "description": "Run trusted JavaScript that makes multiple MCP tool calls in one request — loop, filter, chain, or fan out between calls. For a single MCP call, search, describe, status check, or auth action, use the mcp tool instead. Discover with await tools.search({ query }) — resolves to { items: [{ path, name, server, description? }], total, hasMore, nextOffset }, not an { ok, data } envelope. Inspect with await tools.describe({ path }) — resolves to the tool descriptor with inputTypeScript, or { path, error: { code, message, suggestions } }. Then call tools.call(path, args) — resolves to { ok: true, data } or { ok: false, error: { code, message } } — or use direct flat calls when the name is already known; use emit(value) for user-visible output. Load the mcp-scripting skill for the full workflow guide.",
+    "parameters": {
+     "type": "object",
+     "required": [
+      "code"
+     ],
+     "properties": {
+      "code": {
+       "type": "string",
+       "description": "Trusted JavaScript MCP script. Use tools.<prefixedToolName>(args) and emit(value)."
+      },
+      "timeoutMs": {
+       "type": "number",
+       "minimum": 1,
+       "description": "Execution timeout in milliseconds (default: 30000)"
+      }
+     }
+    },
+    "strict": false
+   }
+  },
+  {
+   "type": "function",
+   "function": {
+    "name": "mcp",
+    "description": "MCP gateway — URL installation, server status, tool search/describe, auth, and single MCP tool calls. When a user supplies an MCP endpoint URL, install it with the install action. When one request needs several MCP calls with logic between them, use mcpScript. Non-MCP Pi tools should be called directly, not through mcp.\n\nUsage:\n  mcp({ action: \"install\", url: \"https://example.com/mcp\" }) → Install, connect, and authenticate an MCP URL\n  mcp({ })                              → Show server status and tool counts\n  mcp({ server: \"name\" })               → List tools from server\n  mcp({ search: \"query\" })              → Search MCP tools by name/description\n  mcp({ describe: \"tool_name\" })        → Show tool details and parameters\n  mcp({ instructions: \"name\" })         → Show full server usage instructions\n  mcp({ connect: \"server-name\" })       → Connect to a server and refresh metadata\n  mcp({ tool: \"name\", args: { key: \"value\" } })         → Call a tool (object args; JSON string also accepted)\n  mcp({ action: \"ui-messages\" })        → Retrieve accumulated messages from completed UI sessions\n  mcp({ action: \"auth-start\", server: \"name\" })      → Open OAuth and watch for completion\n  mcp({ action: \"auth-complete\", server: \"name\", args: { redirectUrl: \"...\" } }) → Complete manual OAuth\n\nMode: action > tool (call) > connect > describe > instructions > search > server (list) > nothing (status)",
+    "parameters": {
+     "type": "object",
+     "properties": {
+      "tool": {
+       "type": "string",
+       "description": "Tool name to call (e.g., 'xcodebuild_list_sims')"
+      },
+      "args": {
+       "anyOf": [
+        {
+         "type": "string",
+         "description": "Arguments as a JSON string (e.g., '{\"key\": \"value\"}')"
+        },
+        {
+         "type": "object",
+         "properties": {},
+         "additionalProperties": true,
+         "description": "Arguments as a JSON object (e.g., { \"key\": \"value\" })"
+        }
+       ],
+       "description": "Tool arguments as a JSON object, or as a JSON string encoding one"
+      },
+      "connect": {
+       "type": "string",
+       "description": "Server name to connect (lazy connect + metadata refresh)"
+      },
+      "describe": {
+       "type": "string",
+       "description": "Tool name to describe (shows parameters)"
+      },
+      "instructions": {
+       "type": "string",
+       "description": "Server name to show that server's usage instructions"
+      },
+      "search": {
+       "type": "string",
+       "description": "Search tools by name/description"
+      },
+      "searchMode": {
+       "type": "string",
+       "enum": [
+        "lexical",
+        "semantic"
+       ],
+       "description": "Search backend (default: lexical; semantic is available when a System One key is configured)"
+      },
+      "regex": {
+       "type": "boolean",
+       "description": "Treat search as regex (default: substring match)"
+      },
+      "includeSchemas": {
+       "type": "boolean",
+       "description": "Include parameter schemas in search results (default: true)"
+      },
+      "limit": {
+       "type": "number",
+       "minimum": 1,
+       "description": "Maximum search results to return (default: 12)"
+      },
+      "offset": {
+       "type": "number",
+       "minimum": 0,
+       "description": "Search result offset (default: 0)"
+      },
+      "server": {
+       "type": "string",
+       "description": "Server name: filters searches, disambiguates calls and describe operations, and optionally names an install"
+      },
+      "action": {
+       "type": "string",
+       "description": "Action: 'install', 'ui-messages', 'auth-start', or 'auth-complete'"
+      },
+      "url": {
+       "type": "string",
+       "description": "MCP endpoint URL for action: 'install'"
+      },
+      "target": {
+       "type": "string",
+       "description": "Install target: 'global' (default) or 'project'"
+      }
+     }
+    },
+    "strict": false
+   }
+  }
+ ],
+ "tool_stream": true,
+ "thinking": {
+  "type": "enabled",
+  "clear_thinking": false
+ },
+ "reasoning_effort": "high"
+}

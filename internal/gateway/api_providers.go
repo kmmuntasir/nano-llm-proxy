@@ -7,6 +7,7 @@ import (
 	"net/http"
 	"net/url"
 	"regexp"
+	"strings"
 )
 
 // store.Provider management endpoints (superadmin only). GUI-added providers are
@@ -46,22 +47,24 @@ func (g *gateway) handleListProviders(w http.ResponseWriter, r *http.Request) {
 		Errors      int64  `json:"errors"`
 	}
 	type provJSON struct {
-		ID        int64    `json:"id"`
-		Name      string   `json:"name"`
-		Type      string   `json:"type"`
-		BaseURL   string   `json:"baseUrl"`
-		Enabled   bool     `json:"enabled"`
-		Builtin   bool     `json:"builtin"`
-		SortOrder int64    `json:"sortOrder"`
-		Healthy   int      `json:"healthy"`
-		Total     int      `json:"total"`
-		Keys      []pkJSON `json:"keys"`
+		ID               int64    `json:"id"`
+		Name             string   `json:"name"`
+		Type             string   `json:"type"`
+		BaseURL          string   `json:"baseUrl"`
+		AnthropicBaseURL string   `json:"anthropicBaseUrl"`
+		Enabled          bool     `json:"enabled"`
+		Builtin          bool     `json:"builtin"`
+		SortOrder        int64    `json:"sortOrder"`
+		Healthy          int      `json:"healthy"`
+		Total            int      `json:"total"`
+		Keys             []pkJSON `json:"keys"`
 	}
 	out := make([]provJSON, 0, len(provs))
 	for i, p := range provs {
 		pj := provJSON{
 			ID: p.ID, Name: p.Name, Type: p.Type, BaseURL: p.BaseURL,
-			Enabled: p.Enabled, Builtin: p.Builtin, SortOrder: p.SortOrder,
+			AnthropicBaseURL: p.AnthropicBaseURL,
+			Enabled:          p.Enabled, Builtin: p.Builtin, SortOrder: p.SortOrder,
 			Keys: []pkJSON{},
 		}
 		for _, k := range keyLists[i] {
@@ -98,16 +101,18 @@ func upstreamKeyHash(key string) string {
 func (g *gateway) handleCreateProvider(w http.ResponseWriter, r *http.Request) {
 	actor := contextUser(r)
 	var req struct {
-		Name     string   `json:"name"`
-		BaseURL  string   `json:"baseUrl"`
-		Keys     []string `json:"keys"`
-		FirstKey string   `json:"firstKey"`
+		Name             string   `json:"name"`
+		BaseURL          string   `json:"baseUrl"`
+		AnthropicBaseURL string   `json:"anthropicBaseUrl"`
+		Keys             []string `json:"keys"`
+		FirstKey         string   `json:"firstKey"`
 	}
 	if !readJSON(w, r, &req) {
 		return
 	}
 	name := req.Name
-	baseURL := req.BaseURL
+	baseURL := strings.TrimSpace(req.BaseURL)
+	anthropicURL := strings.TrimSpace(req.AnthropicBaseURL)
 	if !providerNameRe.MatchString(name) {
 		apiErr(w, http.StatusBadRequest, "Provider name must be 1-32 characters of lowercase letters, digits, or dashes (it becomes the model prefix)")
 		return
@@ -116,10 +121,23 @@ func (g *gateway) handleCreateProvider(w http.ResponseWriter, r *http.Request) {
 		apiErr(w, http.StatusConflict, "That name is reserved (zen and kilo are built in)")
 		return
 	}
-	u, err := url.Parse(baseURL)
-	if err != nil || (u.Scheme != "http" && u.Scheme != "https") || u.Host == "" {
-		apiErr(w, http.StatusBadRequest, "baseUrl must be an absolute http(s) URL (OpenAI-compatible root, e.g. https://host/v1)")
+	if baseURL == "" && anthropicURL == "" {
+		apiErr(w, http.StatusBadRequest, "At least one endpoint is required: baseUrl (OpenAI-compatible root) and/or anthropicBaseUrl (Anthropic-compatible root)")
 		return
+	}
+	if baseURL != "" {
+		u, err := url.Parse(baseURL)
+		if err != nil || (u.Scheme != "http" && u.Scheme != "https") || u.Host == "" {
+			apiErr(w, http.StatusBadRequest, "baseUrl must be an absolute http(s) URL (OpenAI-compatible root, e.g. https://host/v1)")
+			return
+		}
+	}
+	if anthropicURL != "" {
+		u, err := url.Parse(anthropicURL)
+		if err != nil || (u.Scheme != "http" && u.Scheme != "https") || u.Host == "" {
+			apiErr(w, http.StatusBadRequest, "anthropicBaseUrl must be an absolute http(s) URL (Anthropic-compatible root, e.g. https://api.z.ai/api/anthropic)")
+			return
+		}
 	}
 	keys := req.Keys
 	if len(keys) == 0 && req.FirstKey != "" {
@@ -129,7 +147,7 @@ func (g *gateway) handleCreateProvider(w http.ResponseWriter, r *http.Request) {
 		apiErr(w, http.StatusBadRequest, "At least one upstream API key is required")
 		return
 	}
-	p := &store.Provider{Name: name, Type: "openai", BaseURL: baseURL, Enabled: true, SortOrder: 100}
+	p := &store.Provider{Name: name, Type: "openai", BaseURL: baseURL, AnthropicBaseURL: anthropicURL, Enabled: true, SortOrder: 100}
 	pks := make([]store.ProviderKey, 0, len(keys))
 	for _, k := range keys {
 		if k != "" {
@@ -162,9 +180,10 @@ func (g *gateway) handlePatchProvider(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	var req struct {
-		Name    *string `json:"name"`
-		BaseURL *string `json:"baseUrl"`
-		Enabled *bool   `json:"enabled"`
+		Name             *string `json:"name"`
+		BaseURL          *string `json:"baseUrl"`
+		AnthropicBaseURL *string `json:"anthropicBaseUrl"`
+		Enabled          *bool   `json:"enabled"`
 	}
 	if !readJSON(w, r, &req) {
 		return
@@ -178,14 +197,41 @@ func (g *gateway) handlePatchProvider(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	if req.BaseURL != nil {
-		u, err := url.Parse(*req.BaseURL)
-		if err != nil || (u.Scheme != "http" && u.Scheme != "https") || u.Host == "" {
-			apiErr(w, http.StatusBadRequest, "baseUrl must be an absolute http(s) URL")
-			return
+		// empty = clear the OpenAI root (allowed while the other stays)
+		*req.BaseURL = strings.TrimSpace(*req.BaseURL)
+		if *req.BaseURL != "" {
+			u, err := url.Parse(*req.BaseURL)
+			if err != nil || (u.Scheme != "http" && u.Scheme != "https") || u.Host == "" {
+				apiErr(w, http.StatusBadRequest, "baseUrl must be an absolute http(s) URL")
+				return
+			}
 		}
 	}
+	if req.AnthropicBaseURL != nil {
+		*req.AnthropicBaseURL = strings.TrimSpace(*req.AnthropicBaseURL)
+		if *req.AnthropicBaseURL != "" {
+			u, err := url.Parse(*req.AnthropicBaseURL)
+			if err != nil || (u.Scheme != "http" && u.Scheme != "https") || u.Host == "" {
+				apiErr(w, http.StatusBadRequest, "anthropicBaseUrl must be an absolute http(s) URL")
+				return
+			}
+		}
+	}
+	// at least one endpoint must remain after the patch
+	effectiveOpenAI := p.BaseURL
+	if req.BaseURL != nil {
+		effectiveOpenAI = *req.BaseURL
+	}
+	effectiveAnthropic := p.AnthropicBaseURL
+	if req.AnthropicBaseURL != nil {
+		effectiveAnthropic = *req.AnthropicBaseURL
+	}
+	if effectiveOpenAI == "" && effectiveAnthropic == "" {
+		apiErr(w, http.StatusBadRequest, "Cannot clear both endpoints — a provider needs baseUrl and/or anthropicBaseUrl")
+		return
+	}
 	if !g.applyMutation(w, actor, "provider.update", "A provider with this name already exists", func() error {
-		return g.store.UpdateProvider(id, req.Name, req.BaseURL, req.Enabled)
+		return g.store.UpdateProvider(id, req.Name, req.BaseURL, req.AnthropicBaseURL, req.Enabled)
 	}) {
 		return
 	}

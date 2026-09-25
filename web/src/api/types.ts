@@ -40,6 +40,7 @@ export interface ProviderView {
   name: string
   type: "openai" | "opencode"
   baseUrl: string
+  anthropicBaseUrl: string
   enabled: boolean
   builtin: boolean
   sortOrder: number

@@ -149,9 +149,24 @@ func (g *gateway) handleHealth(w http.ResponseWriter, r *http.Request) {
 }
 
 // fetchUpstreamModels GETs one provider's catalog with the first healthy key.
-// Builtin providers get the self-describing suffix treatment; generic
-// openai providers pass through raw under their prefix.
+// Dual-endpoint providers are catalogued from the OpenAI root, falling back to
+// the Anthropic root's /v1/models when that fails; anthropic-only providers go
+// straight there. Both shapes expose ids as data[].id.
 func (g *gateway) fetchUpstreamModels(ref providerRef) ([]any, error) {
+	if ref.baseURL == "" {
+		return g.fetchModelsAnthropic(ref)
+	}
+	models, err := g.fetchModelsOpenAI(ref)
+	if err == nil || ref.anthropicBaseURL == "" {
+		return models, err
+	}
+	if alt, altErr := g.fetchModelsAnthropic(ref); altErr == nil {
+		return alt, nil
+	}
+	return models, err
+}
+
+func (g *gateway) fetchModelsOpenAI(ref providerRef) ([]any, error) {
 	key := ref.pool.pick(nil)
 	if key == nil {
 		return nil, fmt.Errorf("No healthy %s keys available — every key is cooling or disabled", ref.name)
@@ -169,6 +184,35 @@ func (g *gateway) fetchUpstreamModels(ref providerRef) ([]any, error) {
 	if resp.StatusCode != http.StatusOK {
 		return nil, fmt.Errorf("%s /models HTTP %d", ref.name, resp.StatusCode)
 	}
+	return g.decodeModelList(ref, resp)
+}
+
+func (g *gateway) fetchModelsAnthropic(ref providerRef) ([]any, error) {
+	key := ref.pool.pick(nil)
+	if key == nil {
+		return nil, fmt.Errorf("No healthy %s keys available — every key is cooling or disabled", ref.name)
+	}
+	req, err := http.NewRequestWithContext(context.Background(), http.MethodGet, ref.anthropicBaseURL+"/v1/models", nil)
+	if err != nil {
+		return nil, err
+	}
+	req.Header.Set("x-api-key", key.Key)
+	req.Header.Set("anthropic-version", "2023-06-01")
+	resp, err := g.client.Do(req)
+	if err != nil {
+		return nil, err
+	}
+	defer resp.Body.Close()
+	if resp.StatusCode != http.StatusOK {
+		return nil, fmt.Errorf("%s /v1/models HTTP %d", ref.name, resp.StatusCode)
+	}
+	return g.decodeModelList(ref, resp)
+}
+
+// decodeModelList parses an upstream catalog ({"data":[{"id":...}, ...]}) and
+// applies the per-provider enrichment. Builtin providers get the
+// self-describing suffix treatment; generic providers pass through raw.
+func (g *gateway) decodeModelList(ref providerRef, resp *http.Response) ([]any, error) {
 	var parsed struct {
 		Data []map[string]any `json:"data"`
 	}
@@ -258,7 +302,7 @@ func (g *gateway) fetchUpstreamModels(ref providerRef) ([]any, error) {
 			cw, _ := entry["context_window"].(int64)
 			entry["id"] = ref.name + "/" + buildSuffixedID(id, cw, mods)
 		default:
-			// generic openai provider: passthrough, no enrichment, no suffixes
+			// generic provider: passthrough, no enrichment, no suffixes
 			if d, ok := m["context_length"].(float64); ok {
 				entry["context_window"] = int64(d)
 			}

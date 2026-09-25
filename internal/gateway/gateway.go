@@ -25,14 +25,17 @@ const upgradeHint = "upstream UpgradeRequired: the configured zen.userAgent is b
 	"1.18.0 floor; raise it in the admin GUI (Settings → Zen)"
 
 // providerRef is the runtime handle for one enabled provider: its routing
-// prefix, proxy behavior type, key pool, and upstream base URL. Built by
-// rebuildPools from the store (or from config in store==nil test mode).
+// prefix, proxy behavior type, key pool, and upstream base URL(s). A provider
+// may expose the OpenAI surface, the Anthropic surface, or both (e.g. the
+// Z.ai GLM Coding Plan) — whichever roots are set decide the routing below.
+// Built by rebuildPools from the store (or from config in store==nil test mode).
 type providerRef struct {
-	name    string // routing prefix ("zen/...")
-	typ     string // "openai" | "opencode"
-	pool    *Pool
-	baseURL string
-	builtin bool
+	name             string // routing prefix ("zen/...")
+	typ              string // "openai" | "opencode"
+	pool             *Pool
+	baseURL          string // OpenAI-compatible root; empty = anthropic-only
+	anthropicBaseURL string // Anthropic-compatible root; empty = no native surface
+	builtin          bool
 }
 
 type gateway struct {
@@ -163,7 +166,8 @@ func (g *gateway) rebuildPools() error {
 		}
 		registry = append(registry, providerRef{
 			name: row.Name, typ: row.Type, pool: pool,
-			baseURL: row.BaseURL, builtin: row.Builtin,
+			baseURL: row.BaseURL, anthropicBaseURL: row.AnthropicBaseURL,
+			builtin: row.Builtin,
 		})
 	}
 
@@ -370,10 +374,14 @@ func (g *gateway) handleChat(w http.ResponseWriter, r *http.Request) {
 	log.Printf("req provider=%s model=%s stream=%v", provider, upstreamModel, clientWantsStream)
 
 	var out string
-	if ref.typ == "opencode" {
+	switch {
+	case ref.typ == "opencode":
 		out = g.proxyZen(ref, w, r, body, upstreamModel, clientWantsStream, start)
-	} else {
+	case ref.baseURL != "":
 		out = g.proxyOpenAI(ref, w, r, body, clientWantsStream, start)
+	default:
+		// anthropic-only provider: translate chat completions to Messages
+		out = g.chatViaAnthropic(ref, w, r, body, upstreamModel, clientWantsStream, start)
 	}
 	if out != "" {
 		g.recordActivity(r, ref, upstreamModel, "", start, http.StatusBadGateway, out, tokenUsage{})

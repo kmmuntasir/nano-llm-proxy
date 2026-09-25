@@ -85,6 +85,14 @@ clients self-issue; anything else (including suffixed IDs like
 `myprovider/my-model-128K`) routes directly. A `[1m]` suffix is stripped
 before the upstream call.
 
+When the routed provider has an Anthropic-compatible endpoint
+(`anthropicBaseUrl`), the request is forwarded to it natively — none of
+the translation above applies: thinking blocks, `anthropic-beta` headers,
+interleaved `system` messages, and SSE event framing pass through
+verbatim, and only the credential is swapped for a pooled upstream key.
+Providers with only an OpenAI-compatible root go through the translation
+described above.
+
 ## GET /v1/models
 
 Merged catalog of every enabled provider, enriched per entry:
@@ -125,7 +133,7 @@ Roles: `superadmin` (everything below) and `user` (own keys + dashboard).
 | `GET/POST /api/me/keys`, `PATCH/DELETE /api/me/keys/{keyId}` | user | Own client keys |
 | `GET/POST /api/users`, `PATCH/DELETE /api/users/{id}` | superadmin | User management |
 | `GET/POST /api/users/{id}/keys`, `PATCH/DELETE /api/users/{id}/keys/{keyId}` | superadmin | Per-user client keys |
-| `GET/POST /api/providers`, `PATCH/DELETE /api/providers/{id}` | superadmin | Providers (generic CRUD; built-ins cannot be deleted) |
+| `GET/POST /api/providers`, `PATCH/DELETE /api/providers/{id}` | superadmin | Providers (generic CRUD; `baseUrl` and/or `anthropicBaseUrl`, at least one required; built-ins cannot be deleted) |
 | `POST /api/providers/{id}/keys`, `PATCH/DELETE /api/providers/{id}/keys/{keyId}` | superadmin | Upstream keys |
 | `GET /api/settings` | superadmin | Effective runtime settings document (rotation, retries, Claude fallback, adapter knobs, model catalog) |
 | `PUT /api/settings` | superadmin | Validate and replace the document; omitted fields fall back to defaults, the models.dev sync status is server-owned and preserved. Validation failures return 400 and change nothing. Applies in-request — pool mode and the `/v1/models` cache refresh before the response |
