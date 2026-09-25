@@ -59,7 +59,7 @@ export default function LoginPage() {
           <form onSubmit={submit}>
             <VStack gap={4}>
               <Field.Root required>
-                <Field.Label>Email</Field.Label>
+                <Field.Label>Email <Field.RequiredIndicator /></Field.Label>
                 <Input
                   type="email"
                   autoComplete="username"
@@ -69,7 +69,7 @@ export default function LoginPage() {
                 />
               </Field.Root>
               <Field.Root required>
-                <Field.Label>Password</Field.Label>
+                <Field.Label>Password <Field.RequiredIndicator /></Field.Label>
                 <PasswordInput
                   autoComplete="current-password"
                   value={password}

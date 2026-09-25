@@ -89,7 +89,7 @@ function RangePicker({
       ))}
       <Field.Root w="200px">
         <Field.Label fontSize="xs">From</Field.Label>
-        <Input
+        <Input autoComplete="off"
           type="datetime-local"
           size="xs"
           value={from}
@@ -98,7 +98,7 @@ function RangePicker({
       </Field.Root>
       <Field.Root w="200px">
         <Field.Label fontSize="xs">To</Field.Label>
-        <Input
+        <Input autoComplete="off"
           type="datetime-local"
           size="xs"
           value={to}

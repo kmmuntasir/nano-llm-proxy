@@ -104,15 +104,15 @@ function AddUserModal({ open, onOpenChange }: { open: boolean; onOpenChange: (o:
           <Dialog.Body>
             <VStack align="stretch" gap={3}>
               <Field.Root required>
-                <Field.Label>Name</Field.Label>
-                <Input value={name} onChange={(e) => setName(e.target.value)} />
+                <Field.Label>Name <Field.RequiredIndicator /></Field.Label>
+                <Input autoComplete="off" value={name} onChange={(e) => setName(e.target.value)} />
               </Field.Root>
               <Field.Root required>
-                <Field.Label>Email</Field.Label>
-                <Input type="email" value={email} onChange={(e) => setEmail(e.target.value)} />
+                <Field.Label>Email <Field.RequiredIndicator /></Field.Label>
+                <Input autoComplete="off" type="email" value={email} onChange={(e) => setEmail(e.target.value)} />
               </Field.Root>
               <Field.Root required>
-                <Field.Label>New password</Field.Label>
+                <Field.Label>New password <Field.RequiredIndicator /></Field.Label>
                 <PasswordInput
                   value={password}
                   onChange={(e) => setPassword(e.target.value)}
@@ -121,7 +121,7 @@ function AddUserModal({ open, onOpenChange }: { open: boolean; onOpenChange: (o:
                 <Field.HelperText>min 10 chars</Field.HelperText>
               </Field.Root>
               <Field.Root required>
-                <Field.Label>Confirm password</Field.Label>
+                <Field.Label>Confirm password <Field.RequiredIndicator /></Field.Label>
                 <PasswordInput
                   value={confirm}
                   onChange={(e) => setConfirm(e.target.value)}
@@ -215,7 +215,7 @@ function ResetPasswordModal({
           <Dialog.Body>
             <VStack align="stretch" gap={3}>
               <Field.Root required>
-                <Field.Label>New password</Field.Label>
+                <Field.Label>New password <Field.RequiredIndicator /></Field.Label>
                 <PasswordInput
                   value={password}
                   onChange={(e) => setPassword(e.target.value)}
@@ -226,7 +226,7 @@ function ResetPasswordModal({
                 </Field.HelperText>
               </Field.Root>
               <Field.Root required>
-                <Field.Label>Confirm password</Field.Label>
+                <Field.Label>Confirm password <Field.RequiredIndicator /></Field.Label>
                 <PasswordInput
                   value={confirm}
                   onChange={(e) => setConfirm(e.target.value)}

@@ -92,7 +92,7 @@ export default function ModelsPage() {
           <HStack flexWrap="wrap" gap={3} align="end">
             <Field.Root flex={1} minW="220px">
               <Field.Label>Search</Field.Label>
-              <Input
+              <Input autoComplete="off"
                 placeholder="model name or description…"
                 value={search}
                 onChange={(e) => setSearch(e.target.value)}

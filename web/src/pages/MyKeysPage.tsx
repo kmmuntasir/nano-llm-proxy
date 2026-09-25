@@ -90,7 +90,7 @@ export default function MyKeysPage() {
             <HStack gap={3} align="end">
               <Field.Root flex={1} maxW="sm">
                 <Field.Label>Alias (optional)</Field.Label>
-                <Input
+                <Input autoComplete="off"
                   placeholder="e.g. my laptop"
                   value={alias}
                   onChange={(e) => setAlias(e.target.value)}
