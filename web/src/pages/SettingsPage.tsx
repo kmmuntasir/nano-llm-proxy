@@ -240,7 +240,11 @@ function WebToolsCard({
             <Switch.Control>
               <Switch.Thumb />
             </Switch.Control>
-            <Switch.Label>Enabled — serve /mcp to client keys</Switch.Label>
+            <Switch.Label color={value.enabled ? undefined : "fg.muted"}>
+              {value.enabled
+                ? "Enabled — serve /mcp to client keys"
+                : "Disabled — /mcp answers 404 until you save with this on"}
+            </Switch.Label>
           </Switch.Root>
 
           <HStack gap={4} align="end" flexWrap="wrap">
