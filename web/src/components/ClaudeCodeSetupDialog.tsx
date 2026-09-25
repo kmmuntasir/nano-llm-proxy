@@ -64,7 +64,7 @@ function SlotPicker({
       mono
       ariaLabel={`${label} model`}
       startElement={
-        <Text fontSize="xs" color="fg.muted" w="12" ml={1}>
+        <Text fontSize="xs" color="fg.muted">
           {label}
         </Text>
       }

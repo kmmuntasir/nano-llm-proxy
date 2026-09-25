@@ -1,5 +1,5 @@
 import { useId, useMemo, useRef, useState } from "react"
-import { Box, Input, InputGroup, Text } from "@chakra-ui/react"
+import { Box, Input, Text } from "@chakra-ui/react"
 import type { ReactNode } from "react"
 
 // ComboSelect is the searchable dropdown used across the GUI (model pickers
@@ -24,10 +24,15 @@ interface ComboSelectProps {
   emptyText?: string
   /** mono font for the input and the options (model ids) */
   mono?: boolean
-  /** inline label rendered in the input's start element */
+  /** inline label rendered inside the input's left edge */
   startElement?: ReactNode
   ariaLabel?: string
 }
+
+// the inline label ("Opus") lives on an overlay above the input's left edge
+// (Chakra's InputGroup only reserves its own height as padding — wider labels
+// end up under the typed text), and the input reserves this much space for it
+const LABEL_PS = "4.25rem"
 
 export default function ComboSelect({
   options,
@@ -67,9 +72,23 @@ export default function ComboSelect({
 
   const labelOf = (v: string) => options.find((o) => o.value === v)?.label ?? v
 
+  // highlight the first real match after the "None" row, so Enter on a
+  // fresh query picks a model rather than clearing the slot
+  const firstMatchIndex = (q: string) => {
+    if (noneLabel === undefined) return 0
+    const ql = q.toLowerCase()
+    const any = options.some(
+      (o) => o.label.toLowerCase().includes(ql) || (o.search ?? "").toLowerCase().includes(ql),
+    )
+    return any ? 1 : 0
+  }
+
   const openList = () => {
     setQuery("")
-    const current = items.findIndex((o) => o.value === value)
+    // items still reflects the previous query here; the list is about to
+    // become [none?, ...options], so locate the current value in THAT list
+    const full = noneLabel !== undefined ? [{ value: "", label: noneLabel }, ...options] : options
+    const current = full.findIndex((o) => o.value === value)
     setHighlight(current >= 0 ? current : 0)
     setOpen(true)
   }
@@ -122,15 +141,17 @@ export default function ComboSelect({
         }
         break
       case "Home":
-        if (open) {
+        if (open && items.length > 0) {
           e.preventDefault()
           setHighlight(0)
+          scrollTo(0)
         }
         break
       case "End":
-        if (open) {
+        if (open && items.length > 0) {
           e.preventDefault()
           setHighlight(items.length - 1)
+          scrollTo(items.length - 1)
         }
         break
     }
@@ -138,31 +159,43 @@ export default function ComboSelect({
 
   return (
     <Box position="relative" w="full">
-      <InputGroup startElement={startElement} w="full">
-        <Input
-          ref={inputRef}
-          role="combobox"
-          aria-expanded={open}
-          aria-controls={open ? listId : undefined}
-          aria-activedescendant={open && items[highlight] ? `${listId}-opt-${highlight}` : undefined}
-          aria-label={ariaLabel}
-          autoComplete="off"
-          placeholder={placeholder}
-          fontFamily={mono ? "mono" : undefined}
-          value={open ? query : value ? labelOf(value) : ""}
-          onChange={(e) => {
-            setQuery(e.target.value)
-            setHighlight(0)
-            setOpen(true)
-          }}
-          onFocus={openList}
-          onBlur={() => setOpen(false)}
-          onKeyDown={(e) => {
-            onKeyDown(e)
-            if (open && highlight !== 0) scrollTo(highlight)
-          }}
-        />
-      </InputGroup>
+      {startElement && (
+        <Box
+          position="absolute"
+          insetInlineStart="0"
+          top="0"
+          bottom="0"
+          zIndex={1}
+          display="flex"
+          alignItems="center"
+          pl={3}
+          pointerEvents="none"
+        >
+          {startElement}
+        </Box>
+      )}
+      <Input
+        ref={inputRef}
+        role="combobox"
+        aria-expanded={open}
+        aria-controls={open ? listId : undefined}
+        aria-activedescendant={open && items[highlight] ? `${listId}-opt-${highlight}` : undefined}
+        aria-label={ariaLabel}
+        autoComplete="off"
+        placeholder={placeholder}
+        fontFamily={mono ? "mono" : undefined}
+        ps={startElement ? LABEL_PS : undefined}
+        value={open ? query : value ? labelOf(value) : ""}
+        onChange={(e) => {
+          const q = e.target.value
+          setQuery(q)
+          setHighlight(firstMatchIndex(q))
+          setOpen(true)
+        }}
+        onFocus={openList}
+        onBlur={() => setOpen(false)}
+        onKeyDown={onKeyDown}
+      />
       {open && (
         <Box
           id={listId}
@@ -201,7 +234,10 @@ export default function ComboSelect({
               fontSize="sm"
               fontFamily={mono ? "mono" : undefined}
               cursor="pointer"
-              bg={i === highlight ? "bg.subtle" : undefined}
+              // an unmistakable accent — a subtle gray highlight reads as
+              // "keyboard does nothing"
+              bg={i === highlight ? "blue.subtle" : undefined}
+              color={i === highlight ? "blue.fg" : undefined}
               onMouseEnter={() => setHighlight(i)}
               onClick={() => pick(i)}
               whiteSpace="nowrap"
