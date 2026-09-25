@@ -161,8 +161,10 @@ authenticated request.
 
 Setup for clients: `claude mcp add -s user -t http nano-web
 https://<gateway>/mcp --header "Authorization: Bearer fg-…"` — the GUI's
-My Keys → "Set up MCP web tools" dialog generates this plus opencode/Kilo
-configs. Backends are installed with
+My Keys → "Set up MCP web tools" dialog generates this plus opencode/Kilo/Pi
+configs, and the Guide page renders full per-agent setup (including Pi,
+which needs the pi-openai-compat extension for the gateway and
+pi-mcp-adapter for MCP). Backends are installed with
 `scripts/install-web-tools.sh` (see `docs/deployment.md`).
 
 ## Admin API (`/api/*`)

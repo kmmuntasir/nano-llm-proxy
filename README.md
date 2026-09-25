@@ -281,7 +281,7 @@ Served by the same binary at `/`.
 | --- | --- | --- |
 | Dashboard | everyone | Uptime, 24h requests/tokens/errors, usage charts (Today / 7d / 30d: requests, tokens, providers, top models), recent requests |
 | Models | everyone | Every live model across providers — the gateway's base URL with a one-click Claude Code `settings.json` env generator (pick opus/sonnet/haiku, copy the env object; `[1m]` is added automatically for 1M-context models) — plus search and filters by provider, context window, reasoning, Responses API, and input modalities; every model shows its exact ID with a copy button |
-| Guide | everyone | User guide rendered with this deployment's URLs: base endpoints, setup for Claude Code / opencode / Codex CLI / Kilo Code / generic OpenAI-compatible clients, MCP web-tools setup, troubleshooting |
+| Guide | everyone | User guide rendered with this deployment's URLs: base endpoints, setup for Claude Code / opencode / Codex CLI / Kilo Code / Pi / generic OpenAI-compatible clients, MCP web-tools setup, troubleshooting |
 | Usage | everyone | Date-range usage: totals, top models, providers, per-key (admins also get per-user), recent activity — scoped to the signed-in user |
 | Profile | everyone | Account info, self-service password reset, own client keys (create/disable/delete) plus an MCP web-tools setup dialog |
 | Users | superadmin | User CRUD, roles, password resets, per-user key management, per-user provider access (revoke a provider and it vanishes from that user's model list; their requests to it fail like an unknown provider) |
