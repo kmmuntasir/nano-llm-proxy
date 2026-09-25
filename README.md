@@ -12,8 +12,14 @@ file.
 Think "personal API gateway for language models": point your scripts, IDE
 extensions, and CLI agents at one URL with one key, while the gateway rotates
 a pool of upstream keys, survives rate limits and flaky upstreams, and shows
-you what happened in a web UI. A lightweight alternative to dragging a Python
-control plane around just to front a few API keys.
+you what happened in a web UI.
+
+**No Docker, no sidecars, no Postgres, no control plane.** One static binary
+plus one SQLite file is the entire deployment. `sudo ./deploy.sh` builds it
+and installs a hardened systemd unit. The whole point is that you can drop it
+on a cheap VPS, a NAS, or a laptop and have a working gateway in under a
+minute — the same job most gateways make you spin up a container and a
+database for.
 
 ## Why
 
@@ -24,18 +30,27 @@ control plane around just to front a few API keys.
 | Clients speak different protocols | The same pool serves OpenAI chat, OpenAI Responses, and Anthropic Messages |
 | Provider quirks (API surface splits, client-shape checks) | The built-in zen adapter normalizes the odd ones; the generic adapter covers any OpenAI-compatible URL |
 | Admin usually means YAML edits + restarts | Embedded web GUI: users, client keys, providers, upstream keys, usage charts, live dashboard |
+| A gateway that needs a container runtime and a database | One file, one process, one SQLite database — deployable by `scp` |
+
+> **Terminology.** Many gateways in this space call a provider a *channel*
+> and a key within it a *credential*; others call a key pool a *channel pool*
+> and a rotation policy a *strategy*. This README uses **provider** → **key
+> pool** → **rotation mode**. The mapping is: channel = provider, credential =
+> upstream key, strategy = rotation mode.
 
 ## Features
 
-- Single static binary (~12 MB, pure Go, no cgo); idles around 15 MB of RAM
+- Single static binary (~24 MB with the GUI embedded, pure Go, no cgo); idles
+  around 15 MB of RAM
 - Three request surfaces — `/v1/chat/completions`, `/v1/responses`,
   `/v1/messages` — plus a merged `/v1/models` catalog and an open `/health`
 - Streaming everywhere; non-streaming clients get aggregated responses
 - Key pools per provider: `priority` rotation (stick-with-failover,
   prompt-cache friendly) or `lru` (spread); cooldowns honor `Retry-After`
-- Failure classification: genuine auth failures disable a key; rate limits
-  and upstream flakes cool it down briefly; client-shape problems fail fast
-  with an actionable hint
+- Failure classification: genuine auth failures **blacklist** a key until you
+  re-enable it; rate limits and upstream flakes cool it down briefly (and
+  cooldowns lapse on their own, self-correcting with one probe request per
+  cycle); client-shape problems fail fast with an actionable hint
 - Embedded admin GUI (React, served by the same binary): users and roles,
   per-user client keys (stored hashed, plaintext shown once), provider and
   upstream-key management, self-service profiles, usage dashboards with
@@ -57,8 +72,71 @@ control plane around just to front a few API keys.
   (native fetch + obscura headless-browser rendering) with SSRF protection,
   per-user metering, and an idempotent installer (`scripts/install-web-tools.sh`)
   — no paid search APIs
-- 141 tests (`go test -race ./...`) against scripted mock upstreams and
+- 142 tests (`go test -race ./...`) against scripted mock upstreams and
   local fixture servers — no network or Node required
+
+## How it compares
+
+The self-hosted LLM gateway space is crowded, so here is the honest
+one-glance picture. Verified against each project's repository in **September
+2026** — star counts, versions, and feature gates move, so treat the
+qualitative columns as the durable part and re-check the rest before deciding.
+
+|  | **nano-llm-proxy** | LiteLLM | Bifrost | gpt-load | ccLoad | openziti/llm-gateway |
+| --- | --- | --- | --- | --- | --- | --- |
+| Runtime | Go static binary | Python | Go | Go | Go | Go |
+| Docker required | **No** | usually | usually | default path | default path | No |
+| External services | **none** | Postgres for virtual keys / budgets | — | none w/ SQLite | none w/ SQLite | none |
+| Datastore | SQLite (built in) | Postgres recommended | config | SQLite / MySQL / PG | SQLite | **none** (YAML only) |
+| Provider coverage | 10 presets + any compatible URL | **100+** (widest) | 23+ | ~20 + subscriptions | 4 protocols | OpenAI-compatible + local |
+| Client protocols | Chat, Responses, **Anthropic** | OpenAI, Anthropic, +more | OpenAI-compatible | Chat, Responses, Images, Embeddings, Rerank, Anthropic, **Gemini** | OpenAI, Anthropic, Gemini, Codex | OpenAI-compatible |
+| Multi-user + roles | **built in** | virtual keys (SSO/OIDC/SCIM commercial) | — | AccessKey | — | virtual keys |
+| Embedded GUI | yes | yes | yes | yes | yes | **no** |
+| Semantic cache / prompt compression | — | yes | yes (Weaviate) | — | — | — |
+| Multi-instance / cluster | — | yes | **yes** | — | — | — |
+| License | GPL-3.0 | MIT core (commercial add-ons) | Apache-2.0 | MIT | MIT | Apache-2.0 |
+
+Read that table as *not* a ranking. LiteLLM genuinely wins on provider
+breadth and Bifrost on measured throughput; both need infrastructure
+nano-llm-proxy deliberately does not. The niche this fills is the one with
+no popular occupant: **a gateway you can `scp` to a box and run**, with real
+multi-user auth and a real GUI, without a container runtime.
+
+### Where this is deliberately not the best choice
+
+Being straight about the gaps, so you don't pick it and find out later:
+
+- **Protocol breadth.** Three client surfaces (OpenAI Chat, OpenAI Responses,
+  Anthropic Messages). No Gemini `/v1beta`, no Images, no Embeddings, no
+  Rerank. gpt-load covers all of those natively.
+- **No semantic caching or prompt compression.** Bifrost and GoModel both
+  ship them; this does not.
+- **Single instance.** Pools are in-memory per process, rebuilt on every GUI
+  mutation. There is no shared pool across replicas — do not put two
+  processes behind a load balancer.
+- **Provider count is preset-based.** Ten curated presets plus any
+  OpenAI- or Anthropic-compatible URL. Not a catalog of 1,000+ models.
+- **Upstream keys are stored reversibly.** They must stay usable verbatim, so
+  they live in the SQLite file (keep it 0600). If your threat model needs
+  envelope encryption at rest, `gpt-load` or `openziti/llm-gateway` is the
+  better answer.
+
+### Where this wins
+
+- **Zero-infrastructure deploy.** `sudo ./deploy.sh` → a hardened systemd
+  unit. Most peers lead with Docker Compose and treat a native binary as the
+  secondary path.
+- **A tiny dependency graph.** Five direct Go dependencies, every one pure
+  Go — no cgo, no compiler toolchain, no interpreter at runtime. That is the
+  structural answer to dependency supply-chain risk. (For scale: two LiteLLM
+  PyPI releases shipped malicious credential-stealing code in 2026.)
+- **Real multi-tenancy.** Users, roles, per-user client keys, per-user
+  provider revocation, and a self-service profile — built in, not a paid tier.
+- **Bundled self-hosted MCP web tools.** Search + headless page reading with
+  SSRF protection and per-user metering, at no per-call API cost.
+- **Claude Code is a first-class citizen,** not a happy accident: dual
+  endpoints, `claude-*` fallback rewriting, `[1m]` context suffixes, and a
+  generated `settings.json`.
 
 ## Quickstart (from source)
 
@@ -138,7 +216,7 @@ Failure handling per request:
 | --- | --- | --- |
 | 429 with `Retry-After` | cooldown for that duration | next key |
 | 429 without | 30 s cooldown — Z.ai coding-plan 429s state the reset in the body, and the key cools until that instant | next key |
-| 401 genuine auth error | disabled until re-enabled | next key |
+| 401 genuine auth error | blacklisted until re-enabled | next key |
 | 401 anything else | 10 s cooldown (some providers wrap flakes as 401) | next key |
 | 403 client-shape rejection | none — not the key's fault | fail fast with a hint |
 | 426 upgrade required | none | fail fast: raise the adapter's `userAgent` |
@@ -301,8 +379,12 @@ Forgot the password? Run `./nano-llm-proxy -reset-admin-password` with
   backoff, Origin checks on state-changing requests.
 - Upstream provider keys are visible only to the server (the GUI shows hashed
   prefixes and status). They must remain usable verbatim, so they live in the
-  SQLite file — keep it at 0600 and out of version control. `keys.json` and
-  `.env` files are gitignored already.
+  SQLite file **without envelope encryption** — keep it at 0600 and out of
+  version control. `keys.json` and `.env` files are gitignored already. This
+  is a known trade-off, called out in
+  [Where this is deliberately not the best choice](#where-this-is-deliberately-not-the-best-choice);
+  if you need provider credentials encrypted at rest, use full-disk
+  encryption or pick a gateway that does it for you.
 
 ## Configuration
 
@@ -330,7 +412,9 @@ apply in-request; no restarts.
 
 `sudo ./deploy.sh` does the whole setup on a systemd host: it requires a
 `.env`, builds GUI + binary, installs to `/opt/nano-llm-proxy`, and installs
-a hardened unit. Optional MCP web-tool backends (SearXNG + obscura) are a
+a hardened unit. No Docker, no container runtime, no database server — the
+`StateDirectory` the unit sets is the only persistent state, holding
+`gateway.db`. Optional MCP web-tool backends (SearXNG + obscura) are a
 separate, idempotent installer — `sudo ./scripts/install-web-tools.sh` —
 documented in [docs/deployment.md](docs/deployment.md). Hand-rolled
 equivalent (full walkthrough in
