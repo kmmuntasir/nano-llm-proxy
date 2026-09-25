@@ -84,12 +84,21 @@ type KiloSettings struct {
 	FreeOnly bool `json:"freeOnly"`
 }
 
+// ZaiSettings carries the model metadata for Z.ai preset providers. Z.ai's
+// own /models payload advertises ids only, so — like Zen — the facts come
+// from models.dev, filled by the same sync that refreshes Zen's catalog.
+// There is no separate toggle or status: one models.dev fetch, two catalogs.
+type ZaiSettings struct {
+	ModelMeta map[string]ModelMeta `json:"modelMeta,omitempty"`
+}
+
 type RuntimeSettings struct {
 	Rotation  string            `json:"rotation"` // "priority" (default) | "lru"
 	Retry     RetryConfig       `json:"retry"`
 	Anthropic AnthropicSettings `json:"anthropic"`
 	Zen       ZenSettings       `json:"zen"`
 	Kilo      KiloSettings      `json:"kilo"`
+	Zai       ZaiSettings       `json:"zai"`
 }
 
 // DefaultRuntimeSettings is the seed for a fresh database and the fallback
@@ -109,6 +118,7 @@ func DefaultRuntimeSettings() *RuntimeSettings {
 			ModelMeta:   map[string]ModelMeta{},
 		},
 		Kilo: KiloSettings{},
+		Zai:  ZaiSettings{ModelMeta: map[string]ModelMeta{}},
 	}
 }
 
@@ -130,6 +140,9 @@ func (rs *RuntimeSettings) ApplyDefaults() *RuntimeSettings {
 	}
 	if rs.Zen.ModelMeta == nil {
 		rs.Zen.ModelMeta = map[string]ModelMeta{}
+	}
+	if rs.Zai.ModelMeta == nil {
+		rs.Zai.ModelMeta = map[string]ModelMeta{}
 	}
 	return rs
 }
@@ -166,6 +179,14 @@ func (rs *RuntimeSettings) Validate() string {
 			return fmt.Sprintf("Model meta for %q: max output tokens must be a positive integer", id)
 		}
 	}
+	for id, meta := range rs.Zai.ModelMeta {
+		if meta.ContextWindow <= 0 {
+			return fmt.Sprintf("Z.ai model meta for %q: context window must be a positive integer", id)
+		}
+		if meta.MaxOutputTokens <= 0 {
+			return fmt.Sprintf("Z.ai model meta for %q: max output tokens must be a positive integer", id)
+		}
+	}
 	return ""
 }
 
@@ -175,5 +196,7 @@ func (rs *RuntimeSettings) Clone() *RuntimeSettings {
 	out := *rs
 	out.Zen.ModelMeta = make(map[string]ModelMeta, len(rs.Zen.ModelMeta))
 	maps.Copy(out.Zen.ModelMeta, rs.Zen.ModelMeta)
+	out.Zai.ModelMeta = make(map[string]ModelMeta, len(rs.Zai.ModelMeta))
+	maps.Copy(out.Zai.ModelMeta, rs.Zai.ModelMeta)
 	return &out
 }

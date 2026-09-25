@@ -51,9 +51,9 @@ control plane around just to front a few API keys.
   aggregations over date ranges (90-day retention), persisted recent activity
 - Runtime settings live in the database and are editable in the GUI with no
   restart: rotation mode, retry/cooldown knobs, an optional per-key daily cap,
-  a Claude `claude-*` fallback model, adapter knobs, and a models.dev-backed
-  Zen model catalog that syncs itself
-- 68 tests (`go test -race ./...`) against scripted mock upstreams — no
+  a Claude `claude-*` fallback model, adapter knobs, and models.dev-backed
+  Zen and Z.ai model catalogs that sync themselves
+- 76 tests (`go test -race ./...`) against scripted mock upstreams — no
   network or Node required
 
 ## Quickstart (from source)
@@ -186,10 +186,12 @@ self-hosted gateway, a custom deployment — goes through the same dropdown's
 **Custom Provider…** option, which reveals the endpoint inputs instead. The
 preset id is stored on the provider row, which is
 the hook for future per-provider behavior. Presets with special catalogs
-(like Kilo's rich metadata) carry their own enrichment logic in
-`internal/gateway/providerspec.go`; `GET /api/providers/presets` lists the
-registry. Adding the same preset twice is fine (each gets its own name and
-keys).
+carry their own enrichment logic in `internal/gateway/providerspec.go` —
+Kilo maps its rich upstream metadata, and Z.ai merges four models.dev
+entries into a synced catalog (models it doesn't know yet advertise a 1M
+context window so agents don't downshift to 128K); `GET
+/api/providers/presets` lists the registry. Adding the same preset twice is
+fine (each gets its own name and keys).
 
 ## Dual-endpoint providers
 
@@ -255,7 +257,7 @@ Served by the same binary at `/`.
 | Profile | everyone | Account info, self-service password reset, own client keys (create/disable/delete) |
 | Users | superadmin | User CRUD, roles, password resets, per-user key management |
 | Providers | superadmin | Add providers from a curated preset dropdown (or its Custom Provider option), search/filter the provider card grid, edit base URLs, add/remove/toggle/rename upstream keys, fetch per-key plan usage for Z.ai (5-hour/weekly windows, tier, resets), browse each provider's live model catalog (zen models with the Responses-API flag carry a toggle) |
-| Settings | superadmin | Rotation, retries/cooldowns, daily cap, Claude fallback, adapter knobs, Zen model-catalog sync |
+| Settings | superadmin | Rotation, retries/cooldowns, daily cap, Claude fallback, adapter knobs, model-catalog sync (zen + zai, models.dev) |
 
 First boot requires `ADMIN_EMAIL` and `ADMIN_PASSWORD` (environment variables
 or an env file); the superadmin is created once and never overwritten.
@@ -291,7 +293,7 @@ real environment always wins; see `.env.example`). Full reference in
 | `NANO_TRUSTED_ORIGINS` | empty | Extra Origins allowed on GUI mutations behind a reverse proxy |
 
 **Runtime** — everything you tune while it runs (rotation, retries, daily
-cap, the Claude fallback, adapter knobs, the Zen model catalog) lives in the
+cap, the Claude fallback, adapter knobs, the model catalogs) lives in the
 database and is edited in the GUI under **Settings**. Changes apply
 in-request; no restarts.
 

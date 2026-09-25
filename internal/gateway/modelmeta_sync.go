@@ -16,19 +16,30 @@ import (
 // zen.modelMeta exists because Zen's /models payload advertises ids only.
 // models.dev — the model directory the opencode ecosystem itself publishes —
 // carries the missing facts (context/output limits, reasoning, input
-// modalities, descriptions) for the same bare ids. The sync below imports
-// them so the catalog stays fresh without hand-maintaining a JSON map:
+// modalities, descriptions) for the same bare ids. Z.ai preset providers have
+// the same problem (their /models is bare ids too), and models.dev covers
+// them under four entries. One sync refreshes both catalogs without
+// hand-maintaining JSON maps:
 //
-//   - live zen ids known to models.dev  -> overwritten from the catalog
-//   - live zen ids unknown to models.dev -> manual entries survive untouched
-//   - meta ids no longer live on zen     -> pruned (they come back on their
-//     own if zen re-adds the model)
+//	zen: live ids known to models.dev      -> overwritten from the catalog
+//	     live ids unknown to models.dev    -> manual entries survive untouched
+//	     meta ids no longer live on zen    -> pruned (they come back on their
+//	                                          own if zen re-adds the model)
+//	zai: merged from zai-coding-plan, zhipuai-coding-plan, zai, zhipuai —
+//	     first hit wins per model id (the coding-plan entries describe exactly
+//	     what the coding endpoint serves; the platform catalogs fill in older
+//	     models). Catalog-unknown ids are left to the zai catalog hook's
+//	     fallback; meta ids that vanished from every entry are pruned.
 //
 // The per-model responsesApi flag is never auto-touched — models.dev has no
 // such concept, so sync overwrites preserve whatever the admin toggled. Any
-// fetch/parse/persist failure leaves the existing meta exactly as it was.
+// fetch/parse/persist failure leaves both metas exactly as they were.
 
 const defaultModelsDevURL = "https://models.dev/api.json"
+
+// zaiModelsDevEntries are the models.dev provider entries merged into
+// Zai.ModelMeta, in first-hit-wins order.
+var zaiModelsDevEntries = []string{"zai-coding-plan", "zhipuai-coding-plan", "zai", "zhipuai"}
 
 // metaSyncInFlight guards the background trigger so overlapping maintenance
 // ticks never run two syncs at once (manual syncs bypass it by design).
@@ -46,11 +57,11 @@ type modelsDevModel struct {
 	Description string `json:"description"`
 }
 
-// decodeOpencodeModels streams the models.dev document and materializes only
-// the "opencode" provider subtree. The full payload is ~5 MB and this gateway
-// targets 512 MB VPS boxes — decoding everything would spike memory for data
-// we throw away.
-func decodeOpencodeModels(r io.Reader) (map[string]modelsDevModel, error) {
+// decodeModelsDevSubtrees streams the models.dev document and materializes
+// only the requested provider subtrees. The full payload is ~5 MB and this
+// gateway targets 512 MB VPS boxes — decoding everything would spike memory
+// for data we throw away. Absent subtrees are simply missing from the result.
+func decodeModelsDevSubtrees(r io.Reader, names []string) (map[string]map[string]modelsDevModel, error) {
 	dec := json.NewDecoder(r)
 	tok, err := dec.Token()
 	if err != nil {
@@ -59,22 +70,25 @@ func decodeOpencodeModels(r io.Reader) (map[string]modelsDevModel, error) {
 	if d, ok := tok.(json.Delim); !ok || d != '{' {
 		return nil, fmt.Errorf("expected top-level object")
 	}
-	models := map[string]modelsDevModel{}
-	found := false
+	want := make(map[string]bool, len(names))
+	for _, n := range names {
+		want[n] = true
+	}
+	out := map[string]map[string]modelsDevModel{}
 	for dec.More() {
 		keyTok, err := dec.Token()
 		if err != nil {
 			return nil, err
 		}
 		provider, _ := keyTok.(string)
-		if provider == "opencode" {
+		if want[provider] {
 			var entry struct {
 				Models map[string]modelsDevModel `json:"models"`
 			}
 			if err := dec.Decode(&entry); err != nil {
-				return nil, fmt.Errorf("decode opencode: %w", err)
+				return nil, fmt.Errorf("decode %s: %w", provider, err)
 			}
-			models, found = entry.Models, true
+			out[provider] = entry.Models
 		} else {
 			var skip json.RawMessage // transient; freed before the next provider
 			if err := dec.Decode(&skip); err != nil {
@@ -85,7 +99,18 @@ func decodeOpencodeModels(r io.Reader) (map[string]modelsDevModel, error) {
 	if _, err := dec.Token(); err != nil { // consume closing '}'
 		return nil, err
 	}
-	if !found {
+	return out, nil
+}
+
+// decodeOpencodeModels is the zen-only view of the catalog document; its
+// absence is fatal for the zen merge.
+func decodeOpencodeModels(r io.Reader) (map[string]modelsDevModel, error) {
+	out, err := decodeModelsDevSubtrees(r, []string{"opencode"})
+	if err != nil {
+		return nil, err
+	}
+	models, ok := out["opencode"]
+	if !ok {
 		return nil, fmt.Errorf("no opencode provider in catalog")
 	}
 	return models, nil
@@ -149,10 +174,11 @@ func (g *gateway) syncModelMeta(devURL string) settings.ModelMetaSyncStatus {
 			if resp.StatusCode != http.StatusOK {
 				err = fmt.Errorf("models.dev HTTP %d", resp.StatusCode)
 			} else {
-				var models map[string]modelsDevModel
-				models, err = decodeOpencodeModels(io.LimitReader(resp.Body, 20<<20))
+				var subtrees map[string]map[string]modelsDevModel
+				subtrees, err = decodeModelsDevSubtrees(io.LimitReader(resp.Body, 20<<20),
+					append([]string{"opencode"}, zaiModelsDevEntries...))
 				if err == nil {
-					err = g.mergeModelMeta(ctx, models, &st)
+					err = g.mergeModelMeta(ctx, subtrees, &st)
 				}
 			}
 		}
@@ -164,10 +190,10 @@ func (g *gateway) syncModelMeta(devURL string) settings.ModelMetaSyncStatus {
 	return st
 }
 
-// mergeModelMeta computes the merged catalog and persists it inside the
+// mergeModelMeta computes both merged catalogs and persists them inside the
 // store's read-modify-write transaction so a concurrent admin PUT can't be
 // clobbered, then refreshes the in-memory snapshot and the /v1/models cache.
-func (g *gateway) mergeModelMeta(ctx context.Context, models map[string]modelsDevModel, st *settings.ModelMetaSyncStatus) error {
+func (g *gateway) mergeModelMeta(ctx context.Context, subtrees map[string]map[string]modelsDevModel, st *settings.ModelMetaSyncStatus) error {
 	ids, err := g.liveZenModelIDs(ctx)
 	if err != nil {
 		return fmt.Errorf("zen catalog: %w", err)
@@ -175,6 +201,10 @@ func (g *gateway) mergeModelMeta(ctx context.Context, models map[string]modelsDe
 	live := make(map[string]bool, len(ids))
 	for _, id := range ids {
 		live[id] = true
+	}
+	opencode, ok := subtrees["opencode"]
+	if !ok {
+		return fmt.Errorf("no opencode provider in catalog")
 	}
 
 	// merge on top of the STORE state, not the in-memory snapshot: an admin
@@ -185,7 +215,7 @@ func (g *gateway) mergeModelMeta(ctx context.Context, models map[string]modelsDe
 		return fmt.Errorf("load settings: %w", err)
 	}
 	for _, id := range ids {
-		dev, ok := models[id]
+		dev, ok := opencode[id]
 		if !ok || dev.Limit.Context <= 0 || dev.Limit.Output <= 0 {
 			continue // unknown or unusable — keep whatever the admin curated
 		}
@@ -211,6 +241,7 @@ func (g *gateway) mergeModelMeta(ctx context.Context, models map[string]modelsDe
 			st.Pruned++
 		}
 	}
+	mergeZaiModelMeta(current, subtrees, st)
 
 	// mark success BEFORE the status snapshot is persisted — syncModelMeta
 	// only flips it on the returned copy after we return, and the DB must
@@ -219,6 +250,7 @@ func (g *gateway) mergeModelMeta(ctx context.Context, models map[string]modelsDe
 	status := *st
 	if err := g.store.UpdateSettings(func(rs *settings.RuntimeSettings) *settings.RuntimeSettings {
 		rs.Zen.ModelMeta = current.Zen.ModelMeta
+		rs.Zai.ModelMeta = current.Zai.ModelMeta
 		rs.Zen.ModelMetaSyncStatus = &status
 		return rs
 	}); err != nil {
@@ -229,6 +261,57 @@ func (g *gateway) mergeModelMeta(ctx context.Context, models map[string]modelsDe
 	}
 	g.invalidateCatalog()
 	return nil
+}
+
+// mergeZaiModelMeta folds the four Z.ai-related models.dev entries into
+// Zai.ModelMeta: first hit wins per id (coding-plan entries first — they
+// describe the coding endpoint's own catalog; the platform entries fill in
+// older models). Unlike the zen merge this needs no live catalog fetch: every
+// entry models.dev still documents is kept, ids that vanished from all four
+// entries are pruned, and the catalog hook's 1M fallback covers anything else
+// Z.ai starts serving. An empty union (models.dev dropped its Z.ai coverage)
+// skips the section entirely rather than wiping curated meta.
+func mergeZaiModelMeta(current *settings.RuntimeSettings, subtrees map[string]map[string]modelsDevModel, st *settings.ModelMetaSyncStatus) {
+	devs := map[string]modelsDevModel{}
+	for _, name := range zaiModelsDevEntries {
+		for id, dev := range subtrees[name] {
+			if _, dup := devs[id]; !dup {
+				devs[id] = dev
+			}
+		}
+	}
+	if len(devs) == 0 {
+		return
+	}
+	if current.Zai.ModelMeta == nil {
+		current.Zai.ModelMeta = map[string]settings.ModelMeta{}
+	}
+	for id, dev := range devs {
+		if dev.Limit.Context <= 0 || dev.Limit.Output <= 0 {
+			continue
+		}
+		responses := false
+		if old, exists := current.Zai.ModelMeta[id]; exists {
+			st.Updated++
+			responses = old.ResponsesAPI
+		} else {
+			st.Added++
+		}
+		current.Zai.ModelMeta[id] = settings.ModelMeta{
+			ContextWindow:   dev.Limit.Context,
+			MaxOutputTokens: dev.Limit.Output,
+			Reasoning:       dev.Reasoning,
+			ResponsesAPI:    responses,
+			InputModalities: dev.Modalities.Input,
+			Description:     dev.Description,
+		}
+	}
+	for id := range current.Zai.ModelMeta {
+		if _, ok := devs[id]; !ok {
+			delete(current.Zai.ModelMeta, id)
+			st.Pruned++
+		}
+	}
 }
 
 // failModelMetaSync records why a sync failed without touching modelMeta.

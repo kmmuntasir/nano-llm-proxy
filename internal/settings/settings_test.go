@@ -24,6 +24,9 @@ func TestRuntimeSettingsValidate(t *testing.T) {
 		{"meta zero ctx", func(rs *RuntimeSettings) {
 			rs.Zen.ModelMeta["m"] = ModelMeta{}
 		}, "context window must be"},
+		{"zai meta zero out", func(rs *RuntimeSettings) {
+			rs.Zai.ModelMeta["m"] = ModelMeta{ContextWindow: 1}
+		}, "Z.ai model meta"},
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
@@ -44,10 +47,15 @@ func TestSettingsCloneIsDeep(t *testing.T) {
 	rs := DefaultRuntimeSettings()
 	rs.Anthropic.FallbackModel = "zen/b"
 	rs.Zen.ModelMeta["m"] = ModelMeta{ContextWindow: 1, MaxOutputTokens: 2}
+	rs.Zai.ModelMeta["m"] = ModelMeta{ContextWindow: 3, MaxOutputTokens: 4}
 	c := rs.Clone()
 	c.Anthropic.FallbackModel = "zen/CHANGED"
 	c.Zen.ModelMeta["m"] = ModelMeta{ContextWindow: 9, MaxOutputTokens: 9}
+	c.Zai.ModelMeta["m"] = ModelMeta{ContextWindow: 8, MaxOutputTokens: 8}
 	if rs.Zen.ModelMeta["m"].ContextWindow != 1 {
 		t.Fatalf("Clone is not deep: %+v", rs)
+	}
+	if rs.Zai.ModelMeta["m"].ContextWindow != 3 {
+		t.Fatalf("Clone is not deep for zai meta: %+v", rs)
 	}
 }
