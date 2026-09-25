@@ -29,6 +29,12 @@ search:
 engines:
   - name: duckduckgo
     disabled: false
+  # the modern ddgw engine (TLS-impersonated JSON d.js API) survives DDG's
+  # bot detection where the legacy engine intermittently hits CAPTCHAs —
+  # keep both: SearXNG dedupes overlapping URLs and auto-suspends
+  # CAPTCHA-blocked engines per query
+  - name: duckduckgo web
+    disabled: false
   - name: brave
     disabled: false
   - name: bing
