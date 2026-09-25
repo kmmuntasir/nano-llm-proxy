@@ -53,10 +53,23 @@ block is server-owned).
 | `zen.modelMetaAutoSync` | false | Refresh `modelMeta` from models.dev once a day in the background |
 | `kilo.freeOnly` | false | Same catalog restriction as `zen.freeOnly`, applied to Kilo preset providers |
 | `zai.modelMeta` | empty | Per-model metadata for Z.ai preset providers (context window, max output, modalities, reasoning, description); filled by the models.dev sync. Unknown models advertise a 1M context window so coding agents don't downshift to 128K |
+| `webTools.enabled` | false | Serve the MCP web tools at `POST /mcp` to every client key. Off after upgrades — the SearXNG/obscura backends must be installed first (see `docs/deployment.md`) |
+| `webTools.searxngUrl` | `http://127.0.0.1:8888` | SearXNG base URL; the JSON API must be enabled there (`search.formats` includes `json`) |
+| `webTools.readerMode` | `fast` | `fast` = native fetch first, escalate to obscura; `render` = obscura first, fall back to native. Either way `web_read`'s `render: true` argument forces the browser leg |
+| `webTools.obscuraPath` | `obscura` | obscura binary — bare name (resolved on the service's PATH) or absolute path |
+| `webTools.obscuraStealth` | false | Pass `--stealth` to obscura (anti-bot fingerprinting) |
+| `webTools.obscuraConcurrency` | 2 | Max concurrent obscura processes (1–8); each is capped to a 128 MB V8 heap |
+| `webTools.fetchTimeoutSeconds` | 15 | Native fetch leg timeout (1–120) |
+| `webTools.obscuraTimeoutSeconds` | 30 | obscura process timeout (5–300) |
+| `webTools.maxChars` | 20000 | Default clamp on `web_read` output; per-call `maxChars` can lower it (1000–200000) |
 
 Ranges enforced on save: `maxKeysPerRequest` 1–100, `cooldownSeconds`
 0–86400, `maxRequestsPerKeyPerDay` 0 or 1–1000000, `fallbackModel` shaped
-`provider/model`, every `modelMeta` limit a positive integer.
+`provider/model`, every `modelMeta` limit a positive integer,
+`webTools.obscuraConcurrency` 1–8, `webTools.fetchTimeoutSeconds` 1–120,
+`webTools.obscuraTimeoutSeconds` 5–300, `webTools.maxChars` 1000–200000,
+`webTools.searxngUrl` an http(s) URL with a host, `webTools.obscuraPath`
+non-empty without whitespace.
 
 Base URLs are **not** part of this document — providers (and their base
 URLs) live in their own database table and are edited on the GUI Providers

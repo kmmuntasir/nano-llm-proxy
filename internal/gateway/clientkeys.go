@@ -58,11 +58,18 @@ func (c *clientKeyCache) lookup(raw string) (clientKeyEntry, bool) {
 	return e, true
 }
 
+// clientKeyFromContext returns the authenticated client key, if the
+// middleware put one on the context (store mode only). Works for SDK tool
+// handlers too, which receive a context derived from the HTTP request.
+func clientKeyFromContext(ctx context.Context) (clientKeyEntry, bool) {
+	e, ok := ctx.Value(ctxClientKey).(clientKeyEntry)
+	return e, ok
+}
+
 // contextClientKey returns the authenticated client key, if the middleware
 // put one on the request (store mode only).
 func contextClientKey(r *http.Request) (clientKeyEntry, bool) {
-	e, ok := r.Context().Value(ctxClientKey).(clientKeyEntry)
-	return e, ok
+	return clientKeyFromContext(r.Context())
 }
 
 func withClientKey(r *http.Request, e clientKeyEntry) *http.Request {

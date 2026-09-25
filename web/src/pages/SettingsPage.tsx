@@ -3,6 +3,7 @@ import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query"
 import {
   Button,
   Card,
+  Code,
   Field,
   Heading,
   HStack,
@@ -18,6 +19,8 @@ import type {
   ModelMetaSyncStatusView,
   ModelMetaView,
   RuntimeSettingsView,
+  WebToolsSettingsView,
+  WebToolsTestResult,
 } from "../api/types"
 import { toaster } from "../components/ui/toaster"
 import ComboSelect from "../components/ComboSelect"
@@ -81,6 +84,7 @@ interface SettingsForm {
   /** sync-managed (models.dev, same sync as zen's) — saved back untouched */
   zaiModelMeta: Record<string, ModelMetaView>
   kiloFreeOnly: boolean
+  webTools: WebToolsSettingsView
 }
 
 function hydrate(s: RuntimeSettingsView): SettingsForm {
@@ -95,6 +99,9 @@ function hydrate(s: RuntimeSettingsView): SettingsForm {
     modelMeta: { ...(s.zen.modelMeta ?? {}) },
     zaiModelMeta: { ...(s.zai.modelMeta ?? {}) },
     kiloFreeOnly: s.kilo.freeOnly,
+    // The PUT replaces the whole document — webTools must always ride
+    // along or a save from this page would revert it to defaults.
+    webTools: { ...s.webTools },
   }
 }
 
@@ -116,6 +123,7 @@ function buildPayload(
       },
       kilo: { freeOnly: f.kiloFreeOnly },
       zai: { modelMeta: f.zaiModelMeta },
+      webTools: f.webTools,
     },
   }
 }
@@ -174,6 +182,158 @@ function SyncCard({ status }: { status?: ModelMetaSyncStatusView }) {
             </Text>
           )}
         </HStack>
+      </Card.Body>
+    </Card.Root>
+  )
+}
+
+// WebToolsCard edits the /mcp web-tools settings and live-tests both
+// backends (SearXNG search, obscura render) without saving first.
+function WebToolsCard({
+  value,
+  onChange,
+}: {
+  value: WebToolsSettingsView
+  onChange: (patch: Partial<WebToolsSettingsView>) => void
+}) {
+  const test = useMutation({
+    mutationFn: (target: "searxng" | "obscura") =>
+      post<WebToolsTestResult>("/api/webtools/test", { target, deep: target === "obscura" }),
+    onSuccess: (res, target) => {
+      const label = target === "searxng" ? "SearXNG" : "obscura"
+      if (res.ok) {
+        toaster.create({
+          title: `${label} OK (${res.latencyMs ?? 0} ms)`,
+          description: res.version ? `${res.version} — ${res.detail ?? ""}` : res.detail,
+          type: "success",
+        })
+      } else {
+        toaster.create({ title: `${label} failed: ${res.detail ?? "unknown error"}`, type: "error" })
+      }
+    },
+    onError: (e) =>
+      toaster.create({ title: e instanceof ApiError ? e.message : "test failed", type: "error" }),
+  })
+
+  const num = (v: string) => (v === "" ? 0 : Number(v))
+
+  return (
+    <Card.Root>
+      <Card.Header>
+        <Heading size="sm">Web tools (MCP)</Heading>
+        <Text fontSize="xs" color="fg.muted">
+          Exposes <Code fontFamily="mono">web_search</Code> and{" "}
+          <Code fontFamily="mono">web_read</Code> at <Code fontFamily="mono">/mcp</Code> to every
+          client key. Search uses a self-hosted SearXNG; page reads use a fast native
+          fetch and fall back to the obscura headless browser for JavaScript-heavy or
+          bot-protected pages. Install them on the host with{" "}
+          <Code fontFamily="mono">scripts/install-web-tools.sh</Code>.
+        </Text>
+      </Card.Header>
+      <Card.Body>
+        <VStack align="stretch" gap={4}>
+          <Switch.Root
+            checked={value.enabled}
+            onCheckedChange={(e) => onChange({ enabled: e.checked })}
+          >
+            <Switch.HiddenInput />
+            <Switch.Control>
+              <Switch.Thumb />
+            </Switch.Control>
+            <Switch.Label>Enabled — serve /mcp to client keys</Switch.Label>
+          </Switch.Root>
+
+          <HStack gap={4} align="end" flexWrap="wrap">
+            <Field.Root w={{ base: "full", sm: "340px" }}>
+              <Field.Label>SearXNG URL</Field.Label>
+              <Input autoComplete="off"
+                value={value.searxngUrl}
+                fontFamily="mono"
+                onChange={(e) => onChange({ searxngUrl: e.target.value })}
+              />
+              <Field.HelperText>JSON API endpoint (default port 8888).</Field.HelperText>
+            </Field.Root>
+            <Field.Root w={{ base: "full", sm: "180px" }}>
+              <Field.Label>Reader order</Field.Label>
+              <NativeSelect.Root size="sm">
+                <NativeSelect.Field
+                  value={value.readerMode}
+                  onChange={(e) =>
+                    onChange({ readerMode: e.target.value as WebToolsSettingsView["readerMode"] })
+                  }
+                >
+                  <option value="fast">fast — native fetch first</option>
+                  <option value="render">render — browser first</option>
+                </NativeSelect.Field>
+                <NativeSelect.Indicator />
+              </NativeSelect.Root>
+              <Field.HelperText>Both legs back each other up.</Field.HelperText>
+            </Field.Root>
+            <Field.Root w={{ base: "full", sm: "200px" }}>
+              <Field.Label>obscura path</Field.Label>
+              <Input autoComplete="off"
+                value={value.obscuraPath}
+                fontFamily="mono"
+                onChange={(e) => onChange({ obscuraPath: e.target.value })}
+              />
+              <Field.HelperText>Binary on PATH or absolute.</Field.HelperText>
+            </Field.Root>
+          </HStack>
+
+          <HStack gap={4} align="end" flexWrap="wrap">
+            <Field.Root w={{ base: "full", sm: "150px" }}>
+              <Field.Label>Browser concurrency</Field.Label>
+              <Input autoComplete="off"
+                type="number" min={1} max={8}
+                value={value.obscuraConcurrency}
+                onChange={(e) => onChange({ obscuraConcurrency: num(e.target.value) })}
+              />
+            </Field.Root>
+            <Field.Root w={{ base: "full", sm: "150px" }}>
+              <Field.Label>Fetch timeout (s)</Field.Label>
+              <Input autoComplete="off"
+                type="number" min={1} max={120}
+                value={value.fetchTimeoutSeconds}
+                onChange={(e) => onChange({ fetchTimeoutSeconds: num(e.target.value) })}
+              />
+            </Field.Root>
+            <Field.Root w={{ base: "full", sm: "150px" }}>
+              <Field.Label>Browser timeout (s)</Field.Label>
+              <Input autoComplete="off"
+                type="number" min={5} max={300}
+                value={value.obscuraTimeoutSeconds}
+                onChange={(e) => onChange({ obscuraTimeoutSeconds: num(e.target.value) })}
+              />
+            </Field.Root>
+            <Field.Root w={{ base: "full", sm: "150px" }}>
+              <Field.Label>Max chars</Field.Label>
+              <Input autoComplete="off"
+                type="number" min={1000} max={200000}
+                value={value.maxChars}
+                onChange={(e) => onChange({ maxChars: num(e.target.value) })}
+              />
+            </Field.Root>
+            <Switch.Root
+              checked={value.obscuraStealth}
+              onCheckedChange={(e) => onChange({ obscuraStealth: e.checked })}
+            >
+              <Switch.HiddenInput />
+              <Switch.Control>
+                <Switch.Thumb />
+              </Switch.Control>
+              <Switch.Label>Stealth mode</Switch.Label>
+            </Switch.Root>
+          </HStack>
+
+          <HStack gap={3}>
+            <Button size="sm" loading={test.isPending && test.variables === "searxng"} onClick={() => test.mutate("searxng")}>
+              Test SearXNG
+            </Button>
+            <Button size="sm" loading={test.isPending && test.variables === "obscura"} onClick={() => test.mutate("obscura")}>
+              Test obscura
+            </Button>
+          </HStack>
+        </VStack>
       </Card.Body>
     </Card.Root>
   )
@@ -420,6 +580,12 @@ export default function SettingsPage() {
           </Switch.Root>
         </Card.Body>
       </Card.Root>
+
+      {/* web tools (MCP) */}
+      <WebToolsCard
+        value={form.webTools}
+        onChange={(patch) => set({ webTools: { ...form.webTools, ...patch } })}
+      />
 
       {saveError && (
         <Text color="red.fg" fontSize="sm">
