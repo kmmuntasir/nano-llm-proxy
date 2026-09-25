@@ -1,5 +1,11 @@
 package gateway
 
+import (
+	"bytes"
+	"regexp"
+	"time"
+)
+
 // Curated provider presets: the GUI's "Add Provider" dropdown. Each preset is
 // a release-managed endpoint pair plus, where a catalog needs special
 // handling, a per-preset enrichment hook. Adding a provider from a preset
@@ -32,6 +38,53 @@ type presetSpec struct {
 	// suffixed marks providers whose advertised ids carry the cosmetic
 	// context/modality suffix that every endpoint must strip.
 	suffixed bool
+	// usageURL is a per-key quota/usage endpoint this preset exposes (fetched
+	// on demand by the GUI); "" = the provider has none.
+	usageURL string
+}
+
+// presetUsageURL reports the on-demand per-key usage endpoint for a preset
+// ("" when it has none).
+func presetUsageURL(preset string) string {
+	for _, p := range presetRegistry {
+		if p.ID == preset {
+			return p.usageURL
+		}
+	}
+	return ""
+}
+
+// zaiRateLimitReset extracts the quota-reset instant from a Z.ai coding-plan
+// 429 body, which states it in the message instead of a Retry-After header:
+//
+//	{"code":"1308","message":"已达到 5 小时的使用上限。您的限额将在 2026-09-25 03:15:25 重置。"}
+//
+// The timestamp has no zone in the body and Z.ai renders it in Beijing time,
+// so it is parsed as a fixed +08:00 offset. ok=false — and the caller falls
+// back to the default cooldown — when the body isn't that shape or the
+// instant is implausible (already past, or further out than the 5-hour
+// window plus slack, which also guards against a zone misread).
+var zaiResetRe = regexp.MustCompile(`(\d{4}-\d{2}-\d{2} \d{2}:\d{2}:\d{2})`)
+
+var zaiCST = time.FixedZone("CST", 8*60*60)
+
+func zaiRateLimitReset(body []byte, now time.Time) (time.Time, bool) {
+	if !bytes.Contains(body, []byte(`"1308"`)) {
+		return time.Time{}, false
+	}
+	m := zaiResetRe.FindSubmatch(body)
+	if m == nil {
+		return time.Time{}, false
+	}
+	t, err := time.ParseInLocation("2006-01-02 15:04:05", string(m[1]), zaiCST)
+	if err != nil {
+		return time.Time{}, false
+	}
+	d := t.Sub(now)
+	if d <= 0 || d > 6*time.Hour {
+		return time.Time{}, false
+	}
+	return t, true
 }
 
 // kiloCatalog is kilo's per-entry hook: Kilo's catalog is rich — map the
@@ -151,6 +204,7 @@ var presetRegistry = []presetSpec{
 		BaseURL:          "https://api.z.ai/api/coding/paas/v4",
 		AnthropicBaseURL: "https://api.z.ai/api/anthropic",
 		DocsURL:          "https://docs.z.ai",
+		usageURL:         "https://api.z.ai/api/monitor/usage/quota/limit",
 	},
 }
 

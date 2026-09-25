@@ -193,3 +193,25 @@ export interface RuntimeSettingsView {
   zen: ZenSettingsView
   kilo: KiloSettingsView
 }
+
+// Z.ai coding-plan per-key usage (GET /api/providers/{id}/keys/{keyId}/usage
+// passes the upstream quota object through verbatim).
+export interface ZaiUsageDetail {
+  modelCode: string
+  usage: number
+}
+
+export interface ZaiUsageLimit {
+  type: string // TOKENS_LIMIT | CREDIT_LIMIT | TIME_LIMIT
+  number?: number // CREDIT_LIMIT subtype: 5 = the 5-hour credit window
+  percentage?: number
+  currentValue?: number
+  usage?: number
+  nextResetTime?: number // epoch ms
+  usageDetails?: ZaiUsageDetail[]
+}
+
+export interface ZaiUsage {
+  level: string // plan tier: lite | pro | max
+  limits: ZaiUsageLimit[]
+}

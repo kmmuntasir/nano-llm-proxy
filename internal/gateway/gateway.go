@@ -250,6 +250,14 @@ func (g *gateway) classify(pool *Pool, k *KeyState, resp *http.Response) verdict
 			}
 		}
 		if v.cooldown == 0 {
+			// Z.ai coding plans state the reset instant in the 429 body
+			// (no Retry-After). Cooling until then beats re-probing a key
+			// whose window may be hours from resetting.
+			if t, ok := zaiRateLimitReset(body, time.Now()); ok {
+				v.cooldown = time.Until(t)
+			}
+		}
+		if v.cooldown == 0 {
 			v.cooldown = time.Duration(g.rs().Retry.CooldownSeconds) * time.Second
 		}
 	case 401:
