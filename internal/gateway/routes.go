@@ -55,6 +55,7 @@ func (g *gateway) RegisterRoutes(mux *http.ServeMux, webFS fs.FS) {
 	mux.HandleFunc("GET /api/providers/{id}/models", g.requireSession(g.requireSuperadmin(g.handleProviderModels)))
 	mux.HandleFunc("POST /api/providers/{id}/keys", g.requireSession(g.requireSuperadmin(g.handleAddProviderKey)))
 	mux.HandleFunc("PATCH /api/providers/{id}/keys/{keyId}", g.requireSession(g.requireSuperadmin(g.handlePatchProviderKey)))
+	mux.HandleFunc("GET /api/providers/{id}/keys/{keyId}/usage", g.requireSession(g.requireSuperadmin(g.handleProviderKeyUsage)))
 	mux.HandleFunc("DELETE /api/providers/{id}/keys/{keyId}", g.requireSession(g.requireSuperadmin(g.handleDeleteProviderKey)))
 
 	mux.HandleFunc("GET /api/settings", g.requireSession(g.requireSuperadmin(g.handleGetSettings)))

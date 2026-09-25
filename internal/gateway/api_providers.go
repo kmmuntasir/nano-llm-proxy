@@ -1,14 +1,18 @@
 package gateway
 
 import (
+	"context"
 	"crypto/sha256"
 	"encoding/hex"
+	"encoding/json"
 	"fmt"
+	"io"
 	"net/http"
 	"net/url"
 	"regexp"
 	"strconv"
 	"strings"
+	"time"
 
 	"github.com/kmmuntasir/nano-llm-proxy/internal/store"
 )
@@ -385,6 +389,89 @@ func (g *gateway) handleDeleteProviderKey(w http.ResponseWriter, r *http.Request
 		return
 	}
 	writeJSON(w, http.StatusOK, map[string]any{"ok": true})
+}
+
+// handleProviderKeyUsage serves GET /api/providers/{id}/keys/{keyId}/usage —
+// fetches the key's live quota/usage from the provider's per-key usage
+// endpoint (Z.ai coding plans: plan tier, 5-hour and weekly windows) and
+// passes the upstream data object through verbatim. On demand only — the GUI
+// calls this per key when the user opens the usage modal, never on a timer.
+func (g *gateway) handleProviderKeyUsage(w http.ResponseWriter, r *http.Request) {
+	provID, ok := pathID(w, r, "id")
+	if !ok {
+		return
+	}
+	keyID, ok := pathID(w, r, "keyId")
+	if !ok {
+		return
+	}
+	p, err := g.store.Provider(provID)
+	if err != nil {
+		apiErr(w, http.StatusInternalServerError, err.Error())
+		return
+	}
+	if p == nil {
+		apiErr(w, http.StatusNotFound, "That provider no longer exists (it may have been deleted)")
+		return
+	}
+	usageURL := presetUsageURL(p.Preset)
+	if usageURL == "" {
+		apiErr(w, http.StatusBadRequest, "Usage lookup is not available for this provider (it has no per-key usage endpoint)")
+		return
+	}
+	keys, err := g.store.ListProviderKeys(provID)
+	if err != nil {
+		apiErr(w, http.StatusInternalServerError, err.Error())
+		return
+	}
+	var key string
+	for _, k := range keys {
+		if k.ID == keyID {
+			key = k.Key
+			break
+		}
+	}
+	if key == "" {
+		apiErr(w, http.StatusNotFound, "That key is not on this provider")
+		return
+	}
+	ctx, cancel := context.WithTimeout(r.Context(), 15*time.Second)
+	defer cancel()
+	req, err := http.NewRequestWithContext(ctx, http.MethodGet, usageURL, nil)
+	if err != nil {
+		apiErr(w, http.StatusInternalServerError, err.Error())
+		return
+	}
+	// Z.ai quirk: the raw token, NO "Bearer " prefix
+	req.Header.Set("Authorization", key)
+	req.Header.Set("Accept-Language", "en-US,en")
+	req.Header.Set("Content-Type", "application/json")
+	resp, err := g.client.Do(req)
+	if err != nil {
+		apiErr(w, http.StatusBadGateway, "Usage fetch failed: "+err.Error())
+		return
+	}
+	defer resp.Body.Close()
+	body, _ := io.ReadAll(io.LimitReader(resp.Body, 1<<20))
+	var parsed struct {
+		Success bool            `json:"success"`
+		Msg     string          `json:"msg"`
+		Data    json.RawMessage `json:"data"`
+	}
+	if err := json.Unmarshal(body, &parsed); err != nil {
+		apiErr(w, http.StatusBadGateway, fmt.Sprintf("Usage fetch: upstream HTTP %d with an unparseable body", resp.StatusCode))
+		return
+	}
+	if !parsed.Success {
+		msg := parsed.Msg
+		if msg == "" {
+			msg = fmt.Sprintf("upstream HTTP %d", resp.StatusCode)
+		}
+		apiErr(w, http.StatusBadGateway, "Usage fetch failed: "+msg)
+		return
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.Write(parsed.Data)
 }
 
 // handleProviderModels serves GET /api/providers/{id}/models — the live,

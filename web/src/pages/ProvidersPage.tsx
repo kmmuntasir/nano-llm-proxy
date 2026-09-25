@@ -1,4 +1,4 @@
-import { useState } from "react"
+import { useEffect, useState } from "react"
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query"
 import {
   Badge,
@@ -14,16 +14,17 @@ import {
   IconButton,
   Input,
   NativeSelect,
+  Progress,
   SimpleGrid,
   Stack,
   Switch,
   Text,
   VStack,
 } from "@chakra-ui/react"
-import { ChevronDown, ChevronUp, List, Pencil, Plus, Trash2 } from "lucide-react"
+import { Activity, ChevronDown, ChevronUp, List, Pencil, Plus, Trash2 } from "lucide-react"
 import { api, del, patch, post, put, ApiError } from "../api/client"
 import ModelCard from "../components/ModelCard"
-import type { PresetSpecView, ProviderKeyView, ProviderView } from "../api/types"
+import type { PresetSpecView, ProviderKeyView, ProviderView, ZaiUsage, ZaiUsageLimit } from "../api/types"
 import ConfirmDialog from "../components/ConfirmDialog"
 import StatusBadge from "../components/StatusBadge"
 import { toaster } from "../components/ui/toaster"
@@ -484,6 +485,200 @@ function ModelsListModal({
   )
 }
 
+// --- Z.ai per-key usage (preset zai) ---
+
+// classifyLimit maps a Z.ai quota-limit entry to its display role: the
+// 5-hour window arrives as TOKENS_LIMIT on legacy v1 plans and as
+// CREDIT_LIMIT with number=5 on credit plans; other CREDIT_LIMIT entries
+// are the weekly cap; TIME_LIMIT tracks monthly MCP tool usage.
+function classifyLimit(l: ZaiUsageLimit): "5h" | "week" | "mcp" | null {
+  if (l.type === "TOKENS_LIMIT") return "5h"
+  if (l.type === "TIME_LIMIT") return "mcp"
+  if (l.type === "CREDIT_LIMIT") return l.number === 5 ? "5h" : "week"
+  return null
+}
+
+const fmtResetAbs = (ms: number) =>
+  new Date(ms).toLocaleString(undefined, {
+    weekday: "short",
+    month: "short",
+    day: "numeric",
+    hour: "numeric",
+    minute: "2-digit",
+  })
+
+const fmtResetRel = (ms: number) => {
+  const m = Math.round((ms - Date.now()) / 60000)
+  if (m <= 0) return "soon"
+  if (m < 60) return `in ${m}m`
+  if (m < 48 * 60) return `in ${Math.floor(m / 60)}h ${m % 60}m`
+  return `in ${Math.floor(m / 1440)}d ${Math.floor((m % 1440) / 60)}h`
+}
+
+// usageColor mirrors the standalone monitor's thresholds.
+const usageColor = (pct: number) => (pct >= 85 ? "red" : pct >= 60 ? "orange" : "green")
+
+const tierPalette = (level: string) =>
+  level === "lite" ? "blue" : level === "pro" ? "purple" : level === "max" ? "orange" : "gray"
+
+// KeyUsageCard is deliberately tiny: label + tier badge, then one line per
+// usage window with a mini bar and the reset instant.
+function KeyUsageCard({ label, usage, error }: { label: string; usage?: ZaiUsage; error?: string }) {
+  const rows = usage?.limits ?? []
+  const windows = rows.filter((l) => classifyLimit(l) !== null)
+  return (
+    <Card.Root variant="subtle" bg="bg.subtle" height="100%">
+      <Card.Body px={3} py={3} gap={2}>
+        <HStack gap={2}>
+          <Code fontFamily="mono" fontSize="xs">
+            {label}
+          </Code>
+          {usage && (
+            <Badge colorPalette={tierPalette(usage.level)} variant="subtle">
+              {usage.level || "?"}
+            </Badge>
+          )}
+        </HStack>
+        {error && (
+          <Text fontSize="xs" color="red.fg" wordBreak="break-word">
+            {error}
+          </Text>
+        )}
+        {usage && windows.length === 0 && (
+          <Text fontSize="xs" color="fg.muted">
+            No usage windows reported.
+          </Text>
+        )}
+        {windows.map((l, i) => {
+          const kind = classifyLimit(l)!
+          const pct = Math.max(0, Math.min(100, l.percentage ?? 0))
+          const title = kind === "5h" ? "5-hour" : kind === "week" ? "Weekly" : "MCP this month"
+          const detail =
+            l.type === "TOKENS_LIMIT"
+              ? `${pct}% used`
+              : `${(l.currentValue ?? 0).toLocaleString()} / ${(l.usage ?? 0).toLocaleString()} · ${pct}%`
+          return (
+            <Box key={`${l.type}-${i}`}>
+              <HStack justify="space-between" gap={2}>
+                <Text fontSize="2xs" color="fg.muted">
+                  {title}
+                </Text>
+                <Text fontSize="2xs" fontFamily="mono" whiteSpace="nowrap">
+                  {detail}
+                </Text>
+              </HStack>
+              <Progress.Root value={pct} size="xs" colorPalette={usageColor(pct)} mt={1}>
+                <Progress.Track>
+                  <Progress.Range />
+                </Progress.Track>
+              </Progress.Root>
+              {kind !== "mcp" && l.nextResetTime ? (
+                <Text fontSize="2xs" color="fg.subtle" mt={0.5}>
+                  resets {fmtResetAbs(l.nextResetTime)} · {fmtResetRel(l.nextResetTime)}
+                </Text>
+              ) : null}
+              {kind === "mcp" && (l.usageDetails ?? []).some((u) => u.usage > 0) ? (
+                <Text fontSize="2xs" color="fg.subtle" mt={0.5}>
+                  {(l.usageDetails ?? [])
+                    .filter((u) => u.usage > 0)
+                    .map((u) => `${u.modelCode} ${u.usage}`)
+                    .join(" · ")}
+                </Text>
+              ) : null}
+            </Box>
+          )
+        })}
+        {usage && rows.some((l) => l.type === "TOKENS_LIMIT") && (
+          <Text fontSize="2xs" color="fg.subtle">
+            Legacy plan — no weekly cap.
+          </Text>
+        )}
+      </Card.Body>
+    </Card.Root>
+  )
+}
+
+type KeyUsageResult = { id: number; label: string; usage?: ZaiUsage; error: string }
+
+// KeyUsageModal fetches every key's Z.ai quota in parallel when opened (and
+// on Refresh) — deliberately no auto-refresh: upstream calls stay on demand.
+function KeyUsageModal({
+  provider,
+  open,
+  onOpenChange,
+}: {
+  provider: ProviderView
+  open: boolean
+  onOpenChange: (o: boolean) => void
+}) {
+  const [results, setResults] = useState<KeyUsageResult[] | null>(null)
+  const [busy, setBusy] = useState(false)
+  const [nonce, setNonce] = useState(0)
+
+  useEffect(() => {
+    if (!open) return
+    let cancelled = false
+    setBusy(true)
+    void Promise.all(
+      provider.keys.map((k) =>
+        api<ZaiUsage>(`/api/providers/${provider.id}/keys/${k.id}/usage`)
+          .then((usage) => ({ id: k.id, label: k.label || k.hash || `#${k.id}`, usage, error: "" }))
+          .catch((e) => ({
+            id: k.id,
+            label: k.label || k.hash || `#${k.id}`,
+            usage: undefined,
+            error: e instanceof ApiError ? e.message : "fetch failed",
+          })),
+      ),
+    ).then((rs) => {
+      if (!cancelled) {
+        setResults(rs)
+        setBusy(false)
+      }
+    })
+    return () => {
+      cancelled = true
+    }
+  }, [open, nonce, provider])
+
+  return (
+    <Dialog.Root open={open} onOpenChange={(e: { open: boolean }) => onOpenChange(e.open)} size="xl">
+      <Dialog.Backdrop />
+      <Dialog.Positioner>
+        <Dialog.Content>
+          <Dialog.Header pb={2}>
+            <Dialog.Title>Plan usage — {provider.name}</Dialog.Title>
+          </Dialog.Header>
+          <Dialog.Body px={6}>
+            {!results && busy && <Text fontSize="sm">Checking every key…</Text>}
+            {results && (
+              <SimpleGrid columns={{ base: 1, md: 2 }} gap={3}>
+                {results.map((r) => (
+                  <KeyUsageCard key={r.id} label={r.label} usage={r.usage} error={r.error} />
+                ))}
+              </SimpleGrid>
+            )}
+            {results && results.length === 0 && (
+              <Text fontSize="sm" color="fg.muted">
+                No upstream keys on this provider.
+              </Text>
+            )}
+          </Dialog.Body>
+          <Dialog.Footer>
+            <Button type="button" variant="ghost" loading={busy} onClick={() => setNonce((n) => n + 1)}>
+              Refresh
+            </Button>
+            <Dialog.ActionTrigger asChild>
+              <Button type="button">Close</Button>
+            </Dialog.ActionTrigger>
+          </Dialog.Footer>
+          <Dialog.CloseTrigger />
+        </Dialog.Content>
+      </Dialog.Positioner>
+    </Dialog.Root>
+  )
+}
+
 function ProviderCard({ p }: { p: ProviderView }) {
   const qc = useQueryClient()
   const [newKey, setNewKey] = useState("")
@@ -493,6 +688,7 @@ function ProviderCard({ p }: { p: ProviderView }) {
   const [editURL, setEditURL] = useState("")
   const [keysOpen, setKeysOpen] = useState(false)
   const [modelsOpen, setModelsOpen] = useState(false)
+  const [usageOpen, setUsageOpen] = useState(false)
   const invalidate = () => void qc.invalidateQueries({ queryKey: ["providers"] })
 
   const patchP = useMutation({
@@ -543,6 +739,16 @@ function ProviderCard({ p }: { p: ProviderView }) {
             </Badge>
           </HStack>
           <HStack gap={3}>
+            {p.preset === "zai" && (
+              <Button
+                variant="ghost"
+                size="xs"
+                onClick={() => setUsageOpen(true)}
+                aria-label={`view usage for ${p.name}`}
+              >
+                <Activity /> Usage
+              </Button>
+            )}
             <Button
               variant="ghost"
               size="xs"
@@ -711,6 +917,7 @@ function ProviderCard({ p }: { p: ProviderView }) {
       </Card.Body>
 
       <ModelsListModal provider={p} open={modelsOpen} onOpenChange={setModelsOpen} />
+      {p.preset === "zai" && <KeyUsageModal provider={p} open={usageOpen} onOpenChange={setUsageOpen} />}
       <ConfirmDialog
         open={toDelete}
         onOpenChange={() => setToDelete(false)}

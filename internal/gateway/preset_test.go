@@ -1,15 +1,19 @@
 package gateway
 
 import (
+	"bytes"
 	"encoding/json"
 	"fmt"
+	"io"
 	"net/http"
 	"net/http/httptest"
 	"slices"
 	"strings"
 	"sync"
 	"testing"
+	"time"
 
+	"github.com/kmmuntasir/nano-llm-proxy/internal/config"
 	"github.com/kmmuntasir/nano-llm-proxy/internal/store"
 )
 
@@ -456,4 +460,135 @@ func mustID(t *testing.T, rec *httptest.ResponseRecorder) int64 {
 		t.Fatalf("no id in create response (%v): %s", err, rec.Body.String())
 	}
 	return out.ID
+}
+
+// --- Z.ai per-key usage endpoint + 429 reset parsing ---
+
+// zaiUsageMockURL points the zai registry entry's usage URL at a test server
+// for the duration of the test (no real Z.ai traffic from tests).
+func zaiUsageMockURL(t *testing.T, url string) {
+	t.Helper()
+	for i := range presetRegistry {
+		if presetRegistry[i].ID == "zai" {
+			old := presetRegistry[i].usageURL
+			presetRegistry[i].usageURL = url
+			t.Cleanup(func() { presetRegistry[i].usageURL = old })
+			return
+		}
+	}
+	t.Fatal("no zai entry in the preset registry")
+}
+
+func TestZaiRateLimitReset(t *testing.T) {
+	now := time.Now()
+	future := now.Add(2 * time.Hour).In(zaiCST).Format("2006-01-02 15:04:05")
+	body := []byte(`{"code":"1308","message":"已达到 5 小时的使用上限。您的限额将在 ` + future + ` 重置。"}`)
+	got, ok := zaiRateLimitReset(body, now)
+	if !ok {
+		t.Fatalf("expected a reset instant from %s", body)
+	}
+	if d := got.Sub(now); d < 119*time.Minute || d > 121*time.Minute {
+		t.Fatalf("reset %v is %v away, want ~2h", got, d)
+	}
+	// implausible instants fall back to the default cooldown
+	past := []byte(`{"code":"1308","message":"限额将在 2020-01-01 00:00:00 重置。"}`)
+	if _, ok := zaiRateLimitReset(past, now); ok {
+		t.Fatal("a past reset should not parse")
+	}
+	far := now.Add(9 * time.Hour).In(zaiCST).Format("2006-01-02 15:04:05")
+	if _, ok := zaiRateLimitReset([]byte(`{"code":"1308","message":"限额将在 `+far+` 重置。"}`), now); ok {
+		t.Fatal("a reset beyond the 5h window should not parse")
+	}
+	if _, ok := zaiRateLimitReset([]byte(`{"error":{"message":"limited"}}`), now); ok {
+		t.Fatal("a non-Z.ai body should not parse")
+	}
+}
+
+func TestZai429CoolsUntilStatedReset(t *testing.T) {
+	kf := &config.KeyFile{Zen: []config.KeyFileEntry{{Label: "a", Key: "sk-a"}}}
+	g := newGateway(&config.Config{}, testRuntime(), kf)
+	zenRef, ok := g.provider("zen")
+	if !ok {
+		t.Fatal("no zen pool")
+	}
+	k := zenRef.pool.rawKeys()[0]
+
+	reset := time.Now().Add(2 * time.Hour).In(zaiCST)
+	body := []byte(`{"code":"1308","message":"已达到 5 小时的使用上限。您的限额将在 ` + reset.Format("2006-01-02 15:04:05") + ` 重置。"}`)
+	resp := &http.Response{StatusCode: 429, Header: http.Header{}, Body: io.NopCloser(bytes.NewReader(body))}
+	v := g.classify(zenRef.pool, k, resp)
+	if v.cooldown < 119*time.Minute || v.cooldown > 121*time.Minute {
+		t.Fatalf("cooldown %v, want ~2h (until the stated reset)", v.cooldown)
+	}
+
+	// a plain 429 keeps the default cooldown
+	plain := &http.Response{StatusCode: 429, Header: http.Header{}, Body: io.NopCloser(strings.NewReader(`{"error":{"message":"limited"}}`))}
+	if v := g.classify(zenRef.pool, k, plain); v.cooldown != 30*time.Second {
+		t.Fatalf("plain 429 cooldown %v, want the default 30s", v.cooldown)
+	}
+}
+
+func TestProviderKeyUsageEndpoint(t *testing.T) {
+	var gotAuth, gotLang string
+	fail := false
+	up := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		gotAuth = r.Header.Get("Authorization")
+		gotLang = r.Header.Get("Accept-Language")
+		w.Header().Set("Content-Type", "application/json")
+		if fail {
+			w.Write([]byte(`{"success":false,"code":1308,"msg":"quota exceeded"}`))
+			return
+		}
+		w.Write([]byte(`{"success":true,"code":200,"msg":"","data":{"level":"pro","limits":[{"type":"CREDIT_LIMIT","number":5,"percentage":42,"currentValue":58,"usage":100,"nextResetTime":1790000000000}]}}`))
+	}))
+	defer up.Close()
+
+	g, st := testStoreGateway(t, "http://127.0.0.1:1")
+	p := addPresetProvider(t, st, "zai", "glm", "https://api.z.ai/api/coding/paas/v4", "zai-key-1")
+	keys, err := st.ListProviderKeys(p.ID)
+	if err != nil || len(keys) != 1 {
+		t.Fatalf("keys: %v (%d)", err, len(keys))
+	}
+	zaiUsageMockURL(t, up.URL)
+	adminCookie := loginAs(t, g, "admin@example.com", "super-secret-pass")
+
+	call := func(provID, keyID int64) *httptest.ResponseRecorder {
+		req := httptest.NewRequest("GET", fmt.Sprintf("/api/providers/%d/keys/%d/usage", provID, keyID), nil)
+		req.AddCookie(adminCookie)
+		req.SetPathValue("id", fmt.Sprintf("%d", provID))
+		req.SetPathValue("keyId", fmt.Sprintf("%d", keyID))
+		rec := httptest.NewRecorder()
+		g.requireSession(g.requireSuperadmin(g.handleProviderKeyUsage))(rec, req)
+		return rec
+	}
+
+	rec := call(p.ID, keys[0].ID)
+	if rec.Code != 200 {
+		t.Fatalf("usage: got %d: %s", rec.Code, rec.Body.String())
+	}
+	if gotAuth != "zai-key-1" {
+		t.Fatalf("Authorization must carry the raw token, got %q", gotAuth)
+	}
+	if gotLang == "" {
+		t.Fatal("Accept-Language not set")
+	}
+	if !strings.Contains(rec.Body.String(), `"level":"pro"`) {
+		t.Fatalf("data not passed through: %s", rec.Body.String())
+	}
+
+	// a non-zai provider has no usage endpoint
+	gen := addGenericProvider(t, st, "generic", "https://x.example/v1", "gk1")
+	gkeys, _ := st.ListProviderKeys(gen.ID)
+	if rec := call(gen.ID, gkeys[0].ID); rec.Code != 400 {
+		t.Fatalf("generic provider usage: got %d, want 400", rec.Code)
+	}
+	// unknown key -> 404
+	if rec := call(p.ID, 99999); rec.Code != 404 {
+		t.Fatalf("unknown key usage: got %d, want 404", rec.Code)
+	}
+	// upstream refusal -> 502 with the upstream message
+	fail = true
+	if rec := call(p.ID, keys[0].ID); rec.Code != 502 || !strings.Contains(rec.Body.String(), "quota exceeded") {
+		t.Fatalf("failed usage: got %d: %s", rec.Code, rec.Body.String())
+	}
 }
