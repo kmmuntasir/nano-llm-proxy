@@ -242,11 +242,11 @@ func (g *gateway) decodeModelList(ref providerRef, resp *http.Response) ([]any, 
 			"id":       ref.name + "/" + id,
 			"object":   "model",
 			"owned_by": ref.name,
-			"free":     true,
 		}
 		switch {
 		case ref.typ == "opencode":
 			// Zen advertises ids only — enrich from settings meta + defaults.
+			// Its catalog is the free tier, so entries stay flagged free.
 			const defCtx, defOut = int64(262144), int64(8192)
 			meta, known := g.rs().Zen.ModelMeta[id]
 			if !known {
@@ -264,6 +264,7 @@ func (g *gateway) decodeModelList(ref providerRef, resp *http.Response) ([]any, 
 			entry["max_output_tokens"] = mo
 			entry["reasoning"] = meta.Reasoning
 			entry["responses_api"] = meta.ResponsesAPI
+			entry["free"] = true
 			if len(meta.InputModalities) > 0 {
 				entry["input_modalities"] = meta.InputModalities
 			}

@@ -28,6 +28,7 @@ import type { PresetSpecView, ProviderKeyView, ProviderView, ZaiUsage, ZaiUsageL
 import ConfirmDialog from "../components/ConfirmDialog"
 import StatusBadge from "../components/StatusBadge"
 import { toaster } from "../components/ui/toaster"
+import { PasswordInput } from "../components/ui/password-input"
 
 // AddProviderCard creates a provider two ways: pick a curated preset (the
 // name and release-managed endpoints come from the server — shown read-only
@@ -178,8 +179,8 @@ function AddProviderCard({ added }: { added: Set<string> }) {
             )}
             <Field.Root required minW="220px" flex={1}>
               <Field.Label>API key <Field.RequiredIndicator /></Field.Label>
-              <Input autoComplete="new-password"
-                type="password"
+              <PasswordInput
+                autoComplete="new-password"
                 value={key}
                 onChange={(e) => setKey(e.target.value)}
                 fontFamily="mono"
@@ -896,9 +897,9 @@ function ProviderCard({ p }: { p: ProviderView }) {
                     </Field.Root>
                     <Field.Root required flex={1} minW="220px">
                       <Field.Label>API key <Field.RequiredIndicator /></Field.Label>
-                      <Input autoComplete="new-password"
+                      <PasswordInput
                         size="xs"
-                        type="password"
+                        autoComplete="new-password"
                         placeholder="upstream API key"
                         value={newKey}
                         onChange={(e) => setNewKey(e.target.value)}

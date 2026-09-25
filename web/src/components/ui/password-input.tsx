@@ -39,10 +39,47 @@ export interface PasswordVisibilityProps {
 }
 
 export interface PasswordInputProps
-  extends InputProps, PasswordVisibilityProps {
+  extends Omit<InputProps, "value" | "onChange">, PasswordVisibilityProps {
   rootProps?: GroupProps
+  value?: string
+  onChange?: (e: React.ChangeEvent<HTMLInputElement>) => void
+  /**
+   * Render a browser-native input[type=password] instead of the asterisk
+   * mask. The login screen opts in so password managers can save and fill
+   * the credential; everywhere else stays masked.
+   */
+  native?: boolean
 }
 
+// applyMaskEdit recovers a masked field's real value after an edit: the
+// browser shows asterisks, so the DOM value is the new mask plus whatever
+// was typed at one spot. Diffing it against the previous mask locates that
+// spot; applying the same insert/remove to the real value reconstructs it.
+// Covers typing anywhere in the field, backspace/delete, selection
+// replacement, paste, and cut.
+function applyMaskEdit(
+  prevValue: string,
+  prevMask: string,
+  next: string,
+): { value: string; caret: number } {
+  const min = Math.min(prevMask.length, next.length)
+  let p = 0
+  while (p < min && next[p] === prevMask[p]) p++
+  let s = 0
+  while (s < min - p && next[next.length - 1 - s] === prevMask[prevMask.length - 1 - s]) s++
+  const inserted = next.slice(p, next.length - s)
+  const removed = prevMask.length - p - s
+  return {
+    value: prevValue.slice(0, p) + inserted + prevValue.slice(p + removed),
+    caret: p + inserted.length,
+  }
+}
+
+// PasswordInput is a secret-entry field without input[type=password]: the
+// browser sees a plain text input whose value is one asterisk per character,
+// which keeps password managers and save-prompt autofill out of the way.
+// The eye toggle reveals the real characters. Callers always get the real
+// value in onChange (e.target.value).
 export const PasswordInput = React.forwardRef<
   HTMLInputElement,
   PasswordInputProps
@@ -53,6 +90,9 @@ export const PasswordInput = React.forwardRef<
     visible: visibleProp,
     onVisibleChange,
     visibilityIcon = { on: <Eye size="16" />, off: <EyeOff size="16" /> },
+    native,
+    value = "",
+    onChange,
     ...rest
   } = props
 
@@ -63,6 +103,30 @@ export const PasswordInput = React.forwardRef<
   })
 
   const inputRef = React.useRef<HTMLInputElement>(null)
+  const caretRef = React.useRef<number | null>(null)
+  const display = visible || native ? value : "*".repeat(value.length)
+
+  // a masked edit rewrites the displayed value, which moves the caret to the
+  // end — put it back at the edit point (native fields need no correction)
+  React.useEffect(() => {
+    if (!native && caretRef.current !== null && inputRef.current) {
+      inputRef.current.setSelectionRange(caretRef.current, caretRef.current)
+      caretRef.current = null
+    }
+  }, [display, native])
+
+  const handleChange = (e: React.ChangeEvent<HTMLInputElement>) => {
+    const next = e.target.value
+    let real: string
+    if (visible || native) {
+      real = next
+    } else {
+      const r = applyMaskEdit(value, "*".repeat(value.length), next)
+      real = r.value
+      caretRef.current = r.caret
+    }
+    onChange?.({ ...e, target: { ...e.target, value: real } } as React.ChangeEvent<HTMLInputElement>)
+  }
 
   return (
     <InputGroup
@@ -84,7 +148,10 @@ export const PasswordInput = React.forwardRef<
       <Input
         {...rest}
         ref={mergeRefs(ref, inputRef)}
-        type={visible ? "text" : "password"}
+        type={native ? (visible ? "text" : "password") : "text"}
+        autoComplete={rest.autoComplete ?? (native ? "current-password" : "off")}
+        value={display}
+        onChange={handleChange}
       />
     </InputGroup>
   )

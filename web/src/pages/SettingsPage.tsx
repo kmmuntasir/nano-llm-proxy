@@ -1,7 +1,6 @@
 import { useEffect, useState } from "react"
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query"
 import {
-  Box,
   Button,
   Card,
   Field,
@@ -21,6 +20,7 @@ import type {
   RuntimeSettingsView,
 } from "../api/types"
 import { toaster } from "../components/ui/toaster"
+import ComboSelect from "../components/ComboSelect"
 
 // Editing form for the runtime settings document. The Zen model catalog is
 // sync-managed (models.dev) and browsable on the Models page; the Responses
@@ -42,79 +42,17 @@ function ModelPicker({
   onChange: (v: string) => void
   placeholder?: string
 }) {
-  const [query, setQuery] = useState("")
-  const [open, setOpen] = useState(false)
-  const filtered = models.filter((m) => m.toLowerCase().includes(query.toLowerCase()))
-
   return (
-    <Box position="relative">
-      <Input autoComplete="off"
-        placeholder={placeholder}
-        value={open ? query : value}
-        fontFamily="mono"
-        onChange={(e) => {
-          setQuery(e.target.value)
-          setOpen(true)
-        }}
-        onFocus={() => {
-          setQuery("")
-          setOpen(true)
-        }}
-        onBlur={() => setTimeout(() => setOpen(false), 150)}
-      />
-      {open && (
-        <Box
-          position="absolute"
-          zIndex={20}
-          top="100%"
-          left={0}
-          right={0}
-          mt={1}
-          bg="bg.panel"
-          borderWidth="1px"
-          rounded="md"
-          boxShadow="md"
-          maxH="240px"
-          overflowY="auto"
-        >
-          <Box
-            px={3}
-            py={2}
-            fontSize="sm"
-            cursor="pointer"
-            _hover={{ bg: "bg.subtle" }}
-            onClick={() => {
-              onChange("")
-              setOpen(false)
-            }}
-          >
-            None — pass claude-* through untouched
-          </Box>
-          {filtered.length === 0 && (
-            <Text px={3} py={2} fontSize="sm" color="fg.muted">
-              No models match “{query}”
-            </Text>
-          )}
-          {filtered.map((m) => (
-            <Box
-              key={m}
-              px={3}
-              py={2}
-              fontSize="sm"
-              fontFamily="mono"
-              cursor="pointer"
-              _hover={{ bg: "bg.subtle" }}
-              onClick={() => {
-                onChange(m)
-                setOpen(false)
-              }}
-            >
-              {m}
-            </Box>
-          ))}
-        </Box>
-      )}
-    </Box>
+    <ComboSelect
+      options={models.map((m) => ({ value: m, label: m }))}
+      value={value}
+      onChange={onChange}
+      placeholder={placeholder}
+      noneLabel="None — pass claude-* through untouched"
+      emptyText="No models match"
+      mono
+      ariaLabel="Fallback target model"
+    />
   )
 }
 

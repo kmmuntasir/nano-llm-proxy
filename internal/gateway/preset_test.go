@@ -203,6 +203,9 @@ func TestZaiPresetCatalogEnrichment(t *testing.T) {
 	if known["reasoning"] != true || known["description"] != "flagship" || known["responses_api"] != false {
 		t.Errorf("known entry flags wrong: %v", known)
 	}
+	if known["free"] != false {
+		t.Errorf("coding-plan entries are paid, not free: %v", known)
+	}
 	if m, ok := known["input_modalities"].([]string); !ok || len(m) != 4 {
 		t.Errorf("known entry modalities wrong: %v", known["input_modalities"])
 	}
