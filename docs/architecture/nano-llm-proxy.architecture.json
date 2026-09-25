@@ -1,0 +1,48 @@
+{
+  "schema_version": 1,
+  "diagram_type": "architecture",
+  "meta": {
+    "title": "nano-llm-proxy system architecture",
+    "quality_profile": "showcase",
+    "views": [
+      { "id": "request-path", "label": "LLM request path", "focus": ["clients", "auth", "gateway", "pool", "providers"], "note": "One client key fans out across pooled upstream keys with failover." },
+      { "id": "admin-plane", "label": "Admin plane", "focus": ["gui", "auth", "db", "maintenance"], "note": "GUI mutations rebuild in-memory pools in the same request." },
+      { "id": "web-tools", "label": "MCP web tools", "focus": ["clients", "mcp", "webtools", "searxng", "obscura"], "note": "Self-hosted search and page reading behind SSRF protection." }
+    ]
+  },
+  "components": [
+    { "id": "clients", "type": "external", "label": "LLM Clients", "sublabel": "Claude Code · agents", "pos": [40, 300], "size": [160, 64] },
+    { "id": "gui", "type": "frontend", "label": "Admin GUI", "sublabel": "React 19 SPA · embedded", "pos": [230, 110], "size": [170, 64] },
+    { "id": "auth", "type": "security", "label": "Client-Key Auth", "sublabel": "fg-… keys · sessions", "pos": [230, 300], "size": [170, 64], "tag": "bcrypt · Origin check" },
+    { "id": "gateway", "type": "backend", "label": "Gateway Runtime", "sublabel": ":8787 · chat · responses", "pos": [430, 300], "size": [180, 64], "tag": "CGO_ENABLED=0 · ~24 MB" },
+    { "id": "pool", "type": "security", "label": "Key Pools", "sublabel": "priority | LRU · failover", "pos": [640, 300], "size": [170, 64] },
+    { "id": "providers", "type": "external", "label": "Upstream Providers", "sublabel": "10 presets + custom URLs", "pos": [840, 300], "size": [175, 64] },
+    { "id": "db", "type": "database", "label": "SQLite (WAL)", "sublabel": "gateway.db · usage · settings", "pos": [430, 110], "size": [180, 64], "tag": "0600 · source of truth" },
+    { "id": "maintenance", "type": "backend", "label": "Maintenance Loop", "sublabel": "30 s flush · prune · sync", "pos": [640, 110], "size": [170, 64] },
+    { "id": "mcp", "type": "backend", "label": "MCP Server", "sublabel": "POST /mcp · search · read", "pos": [230, 490], "size": [170, 64] },
+    { "id": "webtools", "type": "backend", "label": "Web-Tool Backends", "sublabel": "SearXNG client · fetch", "pos": [430, 490], "size": [180, 64] },
+    { "id": "searxng", "type": "external", "label": "SearXNG", "sublabel": "optional companion", "pos": [640, 490], "size": [170, 64] },
+    { "id": "obscura", "type": "external", "label": "obscura", "sublabel": "headless render", "pos": [430, 624], "size": [180, 64] }
+  ],
+  "boundaries": [
+    { "kind": "region", "label": "One Linux host · one systemd unit · no Docker", "wraps": ["gui", "auth", "gateway", "pool", "db", "maintenance", "mcp", "webtools", "searxng", "obscura"] }
+  ],
+  "connections": [
+    { "id": "client-auth", "from": "clients", "to": "auth", "label": "Bearer fg-… · x-api-key", "variant": "security", "labelDy": -30 },
+    { "id": "auth-gateway", "from": "auth", "to": "gateway", "label": "OpenAI · Responses · Anthropic", "variant": "emphasis", "labelDy": -30 },
+    { "id": "gateway-pool", "from": "gateway", "to": "pool", "label": "pick healthy key", "labelDy": -30 },
+    { "id": "pool-upstream", "from": "pool", "to": "providers", "label": "HTTPS · SSE + JSON", "variant": "emphasis", "labelDy": -30 },
+    { "id": "gateway-db", "from": "gateway", "to": "db", "label": "pools rebuild in-request" },
+    { "id": "maint-db", "from": "maintenance", "to": "db", "label": "usage flush · prune", "labelDy": 56 },
+    { "id": "gui-auth", "from": "gui", "to": "auth", "label": "session cookie · /api/*", "variant": "security", "labelDy": 26 },
+    { "id": "client-mcp", "from": "clients", "to": "mcp", "label": "POST /mcp · same key" },
+    { "id": "mcp-webtools", "from": "mcp", "to": "webtools", "label": "web_search · web_read", "labelDy": -40 },
+    { "id": "tools-searxng", "from": "webtools", "to": "searxng", "label": "search queries", "labelDy": -40 },
+    { "id": "tools-obscura", "from": "webtools", "to": "obscura", "label": "render escalations", "variant": "dashed", "labelDy": 26 }
+  ],
+  "cards": [
+    { "dot": "cyan", "title": "Request path", "items": ["Model prefix selects the provider; body passes through natively", "priority sticks to the first healthy key, LRU spreads load", "429 cools down, genuine 401 blacklists, failover stops at first byte"] },
+    { "dot": "emerald", "title": "Single-binary ops", "items": ["Pure-Go static binary, SQLite WAL is the source of truth", "Memory is the hot path; GUI mutations rebuild pools in-request", "deploy.sh installs a hardened systemd unit; no Docker, no sidecars"] },
+    { "dot": "amber", "title": "Trust notes", "items": ["Client keys stored sha256-hashed; upstream keys stay usable verbatim (0600)", "Web tools sit behind an SSRF guard with per-user metering", "Single instance by design — no shared pools across replicas"] }
+  ]
+}

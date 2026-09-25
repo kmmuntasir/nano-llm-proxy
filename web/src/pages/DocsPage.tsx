@@ -326,6 +326,8 @@ wire_api = "chat"          # the gateway also speaks "responses"`,
               ["404 from /mcp", "Web tools are disabled in Settings → Web tools (superadmin)"],
               ["web_search returns no results", "Search engines may be CAPTCHA-blocked from this deployment's IP — an admin can trim engines in /etc/searxng/settings.yml (see docs/deployment.md)"],
               ["web_read returns empty/JS-shell text", "Re-run with render: true — the page needs a real browser"],
+              ["Empty reply that stops after a long pause (Pi)", "The model burned Pi's 4096-token output cap on hidden reasoning — switch models or just say continue; the gateway relays upstream finish reasons verbatim"],
+              ["5xx / 523 from the public URL", "The host or network in front of the gateway is down, not the gateway — retry shortly; if it persists, check the deployment's host"],
               ["model not found", "Use the exact provider/model id from the Models page"],
             ].map(([sym, meaning]) => (
               <Table.Row key={sym}>
