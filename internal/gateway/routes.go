@@ -24,6 +24,7 @@ func (g *gateway) RegisterRoutes(mux *http.ServeMux, webFS fs.FS) {
 	mux.HandleFunc("POST /v1/responses", g.clientOnly(g.handleResponses))
 	mux.HandleFunc("POST /v1/messages", g.clientOnly(g.handleMessages))
 	mux.HandleFunc("GET /v1/models", g.clientOnly(g.handleModels))
+	mux.HandleFunc("POST /mcp", g.clientOnly(g.handleMCP)) // MCP web tools (streamable HTTP, stateless)
 	mux.HandleFunc("GET /health", g.handleHealth)
 
 	// GUI backend — session-cookie auth
@@ -64,6 +65,7 @@ func (g *gateway) RegisterRoutes(mux *http.ServeMux, webFS fs.FS) {
 	mux.HandleFunc("PUT /api/settings", g.requireSession(g.requireSuperadmin(g.handlePutSettings)))
 	mux.HandleFunc("POST /api/settings/model-meta/sync", g.requireSession(g.requireSuperadmin(g.handleSyncModelMeta)))
 	mux.HandleFunc("PUT /api/settings/responses-api", g.requireSession(g.requireSuperadmin(g.handleSetResponsesAPI)))
+	mux.HandleFunc("POST /api/webtools/test", g.requireSession(g.requireSuperadmin(g.handleWebToolsTest)))
 
 	mux.HandleFunc("GET /api/dashboard", g.requireSession(g.handleDashboard))
 
@@ -154,6 +156,7 @@ func (g *gateway) handleHealth(w http.ResponseWriter, r *http.Request) {
 		"status":    "ok",
 		"uptime_s":  int(time.Since(startTime).Seconds()),
 		"providers": provs,
+		"webtools":  map[string]bool{"enabled": g.rs().WebTools.Enabled},
 	})
 }
 

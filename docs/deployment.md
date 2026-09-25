@@ -1,10 +1,13 @@
 # Deployment
 
 nano-llm-proxy ships as one static Go binary with an embedded admin GUI and a
-single SQLite file — no Docker, no external services, sized for small (512 MB)
-VPS or container hosts. This note covers deploying to a Linux machine;
-bootstrap environment variables are documented in
-[configuration.md](configuration.md).
+single SQLite file — no Docker, sized for small (512 MB) VPS or container
+hosts. The gateway itself needs no external services; the optional MCP web
+tools add two self-hosted companions (SearXNG + obscura) with their own
+installer, documented under [Companion
+services](#companion-services--web-search--reader-optional) below. This note
+covers deploying to a Linux machine; bootstrap environment variables are
+documented in [configuration.md](configuration.md).
 
 ## Prerequisites
 
@@ -91,6 +94,49 @@ Then run it under any process supervisor with the working directory (or
 there on first boot. A minimal hardened unit is shown in the README's
 Deploying section; keep `ReadWritePaths` covering the database directory or
 `ProtectSystem=strict` will make every write fail.
+
+## Companion services — web search & reader (optional)
+
+The gateway's MCP endpoint (`POST /mcp`) serves `web_search` and `web_read`
+to every client key. Search runs on a **self-hosted SearXNG**; page reads
+use a native Go fetch and escalate to the **obscura** headless browser for
+JavaScript-heavy or bot-protected pages. Both are external to the binary and
+installed by one script:
+
+```bash
+sudo ./scripts/install-web-tools.sh              # install/update both
+sudo ./scripts/install-web-tools.sh --check      # verify (no root, no writes)
+sudo ./scripts/install-web-tools.sh --update     # bump to the pinned refs + restart
+sudo ./scripts/install-web-tools.sh --skip-searxng           # obscura only
+sudo ./scripts/install-web-tools.sh --obscura-dir ~/obscura  # offline: prebuilt binaries
+```
+
+The script is idempotent — re-running always converges. For SearXNG it
+installs system packages, creates a `searxng` system user, clones the repo
+at a pinned commit (`SEARXNG_REF` env overrides), builds a venv, writes
+`/etc/searxng/settings.yml` (only if absent — your secret and edits are
+preserved) with the JSON API enabled and a trimmed no-API-key engine list,
+and installs a hardened systemd unit running the built-in server on
+`127.0.0.1:8888` with `MemoryMax=280M`. For obscura it downloads the pinned
+release (`OBSCURA_VERSION` env overrides) into `/usr/local/bin`, replacing
+binaries atomically.
+
+After installing, open the admin GUI → **Settings → Web tools**, enable it,
+and use the **Test SearXNG / Test obscura** buttons; `--check` verifies all
+three pieces (SearXNG JSON, obscura, gateway flag) any time.
+
+Memory budget on a 512 MB host: gateway ~30–60 MB + SearXNG ~150–200 MB
+(capped at 280 MB) + each obscura render 33–105 MB transient. Two
+concurrent renders fit; if the box starts swapping, drop
+`webTools.obscuraConcurrency` to 1 in Settings. SearXNG engines can get
+CAPTCHA-blocked on residential IPs — if searches come back consistently
+empty, trim the engine list further in `/etc/searxng/settings.yml`.
+
+Updating the pins: `SEARXNG_REF` tracks a master commit (SearXNG publishes
+no tags) and `OBSCURA_VERSION` a release tag; check upstream and pass the
+new value (or export the env var) with `--update`. The `deploy.sh` app flow
+never touches these services — updating the gateway binary is independent
+of them.
 
 ## Binding and TLS notes
 

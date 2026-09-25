@@ -13,11 +13,12 @@ import {
   Text,
   VStack,
 } from "@chakra-ui/react"
-import { Plus, Trash2 } from "lucide-react"
+import { Globe, Plus, Trash2 } from "lucide-react"
 import { api, del, patch, post, ApiError } from "../api/client"
 import type { ClientKeyView } from "../api/types"
 import ConfirmDialog from "../components/ConfirmDialog"
 import KeyRevealDialog from "../components/KeyRevealDialog"
+import McpSetupDialog from "../components/McpSetupDialog"
 import { toaster } from "../components/ui/toaster"
 import { DataTable } from "../components/DataTable"
 
@@ -35,6 +36,7 @@ export default function MyKeysPage() {
   const [alias, setAlias] = useState("")
   const [revealed, setRevealed] = useState<string | null>(null)
   const [toDelete, setToDelete] = useState<ClientKeyView | null>(null)
+  const [mcpOpen, setMcpOpen] = useState(false)
 
   const create = useMutation({
     mutationFn: () => post<{ key: string }>("/api/me/keys", { alias }),
@@ -108,6 +110,9 @@ export default function MyKeysPage() {
       <Card.Root>
         <Card.Header>
           <Heading size="sm">Keys</Heading>
+          <Button size="sm" variant="ghost" colorPalette="blue" onClick={() => setMcpOpen(true)}>
+            <Globe /> Set up MCP web tools
+          </Button>
         </Card.Header>
         <Card.Body pt={3}>
           {isLoading ? (
@@ -167,6 +172,7 @@ export default function MyKeysPage() {
       </Card.Root>
 
       <KeyRevealDialog plaintext={revealed} onClose={() => setRevealed(null)} />
+      <McpSetupDialog open={mcpOpen} onOpenChange={setMcpOpen} />
       <ConfirmDialog
         open={toDelete !== null}
         onOpenChange={() => setToDelete(null)}

@@ -1,0 +1,49 @@
+# SearXNG settings for nano-llm-proxy's web tools — rendered by
+# scripts/install-web-tools.sh (the @@SEARXNG_SECRET@@ placeholder is
+# replaced with a generated secret at install time).
+#
+# Design for a single-host, low-memory gateway:
+# - binds loopback only: the gateway is the only intended client
+# - limiter off: no Redis dependency; the limiter is bot protection for
+#   public instances and is pointless behind loopback
+# - JSON format enabled: the gateway's web_search tool queries format=json
+# - trimmed engine list: fewer engines = lower RAM, fewer upstream
+#   CAPTCHAs, faster (1 vCPU) responses. Re-trim to taste; every engine
+#   here works without an API key.
+
+use_default_settings: true
+
+server:
+  secret_key: "@@SEARXNG_SECRET@@"
+  bind_address: "127.0.0.1"
+  port: 8888
+  limiter: false
+  image_proxy: false
+
+search:
+  safe_search: 1
+  formats:
+    - html
+    - json
+
+engines:
+  - name: duckduckgo
+    disabled: false
+  - name: brave
+    disabled: false
+  - name: bing
+    disabled: false
+  - name: qwant
+    disabled: false
+  - name: startpage
+    disabled: false
+  - name: mojeek
+    disabled: false
+  - name: marginalia
+    disabled: false
+  - name: wikipedia
+    disabled: false
+  - name: stackexchange
+    disabled: false
+  - name: github
+    disabled: false

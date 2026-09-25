@@ -3,6 +3,7 @@ package settings
 import (
 	"fmt"
 	"maps"
+	"net/url"
 	"strings"
 )
 
@@ -92,6 +93,28 @@ type ZaiSettings struct {
 	ModelMeta map[string]ModelMeta `json:"modelMeta,omitempty"`
 }
 
+// WebToolsSettings configures the /mcp endpoint and its two self-hosted
+// backends: SearXNG (search) and the obscura headless browser (JS rendering
+// leg of web_read). SearXNG is the only search backend; the native Go fetch
+// is always the first or fallback reader leg depending on ReaderMode.
+type WebToolsSettings struct {
+	Enabled               bool   `json:"enabled"`
+	SearXNGURL            string `json:"searxngUrl"`
+	ReaderMode            string `json:"readerMode"` // ReaderFast (default) | ReaderRender
+	ObscuraPath           string `json:"obscuraPath"`
+	ObscuraStealth        bool   `json:"obscuraStealth"`
+	ObscuraConcurrency    int    `json:"obscuraConcurrency"`
+	FetchTimeoutSeconds   int    `json:"fetchTimeoutSeconds"`
+	ObscuraTimeoutSeconds int    `json:"obscuraTimeoutSeconds"`
+	MaxChars              int    `json:"maxChars"`
+}
+
+const (
+	ReaderFast        = "fast"   // native fetch first, escalate to obscura
+	ReaderRender      = "render" // obscura first, fall back to native
+	DefaultSearXNGURL = "http://127.0.0.1:8888"
+)
+
 type RuntimeSettings struct {
 	Rotation  string            `json:"rotation"` // "priority" (default) | "lru"
 	Retry     RetryConfig       `json:"retry"`
@@ -99,6 +122,7 @@ type RuntimeSettings struct {
 	Zen       ZenSettings       `json:"zen"`
 	Kilo      KiloSettings      `json:"kilo"`
 	Zai       ZaiSettings       `json:"zai"`
+	WebTools  WebToolsSettings  `json:"webTools"`
 }
 
 // DefaultRuntimeSettings is the seed for a fresh database and the fallback
@@ -119,6 +143,17 @@ func DefaultRuntimeSettings() *RuntimeSettings {
 		},
 		Kilo: KiloSettings{},
 		Zai:  ZaiSettings{ModelMeta: map[string]ModelMeta{}},
+		WebTools: WebToolsSettings{
+			// Enabled stays false: web tools are opt-in so an upgrade never
+			// implies a working SearXNG/obscura install.
+			SearXNGURL:            DefaultSearXNGURL,
+			ReaderMode:            ReaderFast,
+			ObscuraPath:           "obscura",
+			ObscuraConcurrency:    2,
+			FetchTimeoutSeconds:   15,
+			ObscuraTimeoutSeconds: 30,
+			MaxChars:              20000,
+		},
 	}
 }
 
@@ -143,6 +178,28 @@ func (rs *RuntimeSettings) ApplyDefaults() *RuntimeSettings {
 	}
 	if rs.Zai.ModelMeta == nil {
 		rs.Zai.ModelMeta = map[string]ModelMeta{}
+	}
+	wt := &rs.WebTools
+	if wt.SearXNGURL == "" {
+		wt.SearXNGURL = DefaultSearXNGURL
+	}
+	if wt.ReaderMode == "" {
+		wt.ReaderMode = ReaderFast
+	}
+	if wt.ObscuraPath == "" {
+		wt.ObscuraPath = "obscura"
+	}
+	if wt.ObscuraConcurrency <= 0 {
+		wt.ObscuraConcurrency = 2
+	}
+	if wt.FetchTimeoutSeconds <= 0 {
+		wt.FetchTimeoutSeconds = 15
+	}
+	if wt.ObscuraTimeoutSeconds <= 0 {
+		wt.ObscuraTimeoutSeconds = 30
+	}
+	if wt.MaxChars <= 0 {
+		wt.MaxChars = 20000
 	}
 	return rs
 }
@@ -187,11 +244,37 @@ func (rs *RuntimeSettings) Validate() string {
 			return fmt.Sprintf("Z.ai model meta for %q: max output tokens must be a positive integer", id)
 		}
 	}
+	wt := rs.WebTools
+	if wt.ReaderMode != ReaderFast && wt.ReaderMode != ReaderRender {
+		return fmt.Sprintf("Web tools reader mode %q must be %q or %q", wt.ReaderMode, ReaderFast, ReaderRender)
+	}
+	if u, err := url.Parse(wt.SearXNGURL); err != nil || u.Host == "" || (u.Scheme != "http" && u.Scheme != "https") {
+		return fmt.Sprintf("SearXNG URL %q must be an http(s) URL with a host", wt.SearXNGURL)
+	}
+	if wt.ObscuraConcurrency < 1 || wt.ObscuraConcurrency > 8 {
+		return "Obscura concurrency must be between 1 and 8"
+	}
+	if wt.FetchTimeoutSeconds < 1 || wt.FetchTimeoutSeconds > 120 {
+		return "Fetch timeout must be between 1 and 120 seconds"
+	}
+	if wt.ObscuraTimeoutSeconds < 5 || wt.ObscuraTimeoutSeconds > 300 {
+		return "Obscura timeout must be between 5 and 300 seconds"
+	}
+	if wt.MaxChars < 1000 || wt.MaxChars > 200000 {
+		return "Max chars must be between 1000 and 200000"
+	}
+	// ObscuraPath is exec'd (argv-only, never through a shell) — whitespace
+	// or control characters would mean a broken path, not an injection, but
+	// reject them early with a clear message.
+	if wt.ObscuraPath == "" || strings.ContainsAny(wt.ObscuraPath, " \t\r\n\x00") {
+		return "Obscura path must be a non-empty path without whitespace"
+	}
 	return ""
 }
 
 // Clone deep-copies the mutable collections so callers can freely derive
-// from a snapshot without racing the next reader.
+// from a snapshot without racing the next reader. WebTools needs no deep
+// copy: every field is a value type.
 func (rs *RuntimeSettings) Clone() *RuntimeSettings {
 	out := *rs
 	out.Zen.ModelMeta = make(map[string]ModelMeta, len(rs.Zen.ModelMeta))

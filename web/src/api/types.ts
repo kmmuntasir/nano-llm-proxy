@@ -203,6 +203,19 @@ export interface AnthropicSettingsView {
   fallbackModel: string
 }
 
+// /mcp web tools (search via SearXNG, read via native fetch + obscura).
+export interface WebToolsSettingsView {
+  enabled: boolean
+  searxngUrl: string
+  readerMode: "fast" | "render"
+  obscuraPath: string
+  obscuraStealth: boolean
+  obscuraConcurrency: number
+  fetchTimeoutSeconds: number
+  obscuraTimeoutSeconds: number
+  maxChars: number
+}
+
 export interface RuntimeSettingsView {
   rotation: "priority" | "lru"
   retry: RetrySettingsView
@@ -210,6 +223,16 @@ export interface RuntimeSettingsView {
   zen: ZenSettingsView
   kilo: KiloSettingsView
   zai: ZaiSettingsView
+  webTools: WebToolsSettingsView
+}
+
+// POST /api/webtools/test response (superadmin diagnostics).
+export interface WebToolsTestResult {
+  ok: boolean
+  latencyMs?: number
+  version?: string
+  detail?: string
+  nextStep?: string
 }
 
 // Z.ai coding-plan per-key usage (GET /api/providers/{id}/keys/{keyId}/usage

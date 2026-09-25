@@ -53,6 +53,10 @@ control plane around just to front a few API keys.
   restart: rotation mode, retry/cooldown knobs, an optional per-key daily cap,
   a Claude `claude-*` fallback model, adapter knobs, and models.dev-backed
   Zen and Z.ai model catalogs that sync themselves
+- Self-hosted MCP web tools at `/mcp`: `web_search` (SearXNG) and `web_read`
+  (native fetch + obscura headless-browser rendering) with SSRF protection,
+  per-user metering, and an idempotent installer (`scripts/install-web-tools.sh`)
+  — no paid search APIs
 - 76 tests (`go test -race ./...`) against scripted mock upstreams — no
   network or Node required
 

@@ -91,3 +91,4 @@ systemctl restart "$APP_NAME"
 sleep 1
 systemctl --no-pager --lines 5 status "$APP_NAME" || true
 log "done — journal: journalctl -u $APP_NAME -f"
+log "optional MCP web tools (SearXNG + obscura, separate services): sudo ./scripts/install-web-tools.sh"

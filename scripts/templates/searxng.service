@@ -1,0 +1,30 @@
+# SearXNG systemd unit for nano-llm-proxy web tools — rendered by
+# scripts/install-web-tools.sh. Runs the built-in Flask server directly
+# (python -m searx.webapp): measured within a few MB of uwsgi with 1 worker
+# and one less moving part. MemoryMax bounds the process on small hosts.
+
+[Unit]
+Description=SearXNG metasearch (nano-llm-proxy web tools)
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+User=searxng
+Group=searxng
+Environment=SEARXNG_SETTINGS_PATH=/etc/searxng/settings.yml
+ExecStart=@@SEARXNG_VENV@@/bin/python -m searx.webapp
+Restart=on-failure
+RestartSec=3
+MemoryMax=280M
+
+# Same hardening posture as the gateway unit: read-only filesystem except
+# the app dir, no new privileges, private tmp.
+NoNewPrivileges=true
+PrivateTmp=true
+ProtectSystem=strict
+ProtectHome=true
+ReadWritePaths=/opt/searxng
+
+[Install]
+WantedBy=multi-user.target

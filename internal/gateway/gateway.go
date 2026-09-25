@@ -6,6 +6,7 @@ import (
 	"github.com/kmmuntasir/nano-llm-proxy/internal/config"
 	"github.com/kmmuntasir/nano-llm-proxy/internal/settings"
 	"github.com/kmmuntasir/nano-llm-proxy/internal/store"
+	"github.com/kmmuntasir/nano-llm-proxy/internal/webtools"
 	"io"
 	"log"
 	"net"
@@ -59,7 +60,11 @@ type gateway struct {
 	usage   *usageTracker   // per-client-key counters + activity ring
 	backoff loginBackoff    // login rate limiting
 
-	client *http.Client
+	client   *http.Client
+	webtools *webtools.Service // /mcp tool backends (SearXNG + native/obscura reader)
+
+	mcpOnce    sync.Once    // builds mcpHandler exactly once
+	mcpHandler http.Handler // SDK streamable-HTTP handler behind /mcp
 
 	mu          sync.Mutex
 	surfaceOver map[string]string // learned model -> surface flips ("chat"/"responses")
@@ -92,6 +97,7 @@ func newGateway(cfg *config.Config, rs *settings.RuntimeSettings, kf *config.Key
 	g.cfgPtr.Store(cfg)
 	g.rsPtr.Store(rs)
 	g.initHTTPClient()
+	g.webtools = webtools.NewService(func() settings.WebToolsSettings { return g.rs().WebTools })
 	return g
 }
 

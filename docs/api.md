@@ -121,11 +121,46 @@ window so agents don't downshift to 128K.
 ## GET /health
 
 Open, no auth. `providers` maps each provider to its upstream key-pool
-counts (`total` keys, `healthy` of them — the rest cooling or disabled):
+counts (`total` keys, `healthy` of them — the rest cooling or disabled);
+`webtools` reports whether the MCP web tools are enabled:
 
 ```json
-{"status": "ok", "uptime_s": 3600, "providers": {"zen": {"total": 14, "healthy": 14}, "kilo": {"total": 15, "healthy": 15}}}
+{"status": "ok", "uptime_s": 3600, "providers": {"zen": {"total": 14, "healthy": 14}, "kilo": {"total": 15, "healthy": 15}}, "webtools": {"enabled": true}}
 ```
+
+## POST /mcp
+
+An MCP (Model Context Protocol) server over streamable HTTP, running
+stateless (no `Mcp-Session-Id`, JSON responses instead of SSE). It exposes
+two self-hosted web tools to every client key; requires `webTools.enabled`
+in Settings (otherwise 404). Auth is the same as `/v1/*`: `Authorization:
+Bearer fg-…` or `x-api-key`.
+
+Tools:
+
+- **`web_search`** `{query: string, maxResults?: int (1–25, default 8)}` —
+  searches via the gateway's SearXNG instance; returns a numbered markdown
+  list (title, URL, snippet, engines).
+- **`web_read`** `{url: string, render?: bool, maxChars?: int}` — fetches a
+  page and returns its main content as markdown. Plain pages use a fast
+  native fetch; JavaScript-heavy or bot-protected pages are rendered with
+  the obscura headless browser (set `render: true` when you know the page
+  needs a browser, or when plain content comes back empty). Private/loopback
+  addresses are refused (SSRF protection).
+
+Tool-level failures (site unreachable, blocked URL, SearXNG down) come back
+as MCP tool errors (`isError: true`) with actionable text, so agents can
+adapt — they don't break the protocol session. Each tool call is metered as
+one `web-tools` usage event (provider `web-tools`, model = tool name); a
+blocked/invalid URL meters as an error. Protocol POSTs (initialize,
+notifications) count toward the client key's request counter like any other
+authenticated request.
+
+Setup for clients: `claude mcp add -s user -t http nano-web
+https://<gateway>/mcp --header "Authorization: Bearer fg-…"` — the GUI's
+My Keys → "Set up MCP web tools" dialog generates this plus opencode/Kilo
+configs. Backends are installed with
+`scripts/install-web-tools.sh` (see `docs/deployment.md`).
 
 ## Admin API (`/api/*`)
 
@@ -151,6 +186,7 @@ Roles: `superadmin` (everything below) and `user` (own keys + dashboard).
 | `GET /api/models` | user | The merged, enriched model catalog (same body `/v1/models` serves) — backs the Models page |
 | `GET /api/providers/{id}/models` | superadmin | One provider's live catalog, fetched on demand |
 | `PUT /api/settings/responses-api` | superadmin | Flip the per-model Responses-API flag (`{model, responsesApi}`); sync preserves the flag |
+| `POST /api/webtools/test` | superadmin | Live-probe a web-tools backend: `{target: "searxng" \| "obscura", deep?: bool}`. Runs one real search / `obscura --version` (deep adds an example.com fetch); returns `{ok, latencyMs, version?, detail, nextStep}` |
 | `GET /api/usage/summary?from=&to=` | user | Requests/errors/tokens totals, top models, per-provider (scoped to own user; superadmin sees all) |
 | `GET /api/usage/keys?from=&to=` | user | Per-client-key requests/tokens in range (scoped) |
 | `GET /api/usage/users?from=&to=` | superadmin | Per-user requests/tokens in range |
