@@ -53,7 +53,7 @@ control plane around just to front a few API keys.
   restart: rotation mode, retry/cooldown knobs, an optional per-key daily cap,
   a Claude `claude-*` fallback model, adapter knobs, and a models.dev-backed
   Zen model catalog that syncs itself
-- 56 tests (`go test -race ./...`) against scripted mock upstreams — no
+- 68 tests (`go test -race ./...`) against scripted mock upstreams — no
   network or Node required
 
 ## Quickstart (from source)
@@ -98,7 +98,7 @@ suffix) is stripped before the upstream call:
 ```text
 openai/gpt-4o-mini        → provider "openai",  model "gpt-4o-mini"
 groq/llama-3.3-70b        → provider "groq",    model "llama-3.3-70b"
-<adapter>/<model>         → built-in adapters (zen, kilo)
+<adapter>/<model>         → built-in adapters (zen) and preset adapters (kilo)
 ```
 
 `GET /v1/models` merges every enabled provider's catalog and enriches each
@@ -156,12 +156,39 @@ until midnight; off by default.
 | Adapter | Upstream | What it handles |
 | --- | --- | --- |
 | `zen` | OpenCode Zen (`opencode.ai/zen/v1`) | Injects the client headers and tool stubs the API requires, routes each model to its Chat or Responses surface (self-correcting on the signature 503), and translates between the two shapes — including tool calls |
-| `kilo` | Kilo Code (`api.kilo.ai/api/gateway/v1`) | OpenAI-compatible passthrough with rotation |
-| generic | any OpenAI- and/or Anthropic-compatible base URL | GUI-added providers (OpenAI, Groq, Together, vLLM, Ollama, Z.ai, …) — no code needed |
+| `kilo` preset | Kilo Code (`api.kilo.ai/api/gateway/v1`) | OpenAI-compatible passthrough with rotation; its rich catalog (context windows, modalities, free flags) is mapped and suffixed |
+| generic | any OpenAI- and/or Anthropic-compatible base URL | GUI-added providers — no code needed |
 
 Adapter-specific settings (user agent, fingerprint injection, free-only
 filters, the Zen model catalog) live in the GUI under Settings — see
 [docs/configuration.md](docs/configuration.md).
+
+## Provider presets
+
+The GUI's **Add Provider** card offers a curated dropdown so a new upstream
+is one click plus an API key — no URL typing:
+
+| Preset | OpenAI root | Anthropic root |
+| --- | --- | --- |
+| Anthropic | — | `api.anthropic.com` |
+| DeepSeek | `api.deepseek.com/v1` | `api.deepseek.com/anthropic` |
+| Groq | `api.groq.com/openai/v1` | — |
+| Kilo | `api.kilo.ai/api/gateway/v1` | — |
+| Kimi (Moonshot) | `api.moonshot.ai/v1` | `api.moonshot.ai/anthropic` |
+| MiniMax | `api.minimax.io/v1` | `api.minimax.io/anthropic` |
+| OpenAI | `api.openai.com/v1` | — |
+| OpenRouter | `openrouter.ai/api/v1` | `openrouter.ai/api` |
+| xAI (Grok) | `api.x.ai/v1` | — |
+| Z.ai (GLM Coding Plan) | `api.z.ai/api/coding/paas/v4` | `api.z.ai/api/anthropic` |
+
+Endpoints are release-managed (read-only in the GUI); anything unusual — a
+self-hosted gateway, a custom deployment — goes through **Add Custom
+Provider** instead. The preset id is stored on the provider row, which is
+the hook for future per-provider behavior. Presets with special catalogs
+(like Kilo's rich metadata) carry their own enrichment logic in
+`internal/gateway/providerspec.go`; `GET /api/providers/presets` lists the
+registry. Adding the same preset twice is fine (each gets its own name and
+keys).
 
 ## Dual-endpoint providers
 
@@ -226,7 +253,7 @@ Served by the same binary at `/`.
 | Usage | everyone | Date-range usage: totals, top models, providers, per-key (admins also get per-user), recent activity — scoped to the signed-in user |
 | Profile | everyone | Account info, self-service password reset, own client keys (create/disable/delete) |
 | Users | superadmin | User CRUD, roles, password resets, per-user key management |
-| Providers | superadmin | Add generic providers, edit base URLs, add/remove/toggle upstream keys, browse each provider's live model catalog (zen cards carry a Responses-API toggle) |
+| Providers | superadmin | Add preset providers (curated dropdown) or custom ones, edit base URLs, add/remove/toggle upstream keys, browse each provider's live model catalog (zen cards carry a Responses-API toggle) |
 | Settings | superadmin | Rotation, retries/cooldowns, daily cap, Claude fallback, adapter knobs, Zen model-catalog sync |
 
 First boot requires `ADMIN_EMAIL` and `ADMIN_PASSWORD` (environment variables

@@ -72,8 +72,12 @@ type Provider struct {
 	AnthropicBaseURL string
 	Enabled          bool
 	Builtin          bool
-	SortOrder        int64
-	CreatedAt        int64
+	// Preset is the curated preset id this provider was created from ("kilo",
+	// "zai", ...); "" = fully custom. Set at creation, never patched — it keys
+	// per-provider behavior (catalog enrichment, future usage features).
+	Preset    string
+	SortOrder int64
+	CreatedAt int64
 }
 
 type ProviderKey struct {
@@ -147,6 +151,11 @@ func (s *Store) Migrate() error {
 	}
 	if !version.Valid || version.Int64 < 3 {
 		if err := s.migrateV3(); err != nil {
+			return err
+		}
+	}
+	if !version.Valid || version.Int64 < 4 {
+		if err := s.migrateV4(); err != nil {
 			return err
 		}
 	}
@@ -272,9 +281,35 @@ func (s *Store) migrateV3() error {
 	return tx.Commit()
 }
 
-// Bootstrap seeds a fresh database: superadmin from env, and the two builtin
-// providers with keys imported from keys.json. Later boots with a populated
-// DB are no-ops. Ordered so a mid-tx crash leaves nothing partial.
+// migrateV4 introduces preset providers: the curated registry replaces the
+// builtin kilo. The kilo row (if present) converts to a normal, deletable
+// provider tagged preset='kilo' — keys and endpoint survive untouched; fresh
+// installs simply never seed it (Bootstrap seeds zen only). Safe because
+// builtin providers could never be renamed, so name='kilo' AND builtin=1 is
+// unambiguously the seeded row.
+func (s *Store) migrateV4() error {
+	tx, err := s.db.Begin()
+	if err != nil {
+		return err
+	}
+	defer tx.Rollback()
+	if _, err := tx.Exec(`ALTER TABLE providers ADD COLUMN preset TEXT NOT NULL DEFAULT ''`); err != nil {
+		return err
+	}
+	if _, err := tx.Exec(`UPDATE providers SET builtin=0, preset='kilo' WHERE name='kilo' AND builtin=1`); err != nil {
+		return err
+	}
+	if _, err := tx.Exec(`INSERT INTO schema_migrations (version, applied_at) VALUES (4, ?)`, time.Now().Unix()); err != nil {
+		return err
+	}
+	return tx.Commit()
+}
+
+// Bootstrap seeds a fresh database: superadmin from env, and the builtin zen
+// provider with keys imported from keys.json. (Kilo is no longer seeded — it
+// is a preset added from the GUI like the other curated providers.) Later
+// boots with a populated DB are no-ops. Ordered so a mid-tx crash leaves
+// nothing partial.
 func (s *Store) Bootstrap(cfg *config.Config, kf *config.KeyFile, adminEmail, adminPassword string) error {
 	tx, err := s.db.Begin()
 	if err != nil {
@@ -328,25 +363,16 @@ func (s *Store) Bootstrap(cfg *config.Config, kf *config.KeyFile, adminEmail, ad
 			return err
 		}
 		zenID, _ := res.LastInsertId()
-		res, err = tx.Exec(`INSERT INTO providers (name, type, base_url, enabled, builtin, sort_order, created_at)
-			VALUES ('kilo', 'openai', ?, 1, 1, 1, ?)`, cfg.Kilo.BaseURL, now)
-		if err != nil {
-			return err
-		}
-		kiloID, _ := res.LastInsertId()
 		for i, e := range kf.Zen {
 			if _, err := tx.Exec(`INSERT INTO provider_keys (provider_id, key, label, sort_order, disabled, created_at)
 				VALUES (?, ?, ?, ?, 0, ?)`, zenID, e.Key, e.Label, i, now); err != nil {
 				return err
 			}
 		}
-		for i, e := range kf.Kilo {
-			if _, err := tx.Exec(`INSERT INTO provider_keys (provider_id, key, label, sort_order, disabled, created_at)
-				VALUES (?, ?, ?, ?, 0, ?)`, kiloID, e.Key, e.Label, i, now); err != nil {
-				return err
-			}
+		log.Printf("store: seeded providers zen=%d keys", len(kf.Zen))
+		if len(kf.Kilo) > 0 {
+			log.Printf("store: %d kilo keys in keys.json are no longer auto-seeded — add the Kilo preset in the GUI and import them there", len(kf.Kilo))
 		}
-		log.Printf("store: seeded providers zen=%d keys kilo=%d keys", len(kf.Zen), len(kf.Kilo))
 	}
 
 	return tx.Commit()
@@ -679,12 +705,12 @@ func (s *Store) BumpClientKeyUsage(id int64, delta int64, lastUsed int64) error 
 
 // --- providers ---
 
-const providerCols = `id, name, type, base_url, anthropic_base_url, enabled, builtin, sort_order, created_at`
+const providerCols = `id, name, type, base_url, anthropic_base_url, enabled, builtin, preset, sort_order, created_at`
 
 func scanProvider(row interface{ Scan(...any) error }) (*Provider, error) {
 	p := &Provider{}
 	var enabled, builtin int
-	if err := row.Scan(&p.ID, &p.Name, &p.Type, &p.BaseURL, &p.AnthropicBaseURL, &enabled, &builtin, &p.SortOrder, &p.CreatedAt); err != nil {
+	if err := row.Scan(&p.ID, &p.Name, &p.Type, &p.BaseURL, &p.AnthropicBaseURL, &enabled, &builtin, &p.Preset, &p.SortOrder, &p.CreatedAt); err != nil {
 		return nil, err
 	}
 	p.Enabled, p.Builtin = enabled != 0, builtin != 0
@@ -792,8 +818,8 @@ func (s *Store) CreateProvider(p *Provider, keys []ProviderKey) error {
 		return err
 	}
 	defer tx.Rollback()
-	res, err := tx.Exec(`INSERT INTO providers (name, type, base_url, anthropic_base_url, enabled, builtin, sort_order, created_at)
-		VALUES (?, ?, ?, ?, ?, 0, ?, ?)`, p.Name, p.Type, p.BaseURL, p.AnthropicBaseURL, boolInt(p.Enabled), p.SortOrder, now)
+	res, err := tx.Exec(`INSERT INTO providers (name, type, base_url, anthropic_base_url, enabled, builtin, preset, sort_order, created_at)
+		VALUES (?, ?, ?, ?, ?, 0, ?, ?, ?)`, p.Name, p.Type, p.BaseURL, p.AnthropicBaseURL, boolInt(p.Enabled), p.Preset, p.SortOrder, now)
 	if err != nil {
 		return err
 	}

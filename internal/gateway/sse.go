@@ -67,7 +67,7 @@ func (u *usageChunk) into(t *tokenUsage) {
 	t.add(in, out)
 }
 
-// streamKilo passes a kilo 200-response through verbatim (both stream and
+// streamKilo passes a kilo preset's 200-response through verbatim (both stream and
 // non-stream bodies; the upstream shape already matches the client's request)
 // while tapping the usage block for the usage log.
 func streamKilo(w http.ResponseWriter, resp *http.Response) tokenUsage {

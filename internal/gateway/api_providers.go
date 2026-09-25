@@ -3,16 +3,19 @@ package gateway
 import (
 	"crypto/sha256"
 	"encoding/hex"
-	"github.com/kmmuntasir/nano-llm-proxy/internal/store"
 	"net/http"
 	"net/url"
 	"regexp"
+	"strconv"
 	"strings"
+
+	"github.com/kmmuntasir/nano-llm-proxy/internal/store"
 )
 
 // store.Provider management endpoints (superadmin only). GUI-added providers are
-// always type "openai"; the two builtins (zen=opencode, kilo=openai) are
-// editable but can't be renamed or deleted.
+// always type "openai"; the one builtin (zen=opencode) is editable but can't
+// be renamed or deleted. Preset providers carry a `preset` id from the curated
+// registry (providerspec.go) — set at creation, never patched.
 
 var providerNameRe = regexp.MustCompile(`^[a-z][a-z0-9-]{0,31}$`)
 
@@ -54,6 +57,7 @@ func (g *gateway) handleListProviders(w http.ResponseWriter, r *http.Request) {
 		AnthropicBaseURL string   `json:"anthropicBaseUrl"`
 		Enabled          bool     `json:"enabled"`
 		Builtin          bool     `json:"builtin"`
+		Preset           string   `json:"preset"`
 		SortOrder        int64    `json:"sortOrder"`
 		Healthy          int      `json:"healthy"`
 		Total            int      `json:"total"`
@@ -64,8 +68,9 @@ func (g *gateway) handleListProviders(w http.ResponseWriter, r *http.Request) {
 		pj := provJSON{
 			ID: p.ID, Name: p.Name, Type: p.Type, BaseURL: p.BaseURL,
 			AnthropicBaseURL: p.AnthropicBaseURL,
-			Enabled:          p.Enabled, Builtin: p.Builtin, SortOrder: p.SortOrder,
-			Keys: []pkJSON{},
+			Enabled:          p.Enabled, Builtin: p.Builtin, Preset: p.Preset,
+			SortOrder: p.SortOrder,
+			Keys:      []pkJSON{},
 		}
 		for _, k := range keyLists[i] {
 			kj := pkJSON{
@@ -98,10 +103,19 @@ func upstreamKeyHash(key string) string {
 	return hex.EncodeToString(sum[:])[:12]
 }
 
+// handleListPresets serves GET /api/providers/presets — the curated registry
+// behind the GUI's "Add Provider" dropdown.
+func (g *gateway) handleListPresets(w http.ResponseWriter, r *http.Request) {
+	presets := make([]presetSpec, len(presetRegistry))
+	copy(presets, presetRegistry)
+	writeJSON(w, http.StatusOK, map[string]any{"presets": presets})
+}
+
 func (g *gateway) handleCreateProvider(w http.ResponseWriter, r *http.Request) {
 	actor := contextUser(r)
 	var req struct {
 		Name             string   `json:"name"`
+		Preset           string   `json:"preset"`
 		BaseURL          string   `json:"baseUrl"`
 		AnthropicBaseURL string   `json:"anthropicBaseUrl"`
 		Keys             []string `json:"keys"`
@@ -113,12 +127,33 @@ func (g *gateway) handleCreateProvider(w http.ResponseWriter, r *http.Request) {
 	name := req.Name
 	baseURL := strings.TrimSpace(req.BaseURL)
 	anthropicURL := strings.TrimSpace(req.AnthropicBaseURL)
+	// A preset fills in whatever the caller left blank: the name (defaults to
+	// the preset id) and the endpoint roots. Explicit values win, so preset
+	// endpoints can still be pointed at a proxy or a custom deployment.
+	var spec presetSpec
+	if preset := strings.TrimSpace(req.Preset); preset != "" {
+		var ok bool
+		spec, ok = lookupPreset(preset)
+		if !ok {
+			apiErr(w, http.StatusBadRequest, "Unknown provider preset "+strconv.Quote(preset)+" — see GET /api/providers/presets")
+			return
+		}
+		if name == "" {
+			name = spec.ID
+		}
+		if baseURL == "" {
+			baseURL = spec.BaseURL
+		}
+		if anthropicURL == "" {
+			anthropicURL = spec.AnthropicBaseURL
+		}
+	}
 	if !providerNameRe.MatchString(name) {
 		apiErr(w, http.StatusBadRequest, "Provider name must be 1-32 characters of lowercase letters, digits, or dashes (it becomes the model prefix)")
 		return
 	}
-	if name == "zen" || name == "kilo" {
-		apiErr(w, http.StatusConflict, "That name is reserved (zen and kilo are built in)")
+	if name == "zen" {
+		apiErr(w, http.StatusConflict, "That name is reserved (zen is built in)")
 		return
 	}
 	if baseURL == "" && anthropicURL == "" {
@@ -147,7 +182,7 @@ func (g *gateway) handleCreateProvider(w http.ResponseWriter, r *http.Request) {
 		apiErr(w, http.StatusBadRequest, "At least one upstream API key is required")
 		return
 	}
-	p := &store.Provider{Name: name, Type: "openai", BaseURL: baseURL, AnthropicBaseURL: anthropicURL, Enabled: true, SortOrder: 100}
+	p := &store.Provider{Name: name, Type: "openai", BaseURL: baseURL, AnthropicBaseURL: anthropicURL, Enabled: true, Preset: spec.ID, SortOrder: 100}
 	pks := make([]store.ProviderKey, 0, len(keys))
 	for _, k := range keys {
 		if k != "" {

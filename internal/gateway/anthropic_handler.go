@@ -42,7 +42,7 @@ func (g *gateway) handleMessages(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	upstreamModel := parts[1]
-	if ref.builtin {
+	if ref.suffixedCatalog() {
 		upstreamModel = stripModelSuffix(upstreamModel)
 	} else {
 		upstreamModel = stripClientSuffix(upstreamModel)
@@ -115,7 +115,7 @@ func usageFromChatJSON(chat map[string]any) tokenUsage {
 }
 
 // messagesViaOpenAI serves anthropic messages via a plain OpenAI-compatible
-// provider (kilo builtin + GUI-added generics).
+// provider (a kilo preset or any GUI-added generic).
 func (g *gateway) messagesViaOpenAI(ref providerRef, w http.ResponseWriter, r *http.Request, chat map[string]any, model string, stream bool, start time.Time) (string, tokenUsage) {
 	chat["stream"] = stream
 	raw, _ := json.Marshal(chat)

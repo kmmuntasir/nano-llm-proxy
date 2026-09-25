@@ -1,6 +1,7 @@
 package store
 
 import (
+	"database/sql"
 	"errors"
 	"os"
 	"path/filepath"
@@ -56,25 +57,23 @@ func TestMigrateV1AndBootstrap(t *testing.T) {
 		t.Fatalf("bcrypt hash does not verify")
 	}
 
-	// builtin providers, keys imported in order (priority!)
+	// builtin provider seeded (zen only — kilo is a GUI preset now), keys
+	// imported in order (priority!)
 	provs, keyLists, err := st.ListProvidersWithKeys()
 	if err != nil {
 		t.Fatalf("ListProvidersWithKeys: %v", err)
 	}
-	if len(provs) != 2 {
-		t.Fatalf("got %d providers, want 2", len(provs))
+	if len(provs) != 1 {
+		t.Fatalf("got %d providers, want 1", len(provs))
 	}
 	if provs[0].Name != "zen" || provs[0].Type != "opencode" || !provs[0].Builtin || provs[0].SortOrder != 0 {
 		t.Fatalf("zen row wrong: %+v", provs[0])
 	}
-	if provs[1].Name != "kilo" || provs[1].Type != "openai" || !provs[1].Builtin || provs[1].SortOrder != 1 {
-		t.Fatalf("kilo row wrong: %+v", provs[1])
+	if provs[0].Preset != "" {
+		t.Fatalf("zen Preset = %q, want empty", provs[0].Preset)
 	}
 	if len(keyLists[0]) != 2 || keyLists[0][0].Key != "sk-zen-1" || keyLists[0][1].Key != "sk-zen-2" {
 		t.Fatalf("zen keys not imported in order: %+v", keyLists[0])
-	}
-	if len(keyLists[1]) != 1 || keyLists[1][0].Key != "sk-kilo-1" {
-		t.Fatalf("kilo keys wrong: %+v", keyLists[1])
 	}
 
 	// no client keys exist until someone creates one — bootstrap no longer
@@ -98,6 +97,79 @@ func TestMigrateV1AndBootstrap(t *testing.T) {
 	keys2, _ := st.ListClientKeys(admin.ID)
 	if len(keys2) != 0 {
 		t.Fatalf("second bootstrap created client keys: %d", len(keys2))
+	}
+}
+
+// TestMigrateV4ConvertsBuiltinKiloToPreset replays the v3→v4 upgrade on a
+// hand-built DB: the seeded builtin kilo row becomes a normal provider tagged
+// preset='kilo', keeping its endpoint and keys; zen stays builtin.
+func TestMigrateV4ConvertsBuiltinKiloToPreset(t *testing.T) {
+	db, err := sql.Open("sqlite", ":memory:")
+	if err != nil {
+		t.Fatalf("sql.Open: %v", err)
+	}
+	defer db.Close()
+	db.SetMaxOpenConns(1)
+	s := &Store{db: db}
+
+	// build the v3-era schema and seed it like an old boot would (the
+	// migrations ledger itself is created by Migrate before v1 runs)
+	if _, err := s.db.Exec(`CREATE TABLE IF NOT EXISTS schema_migrations (
+		version INTEGER PRIMARY KEY, applied_at INTEGER NOT NULL)`); err != nil {
+		t.Fatalf("create migrations table: %v", err)
+	}
+	for _, mig := range []func() error{s.migrateV1, s.migrateV2, s.migrateV3} {
+		if err := mig(); err != nil {
+			t.Fatalf("migrate: %v", err)
+		}
+	}
+	now := time.Now().Unix()
+	res, err := s.db.Exec(`INSERT INTO providers (name, type, base_url, enabled, builtin, sort_order, created_at)
+		VALUES ('zen', 'opencode', 'https://zen.example/v1', 1, 1, 0, ?)`, now)
+	if err != nil {
+		t.Fatalf("seed zen: %v", err)
+	}
+	zenID, _ := res.LastInsertId()
+	res, err = s.db.Exec(`INSERT INTO providers (name, type, base_url, enabled, builtin, sort_order, created_at)
+		VALUES ('kilo', 'openai', 'https://kilo.example/v1', 1, 1, 1, ?)`, now)
+	if err != nil {
+		t.Fatalf("seed kilo: %v", err)
+	}
+	kiloID, _ := res.LastInsertId()
+	if _, err := s.db.Exec(`INSERT INTO provider_keys (provider_id, key, label, sort_order, disabled, created_at)
+		VALUES (?, 'sk-kilo-keep', 'old', 0, 0, ?)`, kiloID, now); err != nil {
+		t.Fatalf("seed kilo key: %v", err)
+	}
+
+	if err := s.Migrate(); err != nil {
+		t.Fatalf("Migrate to v4: %v", err)
+	}
+
+	kilo, err := s.Provider(kiloID)
+	if err != nil || kilo == nil {
+		t.Fatalf("kilo row missing after v4: %v", err)
+	}
+	if kilo.Builtin {
+		t.Errorf("kilo still builtin: %+v", kilo)
+	}
+	if kilo.Preset != "kilo" {
+		t.Errorf("kilo Preset = %q, want kilo", kilo.Preset)
+	}
+	if kilo.BaseURL != "https://kilo.example/v1" || !kilo.Enabled {
+		t.Errorf("kilo endpoint/enabled not preserved: %+v", kilo)
+	}
+	keys, err := s.ListProviderKeys(kiloID)
+	if err != nil || len(keys) != 1 || keys[0].Key != "sk-kilo-keep" {
+		t.Fatalf("kilo keys not preserved: %v %+v", err, keys)
+	}
+	zen, err := s.Provider(zenID)
+	if err != nil || zen == nil || !zen.Builtin || zen.Preset != "" {
+		t.Fatalf("zen row changed by v4: %v %+v", err, zen)
+	}
+
+	var version int64
+	if err := s.db.QueryRow(`SELECT MAX(version) FROM schema_migrations`).Scan(&version); err != nil || version != 4 {
+		t.Fatalf("schema version = %d, %v; want 4", version, err)
 	}
 }
 

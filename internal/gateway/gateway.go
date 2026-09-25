@@ -36,6 +36,7 @@ type providerRef struct {
 	baseURL          string // OpenAI-compatible root; empty = anthropic-only
 	anthropicBaseURL string // Anthropic-compatible root; empty = no native surface
 	builtin          bool
+	preset           string // curated preset id (providerspec.go); "" = custom
 }
 
 type gateway struct {
@@ -46,7 +47,7 @@ type gateway struct {
 	rsPtr  atomic.Pointer[settings.RuntimeSettings]
 
 	store *store.Store
-	zen   *Pool // builtin pools — swapped wholesale by rebuildPools
+	zen   *Pool // builtin pool — swapped wholesale by rebuildPools
 	kilo  *Pool
 
 	regMu    sync.RWMutex
@@ -144,7 +145,7 @@ func (g *gateway) rebuildPools() error {
 	}
 	g.regMu.RUnlock()
 
-	var zenP, kiloP *Pool
+	var zenP *Pool
 	var registry []providerRef
 	for i, row := range provs {
 		var entries []config.KeyFileEntry
@@ -155,11 +156,8 @@ func (g *gateway) rebuildPools() error {
 			entries = append(entries, config.KeyFileEntry{Label: k.Label, Key: k.Key})
 		}
 		pool := newPoolPreserving(row.Name, g.rs().Rotation, g.rs().Retry.MaxRequestsPerKeyDay, entries, prev)
-		switch {
-		case row.Builtin && row.Name == "zen":
+		if row.Builtin && row.Name == "zen" {
 			zenP = pool
-		case row.Builtin && row.Name == "kilo":
-			kiloP = pool
 		}
 		if !row.Enabled {
 			continue // disabled providers leave the registry: routing 400s
@@ -167,7 +165,7 @@ func (g *gateway) rebuildPools() error {
 		registry = append(registry, providerRef{
 			name: row.Name, typ: row.Type, pool: pool,
 			baseURL: row.BaseURL, anthropicBaseURL: row.AnthropicBaseURL,
-			builtin: row.Builtin,
+			builtin: row.Builtin, preset: row.Preset,
 		})
 	}
 
@@ -175,9 +173,6 @@ func (g *gateway) rebuildPools() error {
 	g.registry = registry
 	if zenP != nil {
 		g.zen = zenP
-	}
-	if kiloP != nil {
-		g.kilo = kiloP
 	}
 	g.regMu.Unlock()
 
@@ -205,7 +200,9 @@ func (g *gateway) provider(prefix string) (providerRef, bool) {
 		case "zen":
 			return providerRef{name: "zen", typ: "opencode", pool: g.zen, baseURL: g.conf().Zen.BaseURL, builtin: true}, true
 		case "kilo":
-			return providerRef{name: "kilo", typ: "openai", pool: g.kilo, baseURL: g.conf().Kilo.BaseURL, builtin: true}, true
+			// Test-mode stand-in for a kilo preset provider (kilo is no longer
+			// builtin in production — it comes from the preset registry).
+			return providerRef{name: "kilo", typ: "openai", pool: g.kilo, baseURL: g.conf().Kilo.BaseURL, preset: "kilo"}, true
 		}
 		return providerRef{}, false
 	}
@@ -363,7 +360,7 @@ func (g *gateway) handleChat(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	provider, upstreamModel := parts[0], parts[1]
-	if ref.builtin {
+	if ref.suffixedCatalog() {
 		upstreamModel = stripModelSuffix(upstreamModel) // cosmetic ctx/modality labels
 	} else {
 		upstreamModel = stripClientSuffix(upstreamModel) // Claude Code "[1m]" only

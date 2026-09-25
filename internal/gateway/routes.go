@@ -48,6 +48,7 @@ func (g *gateway) RegisterRoutes(mux *http.ServeMux, webFS fs.FS) {
 
 	mux.HandleFunc("GET /api/models", g.requireSession(g.handleAllModels))
 	mux.HandleFunc("GET /api/providers", g.requireSession(g.requireSuperadmin(g.handleListProviders)))
+	mux.HandleFunc("GET /api/providers/presets", g.requireSession(g.requireSuperadmin(g.handleListPresets)))
 	mux.HandleFunc("POST /api/providers", g.requireSession(g.requireSuperadmin(g.handleCreateProvider)))
 	mux.HandleFunc("PATCH /api/providers/{id}", g.requireSession(g.requireSuperadmin(g.handlePatchProvider)))
 	mux.HandleFunc("DELETE /api/providers/{id}", g.requireSession(g.requireSuperadmin(g.handleDeleteProvider)))
@@ -139,6 +140,9 @@ func (g *gateway) handleHealth(w http.ResponseWriter, r *http.Request) {
 		provs[ref.name] = ref.pool.healthyCount()
 	}
 	w.Header().Set("Content-Type", "application/json")
+	// kilo_healthy is a legacy name-keyed field: since kilo became a preset
+	// (renames/deletes possible) it reads 0 when no provider is literally
+	// named kilo — the providers map is the complete source of truth.
 	json.NewEncoder(w).Encode(map[string]any{
 		"status":       "ok",
 		"uptime_s":     int(time.Since(startTime).Seconds()),
@@ -210,8 +214,9 @@ func (g *gateway) fetchModelsAnthropic(ref providerRef) ([]any, error) {
 }
 
 // decodeModelList parses an upstream catalog ({"data":[{"id":...}, ...]}) and
-// applies the per-provider enrichment. Builtin providers get the
-// self-describing suffix treatment; generic providers pass through raw.
+// applies the per-provider enrichment: zen from its settings meta, preset
+// providers through their registry hook (providerspec.go), everything else as
+// a generic passthrough.
 func (g *gateway) decodeModelList(ref providerRef, resp *http.Response) ([]any, error) {
 	var parsed struct {
 		Data []map[string]any `json:"data"`
@@ -261,47 +266,14 @@ func (g *gateway) decodeModelList(ref providerRef, resp *http.Response) ([]any, 
 				entry["description"] = meta.Description
 			}
 			entry["id"] = ref.name + "/" + buildSuffixedID(id, ctx, meta.InputModalities)
-		case ref.builtin: // kilo
-			// Kilo's catalog is rich — map the fields agents read.
-			if g.rs().Kilo.FreeOnly {
-				if free, _ := m["isFree"].(bool); !free {
+		default:
+			if hook := presetCatalogHook(ref.preset); hook != nil {
+				if !hook(g, ref, id, entry, m) {
 					continue
 				}
+				break
 			}
-			var mods []string
-			if cw, ok := m["context_length"].(float64); ok {
-				entry["context_window"] = int64(cw)
-			}
-			if tp, ok := m["top_provider"].(map[string]any); ok {
-				if mc, ok := tp["max_completion_tokens"].(float64); ok {
-					entry["max_output_tokens"] = int64(mc)
-				}
-			}
-			if arch, ok := m["architecture"].(map[string]any); ok {
-				if in, ok := arch["input_modalities"].([]any); ok {
-					for _, v := range in {
-						if s, ok := v.(string); ok {
-							mods = append(mods, s)
-						}
-					}
-					entry["input_modalities"] = in
-				}
-				if sp, ok := m["output_modalities"]; ok {
-					entry["output_modalities"] = sp
-				}
-			}
-			if sp, ok := m["supported_parameters"]; ok {
-				entry["supported_parameters"] = sp
-			}
-			if d, ok := m["description"].(string); ok {
-				entry["description"] = d
-			}
-			if free, ok := m["isFree"].(bool); ok {
-				entry["free"] = free
-			}
-			cw, _ := entry["context_window"].(int64)
-			entry["id"] = ref.name + "/" + buildSuffixedID(id, cw, mods)
-		default:
+			// generic provider: passthrough, no enrichment, no suffixes
 			// generic provider: passthrough, no enrichment, no suffixes
 			if d, ok := m["context_length"].(float64); ok {
 				entry["context_window"] = int64(d)

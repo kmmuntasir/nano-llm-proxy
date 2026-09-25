@@ -35,7 +35,7 @@ func (g *gateway) handleResponses(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	upstreamModel := parts[1]
-	if ref.builtin {
+	if ref.suffixedCatalog() {
 		upstreamModel = stripModelSuffix(upstreamModel) // cosmetic ctx/modality labels
 	} else {
 		upstreamModel = stripClientSuffix(upstreamModel)

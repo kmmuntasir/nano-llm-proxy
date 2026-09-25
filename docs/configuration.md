@@ -51,7 +51,7 @@ block is server-owned).
 | `zen.freeOnly` | false | Restrict the zen catalog in `/v1/models` to models flagged as free upstream |
 | `zen.modelMeta` | empty | Per-model metadata (context window, max output, modalities, reasoning, description) shown in `/v1/models`; unknown models get conservative defaults |
 | `zen.modelMetaAutoSync` | false | Refresh `modelMeta` from models.dev once a day in the background |
-| `kilo.freeOnly` | false | Same catalog restriction as `zen.freeOnly` |
+| `kilo.freeOnly` | false | Same catalog restriction as `zen.freeOnly`, applied to Kilo preset providers |
 
 Ranges enforced on save: `maxKeysPerRequest` 1–100, `cooldownSeconds`
 0–86400, `maxRequestsPerKeyPerDay` 0 or 1–1000000, `fallbackModel` shaped
@@ -59,7 +59,8 @@ Ranges enforced on save: `maxKeysPerRequest` 1–100, `cooldownSeconds`
 
 Base URLs are **not** part of this document — providers (and their base
 URLs) live in their own database table and are edited on the GUI Providers
-page, including for the built-in `zen` and `kilo`.
+page. Only `zen` is built in; every other provider is added from the preset
+dropdown or the custom form.
 
 ## Zen model catalog sync
 
@@ -87,8 +88,11 @@ nano-llm-proxy [keys.json] [-reset-admin-password]
 ```
 
 - `keys.json` is a legacy first-boot seeding source
-  (`{"zen":[{"label","key"}...],"kilo":[...]}`). Once imported into the
-  database it is ignored — new deployments manage upstream keys in the GUI.
+  (`{"zen":[{"label","key"}...],"kilo":[...]}`). Only the `zen` entries are
+  imported now — kilo keys are no longer auto-seeded (kilo is a preset added
+  from the GUI; existing databases keep their kilo keys through the
+  migration). Once a database exists the file is ignored — new deployments
+  manage upstream keys in the GUI.
 - `-reset-admin-password` resets the superadmin's password from
   `ADMIN_PASSWORD` and exits; restart the service afterwards.
 
