@@ -7,6 +7,7 @@ import type { UserView } from "./api/types"
 import AppLayout from "./components/AppLayout"
 import LoginPage from "./pages/LoginPage"
 import DashboardPage from "./pages/DashboardPage"
+import DocsPage from "./pages/DocsPage"
 import ModelsPage from "./pages/ModelsPage"
 import ProfilePage from "./pages/ProfilePage"
 import UsagePage from "./pages/UsagePage"
@@ -59,6 +60,7 @@ export default function App() {
       <Routes>
         <Route path="/" element={<DashboardPage />} />
         <Route path="/models" element={<ModelsPage />} />
+        <Route path="/docs" element={<DocsPage />} />
         <Route path="/usage" element={<UsagePage />} />
         <Route path="/profile" element={<ProfilePage />} />
         <Route path="/keys" element={<Navigate to="/profile" replace />} />

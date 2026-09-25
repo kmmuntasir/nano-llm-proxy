@@ -57,8 +57,8 @@ control plane around just to front a few API keys.
   (native fetch + obscura headless-browser rendering) with SSRF protection,
   per-user metering, and an idempotent installer (`scripts/install-web-tools.sh`)
   — no paid search APIs
-- 76 tests (`go test -race ./...`) against scripted mock upstreams — no
-  network or Node required
+- 141 tests (`go test -race ./...`) against scripted mock upstreams and
+  local fixture servers — no network or Node required
 
 ## Quickstart (from source)
 
@@ -252,6 +252,23 @@ The `/v1/messages` surface speaks the full Anthropic protocol: system blocks,
 `tool_use`/`tool_result`, streaming SSE events (`message_start` …
 `message_stop`), stop reasons, and usage.
 
+## MCP web tools
+
+The gateway embeds an MCP server at `POST /mcp` serving two self-hosted
+tools to every client key — `web_search` (SearXNG) and `web_read` (fast
+native fetch escalating to the obscura headless browser for
+JavaScript-heavy or bot-protected pages). SSRF-protected, metered per user
+on the Usage page, no paid search APIs. The signed-in **Guide** page in the
+GUI generates setup snippets for Claude Code, opencode, Codex CLI, Kilo
+Code, and plain MCP clients with the deployment's own URLs. The backends
+are optional companion services installed by an idempotent script — see
+[docs/deployment.md](docs/deployment.md).
+
+```bash
+claude mcp add -s user -t http nano-web https://your-gateway/mcp \
+  --header "Authorization: Bearer fg-..."
+```
+
 ## Admin GUI
 
 Served by the same binary at `/`.
@@ -260,11 +277,12 @@ Served by the same binary at `/`.
 | --- | --- | --- |
 | Dashboard | everyone | Uptime, 24h requests/tokens/errors, usage charts (Today / 7d / 30d: requests, tokens, providers, top models), recent requests |
 | Models | everyone | Every live model across providers — the gateway's base URL with a one-click Claude Code `settings.json` env generator (pick opus/sonnet/haiku, copy the env object; `[1m]` is added automatically for 1M-context models) — plus search and filters by provider, context window, reasoning, Responses API, and input modalities; every model shows its exact ID with a copy button |
+| Guide | everyone | User guide rendered with this deployment's URLs: base endpoints, setup for Claude Code / opencode / Codex CLI / Kilo Code / generic OpenAI-compatible clients, MCP web-tools setup, troubleshooting |
 | Usage | everyone | Date-range usage: totals, top models, providers, per-key (admins also get per-user), recent activity — scoped to the signed-in user |
-| Profile | everyone | Account info, self-service password reset, own client keys (create/disable/delete) |
+| Profile | everyone | Account info, self-service password reset, own client keys (create/disable/delete) plus an MCP web-tools setup dialog |
 | Users | superadmin | User CRUD, roles, password resets, per-user key management, per-user provider access (revoke a provider and it vanishes from that user's model list; their requests to it fail like an unknown provider) |
 | Providers | superadmin | Add providers from a curated preset dropdown (or its Custom Provider option), search/filter the provider card grid, edit base URLs, add/remove/toggle/rename upstream keys, fetch per-key plan usage for Z.ai (5-hour/weekly windows, tier, resets), browse each provider's live model catalog (zen models with the Responses-API flag carry a toggle) |
-| Settings | superadmin | Rotation, retries/cooldowns, daily cap, Claude fallback, adapter knobs, model-catalog sync (zen + zai, models.dev) |
+| Settings | superadmin | Rotation, retries/cooldowns, daily cap, Claude fallback, adapter knobs, model-catalog sync (zen + zai, models.dev), web tools (SearXNG URL, reader mode, obscura knobs, live backend tests) |
 
 First boot requires `ADMIN_EMAIL` and `ADMIN_PASSWORD` (environment variables
 or an env file); the superadmin is created once and never overwritten.
@@ -300,15 +318,18 @@ real environment always wins; see `.env.example`). Full reference in
 | `NANO_TRUSTED_ORIGINS` | empty | Extra Origins allowed on GUI mutations behind a reverse proxy |
 
 **Runtime** — everything you tune while it runs (rotation, retries, daily
-cap, the Claude fallback, adapter knobs, the model catalogs) lives in the
-database and is edited in the GUI under **Settings**. Changes apply
-in-request; no restarts.
+cap, the Claude fallback, adapter knobs, the model catalogs, web tools)
+lives in the database and is edited in the GUI under **Settings**. Changes
+apply in-request; no restarts.
 
 ## Deploying
 
 `sudo ./deploy.sh` does the whole setup on a systemd host: it requires a
 `.env`, builds GUI + binary, installs to `/opt/nano-llm-proxy`, and installs
-a hardened unit. Hand-rolled equivalent (full walkthrough in
+a hardened unit. Optional MCP web-tool backends (SearXNG + obscura) are a
+separate, idempotent installer — `sudo ./scripts/install-web-tools.sh` —
+documented in [docs/deployment.md](docs/deployment.md). Hand-rolled
+equivalent (full walkthrough in
 [docs/configuration.md](docs/configuration.md)):
 
 ```ini
@@ -343,11 +364,13 @@ cd web && npm ci && npm run dev       # GUI dev server
 | Path | Responsibility |
 | --- | --- |
 | `main.go` | bootstrap wiring: .env, store open, route registration, listen |
-| `internal/gateway/` | the runtime: gateway assembly, hot-path rebuild, failure classifier, key pools (priority/LRU + daily cap), zen/kilo/generic adapters, Responses ↔ chat and Anthropic conversions, admin API handlers, sessions/auth, models.dev sync |
+| `internal/gateway/` | the runtime: gateway assembly, hot-path rebuild, failure classifier, key pools (priority/LRU + daily cap), zen/kilo/generic adapters, Responses ↔ chat and Anthropic conversions, admin API handlers, sessions/auth, models.dev sync, the `/mcp` MCP server |
+| `internal/webtools/` | web-tool backends: SearXNG client, native fetch + readability → markdown, obscura executor, SSRF guard, escalation policy |
 | `internal/store/` | SQLite: migrations, bootstrap, users/keys/providers/settings CRUD, usage log |
 | `internal/settings/` | runtime-settings document: defaults, validation, `ModelMeta` schema |
 | `internal/config/` | .env parser, env bootstrap, legacy key-file schema |
 | `web/` | React 19 + Chakra UI admin GUI (Vite, TypeScript) |
+| `scripts/install-web-tools.sh` | idempotent installer for the optional SearXNG + obscura companion services |
 
 ## Troubleshooting
 
@@ -361,6 +384,9 @@ cd web && npm ci && npm run dev       # GUI dev server
 | GUI mutations 403 behind a reverse proxy | browser Origin differs from backend Host | add your public host to `NANO_TRUSTED_ORIGINS` |
 | Empty model replies, `finish_reason: "length"` | output budget consumed by hidden reasoning | raise `max_tokens` (≥ 500) |
 | Claude Code: "Unknown Model" before any request | CC validates model names client-side | use `ANTHROPIC_DEFAULT_*_MODEL` slots; set the gateway's Claude fallback for background `claude-*` calls |
+| 404 on `POST /mcp` | web tools disabled (or binary predates the feature) | enable in Settings → Web tools; install backends with `scripts/install-web-tools.sh` |
+| `web_search` returns no results | search engines CAPTCHA-blocked from this IP | trim engines in `/etc/searxng/settings.yml` (see docs/deployment.md); the `duckduckgo web` engine is bot-detection-resistant |
+| `web_read` returns JS-shell text | page is rendered client-side | call with `render: true`; or set reader mode `render` in Settings |
 
 ## Responsible use
 
