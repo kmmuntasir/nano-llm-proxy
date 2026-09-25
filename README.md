@@ -22,7 +22,7 @@ control plane around just to front a few API keys.
 | Keys scattered across several providers | One endpoint, one client key; upstream keys never leave the server |
 | Per-key rate limits interrupt long agent sessions | Requests fail over across the pool: cooldowns, `Retry-After`, health tracking |
 | Clients speak different protocols | The same pool serves OpenAI chat, OpenAI Responses, and Anthropic Messages |
-| Provider quirks (API surface splits, client-shape checks) | Built-in adapters normalize the odd ones; the generic adapter covers any OpenAI-compatible URL |
+| Provider quirks (API surface splits, client-shape checks) | The built-in zen adapter normalizes the odd ones; the generic adapter covers any OpenAI-compatible URL |
 | Admin usually means YAML edits + restarts | Embedded web GUI: users, client keys, providers, upstream keys, usage charts, live dashboard |
 
 ## Features
@@ -102,7 +102,7 @@ suffix) is stripped before the upstream call:
 ```text
 openai/gpt-4o-mini        → provider "openai",  model "gpt-4o-mini"
 groq/llama-3.3-70b        → provider "groq",    model "llama-3.3-70b"
-<adapter>/<model>         → built-in adapters (zen) and preset adapters (kilo)
+<adapter>/<model>         → the built-in zen adapter, or preset providers (kilo, zai, …)
 ```
 
 `GET /v1/models` merges every enabled provider's catalog and enriches each
@@ -158,12 +158,16 @@ Two structural rules:
 An optional daily cap per key (Settings → Retries) cools an exhausted key
 until midnight; off by default.
 
-## Built-in provider adapters
+## Provider adapters
+
+One adapter is built in; everything else — including the Kilo preset — is a
+GUI-added provider from the preset registry (see [Provider
+presets](#provider-presets)), served by the generic passthrough:
 
 | Adapter | Upstream | What it handles |
 | --- | --- | --- |
-| `zen` | OpenCode Zen (`opencode.ai/zen/v1`) | Injects the client headers and tool stubs the API requires, routes each model to its Chat or Responses surface (self-correcting on the signature 503), and translates between the two shapes — including tool calls |
-| `kilo` preset | Kilo Code (`api.kilo.ai/api/gateway/v1`) | OpenAI-compatible passthrough with rotation; its rich catalog (context windows, modalities, free flags) is mapped and suffixed |
+| `zen` (built in) | OpenCode Zen (`opencode.ai/zen/v1`) | Injects the client headers and tool stubs the API requires, routes each model to its Chat or Responses surface (self-correcting on the signature 503), and translates between the two shapes — including tool calls |
+| presets (Kilo, DeepSeek, Z.ai, …) | per preset | OpenAI/Anthropic passthrough with rotation; presets with special catalogs map their metadata (Kilo's rich catalog, Z.ai's models.dev merge) |
 | generic | any OpenAI- and/or Anthropic-compatible base URL | GUI-added providers — no code needed |
 
 Adapter-specific settings (user agent, fingerprint injection, free-only
@@ -234,9 +238,9 @@ integration uses env slots for your main models plus the gateway's
   "env": {
     "ANTHROPIC_BASE_URL": "http://localhost:8787",
     "ANTHROPIC_AUTH_TOKEN": "fg-...",
-    "ANTHROPIC_DEFAULT_OPUS_MODEL": "openai/gpt-4o-mini",
-    "ANTHROPIC_DEFAULT_SONNET_MODEL": "groq/llama-3.3-70b-versatile",
-    "ANTHROPIC_DEFAULT_HAIKU_MODEL": "openai/gpt-4o-mini"
+    "ANTHROPIC_DEFAULT_OPUS_MODEL": "zai/glm-5.3[1m]",
+    "ANTHROPIC_DEFAULT_SONNET_MODEL": "zai/glm-5.3-flash",
+    "ANTHROPIC_DEFAULT_HAIKU_MODEL": "zen/mimo-v2.6-flash-free"
   }
 }
 ```
@@ -364,7 +368,7 @@ cd web && npm ci && npm run dev       # GUI dev server
 | Path | Responsibility |
 | --- | --- |
 | `main.go` | bootstrap wiring: .env, store open, route registration, listen |
-| `internal/gateway/` | the runtime: gateway assembly, hot-path rebuild, failure classifier, key pools (priority/LRU + daily cap), zen/kilo/generic adapters, Responses ↔ chat and Anthropic conversions, admin API handlers, sessions/auth, models.dev sync, the `/mcp` MCP server |
+| `internal/gateway/` | the runtime: gateway assembly, hot-path rebuild, failure classifier, key pools (priority/LRU + daily cap), zen adapter + preset/generic adapters, Responses ↔ chat and Anthropic conversions, admin API handlers, sessions/auth, models.dev sync, the `/mcp` MCP server |
 | `internal/webtools/` | web-tool backends: SearXNG client, native fetch + readability → markdown, obscura executor, SSRF guard, escalation policy |
 | `internal/store/` | SQLite: migrations, bootstrap, users/keys/providers/settings CRUD, usage log |
 | `internal/settings/` | runtime-settings document: defaults, validation, `ModelMeta` schema |

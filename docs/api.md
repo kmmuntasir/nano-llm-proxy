@@ -125,8 +125,11 @@ counts (`total` keys, `healthy` of them — the rest cooling or disabled);
 `webtools` reports whether the MCP web tools are enabled:
 
 ```json
-{"status": "ok", "uptime_s": 3600, "providers": {"zen": {"total": 14, "healthy": 14}, "kilo": {"total": 15, "healthy": 15}}, "webtools": {"enabled": true}}
+{"status": "ok", "uptime_s": 3600, "providers": {"zen": {"total": 14, "healthy": 14}, "openai": {"total": 3, "healthy": 3}}, "webtools": {"enabled": true}}
 ```
+
+`providers` maps every enabled provider (the built-in `zen` plus each
+GUI-added provider under its own name) to its upstream key-pool counts.
 
 ## POST /mcp
 
