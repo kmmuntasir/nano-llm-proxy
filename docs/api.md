@@ -115,10 +115,11 @@ accepted on every endpoint.
 
 ## GET /health
 
-Open, no auth:
+Open, no auth. `providers` maps each provider to its upstream key-pool
+counts (`total` keys, `healthy` of them — the rest cooling or disabled):
 
 ```json
-{"uptime_s": 3600, "providers": {"openai": {"healthy": 2, "total": 3}}}
+{"status": "ok", "uptime_s": 3600, "providers": {"zen": {"total": 14, "healthy": 14}, "kilo": {"total": 15, "healthy": 15}}}
 ```
 
 ## Admin API (`/api/*`)
@@ -133,9 +134,9 @@ Roles: `superadmin` (everything below) and `user` (own keys + dashboard).
 | `GET/POST /api/me/keys`, `PATCH/DELETE /api/me/keys/{keyId}` | user | Own client keys |
 | `GET/POST /api/users`, `PATCH/DELETE /api/users/{id}` | superadmin | User management |
 | `GET/POST /api/users/{id}/keys`, `PATCH/DELETE /api/users/{id}/keys/{keyId}` | superadmin | Per-user client keys |
-| `GET/POST /api/providers`, `PATCH/DELETE /api/providers/{id}` | superadmin | Providers (generic CRUD; `baseUrl` and/or `anthropicBaseUrl`, at least one required; built-ins cannot be deleted). Create accepts a `preset` id: unknown presets are 400, the name defaults to the preset id, endpoint roots default from the registry, and the preset is immutable afterwards. Multiple providers per preset are allowed; only `zen` is reserved and undeletable |
+| `GET/POST /api/providers`, `PATCH/DELETE /api/providers/{id}` | superadmin | Providers (generic CRUD; `baseUrl` and/or `anthropicBaseUrl`, at least one required; built-ins cannot be deleted). Create takes `keys` as `{key, label}` objects — every upstream key needs a label (1-64 characters). It also accepts a `preset` id: unknown presets are 400, the name defaults to the preset id, endpoint roots default from the registry, and the preset is immutable afterwards. Multiple providers per preset are allowed; only `zen` is reserved and undeletable |
 | `GET /api/providers/presets` | superadmin | The curated preset registry (id, label, endpoint roots) behind the GUI's Add Provider dropdown |
-| `POST /api/providers/{id}/keys`, `PATCH/DELETE /api/providers/{id}/keys/{keyId}` | superadmin | Upstream keys |
+| `POST /api/providers/{id}/keys`, `PATCH/DELETE /api/providers/{id}/keys/{keyId}` | superadmin | Upstream keys; POST requires a label, PATCH may rename a key but never blank its label |
 | `GET /api/settings` | superadmin | Effective runtime settings document (rotation, retries, Claude fallback, adapter knobs, model catalog) |
 | `PUT /api/settings` | superadmin | Validate and replace the document; omitted fields fall back to defaults, the models.dev sync status is server-owned and preserved. Validation failures return 400 and change nothing. Applies in-request — pool mode and the `/v1/models` cache refresh before the response |
 | `POST /api/settings/model-meta/sync` | superadmin | Run the models.dev catalog sync now; returns the sync status (200 even when `ok:false` — the error is in the status block) |
