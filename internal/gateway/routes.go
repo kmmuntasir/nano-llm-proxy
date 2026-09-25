@@ -45,6 +45,8 @@ func (g *gateway) RegisterRoutes(mux *http.ServeMux, webFS fs.FS) {
 	mux.HandleFunc("POST /api/users/{id}/keys", g.requireSession(g.requireSuperadmin(g.handleCreateUserKey)))
 	mux.HandleFunc("PATCH /api/users/{id}/keys/{keyId}", g.requireSession(g.requireSuperadmin(g.handlePatchUserKey)))
 	mux.HandleFunc("DELETE /api/users/{id}/keys/{keyId}", g.requireSession(g.requireSuperadmin(g.handleDeleteUserKey)))
+	mux.HandleFunc("GET /api/users/{id}/providers", g.requireSession(g.requireSuperadmin(g.handleListUserProviders)))
+	mux.HandleFunc("PUT /api/users/{id}/providers/{providerId}/access", g.requireSession(g.requireSuperadmin(g.handleSetUserProviderAccess)))
 
 	mux.HandleFunc("GET /api/models", g.requireSession(g.handleAllModels))
 	mux.HandleFunc("GET /api/providers", g.requireSession(g.requireSuperadmin(g.handleListProviders)))
@@ -289,9 +291,10 @@ func (g *gateway) decodeModelList(ref providerRef, resp *http.Response) ([]any, 
 	return out, nil
 }
 
-// mergedCatalog returns the cached merged catalog body, refreshing it when
-// older than 10 minutes. ok=false means every provider fetch failed.
-func (g *gateway) mergedCatalog() ([]byte, bool) {
+// mergedCatalog returns the cached merged catalog (all providers, unscoped),
+// refreshing it when older than 10 minutes. ok=false means every provider
+// fetch failed. Per-caller scoping happens in catalogFor.
+func (g *gateway) mergedCatalog() ([]any, bool) {
 	g.catMu.Lock()
 	defer g.catMu.Unlock()
 	if g.catalog == nil || time.Since(g.catalogAt) > 10*time.Minute {
@@ -309,34 +312,34 @@ func (g *gateway) mergedCatalog() ([]byte, bool) {
 		if len(merged) == 0 && len(failed) > 0 {
 			return nil, false
 		}
-		body, _ := json.Marshal(map[string]any{"object": "list", "data": merged})
-		g.catalog = body
+		g.catalog = merged
 		g.catalogAt = time.Now()
 	}
 	return g.catalog, true
 }
 
-// handleModels serves the merged, prefixed catalog to API clients.
+// handleModels serves the merged, prefixed catalog to API clients, scoped to
+// the caller's per-user provider access.
 func (g *gateway) handleModels(w http.ResponseWriter, r *http.Request) {
-	body, ok := g.mergedCatalog()
+	models, ok := g.catalogFor(r)
 	if !ok {
 		writeErr(w, http.StatusBadGateway, "Catalog fetch failed: all providers unavailable")
 		return
 	}
 	w.Header().Set("Content-Type", "application/json")
-	w.Write(body)
+	json.NewEncoder(w).Encode(map[string]any{"object": "list", "data": models})
 }
 
-// handleAllModels serves the same merged catalog to the admin GUI's Models
+// handleAllModels serves the same scoped catalog to the admin GUI's Models
 // page (session auth instead of a client key).
 func (g *gateway) handleAllModels(w http.ResponseWriter, r *http.Request) {
-	body, ok := g.mergedCatalog()
+	models, ok := g.catalogFor(r)
 	if !ok {
 		apiErr(w, http.StatusBadGateway, "Catalog fetch failed: all providers unavailable")
 		return
 	}
 	w.Header().Set("Content-Type", "application/json")
-	w.Write(body)
+	json.NewEncoder(w).Encode(map[string]any{"object": "list", "data": models})
 }
 
 func hasFreeSuffix(id string) bool {

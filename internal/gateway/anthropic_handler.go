@@ -36,7 +36,7 @@ func (g *gateway) handleMessages(w http.ResponseWriter, r *http.Request) {
 		writeAnthropicErr(w, http.StatusBadRequest, `Model must be "<provider>/<id>" (e.g. zen/mimo-...)`)
 		return
 	}
-	ref, ok := g.provider(parts[0])
+	ref, ok := g.providerFor(r, parts[0])
 	if !ok {
 		writeAnthropicErr(w, http.StatusBadRequest, fmt.Sprintf("Unknown provider %q — see GET /v1/models", parts[0]))
 		return

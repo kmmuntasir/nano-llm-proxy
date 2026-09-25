@@ -21,6 +21,17 @@ export interface ClientKeyView {
   requestCount: number
 }
 
+// One provider row annotated with a user's access state (Users page access
+// dialog). disabledForUser only matters when enabled is true — a globally
+// disabled provider is unroutable for everyone.
+export interface UserProviderView {
+  id: number
+  name: string
+  preset: string
+  enabled: boolean
+  disabledForUser: boolean
+}
+
 export interface ProviderKeyView {
   id: number
   label: string

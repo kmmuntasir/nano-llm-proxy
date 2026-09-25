@@ -28,7 +28,7 @@ func (g *gateway) handleResponses(w http.ResponseWriter, r *http.Request) {
 			`Model must be "zen/<id>"; only zen has a Responses API — use /v1/chat/completions`)
 		return
 	}
-	ref, ok := g.provider(parts[0])
+	ref, ok := g.providerFor(r, parts[0])
 	if !ok || ref.typ != "opencode" {
 		writeErr(w, http.StatusBadRequest,
 			fmt.Sprintf("store.Provider %q has no Responses API — use /v1/chat/completions", parts[0]))
