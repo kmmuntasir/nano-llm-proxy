@@ -509,22 +509,38 @@ const fmtResetAbs = (ms: number) =>
     minute: "2-digit",
   })
 
+// Forward-looking relative hint for reset lines. Mirrors the reference
+// monitor's formatRelativeHint: `in 56m` · `in 3h 36m` · `in 5d 1h`
+// (minutes only under an hour; days+hours drop minutes; past degrades to
+// `in 0m`).
 const fmtResetRel = (ms: number) => {
-  const m = Math.round((ms - Date.now()) / 60000)
-  if (m <= 0) return "soon"
-  if (m < 60) return `in ${m}m`
-  if (m < 48 * 60) return `in ${Math.floor(m / 60)}h ${m % 60}m`
-  return `in ${Math.floor(m / 1440)}d ${Math.floor((m % 1440) / 60)}h`
+  const diffMinutes = Math.floor((ms - Date.now()) / 60000)
+  if (diffMinutes <= 0) return "in 0m"
+  const days = Math.floor(diffMinutes / 1440)
+  const hours = Math.floor((diffMinutes % 1440) / 60)
+  const minutes = diffMinutes % 60
+  const parts: string[] = []
+  if (days > 0) parts.push(`${days}d`)
+  if (hours > 0) parts.push(`${hours}h`)
+  if (days === 0 && minutes > 0) parts.push(`${minutes}m`)
+  return `in ${parts.join(" ")}`
 }
 
-// usageColor mirrors the standalone monitor's thresholds.
+// Idle line when `nextResetTime` is absent (0% usage — nothing pending to
+// restore). Mirrors the reference monitor's UsageRow (IDLE_RESET_LINE).
+const IDLE_RESET_LINE = "no pending usage — window idle"
+
+// usageColor mirrors the reference monitor's thresholds (green < 60% ·
+// amber 60–84% · red >= 85% used).
 const usageColor = (pct: number) => (pct >= 85 ? "red" : pct >= 60 ? "orange" : "green")
 
 const tierPalette = (level: string) =>
   level === "lite" ? "blue" : level === "pro" ? "purple" : level === "max" ? "orange" : "gray"
 
 // KeyUsageCard is deliberately tiny: label + tier badge, then one line per
-// usage window with a mini bar and the reset instant.
+// usage window with a mini bar and the reset instant (every window,
+// including MCP tools — like the reference monitor, a window with no
+// `nextResetTime` renders the idle line instead of nothing).
 function KeyUsageCard({ label, usage, error }: { label: string; usage?: ZaiUsage; error?: string }) {
   const rows = usage?.limits ?? []
   const windows = rows.filter((l) => classifyLimit(l) !== null)
@@ -574,11 +590,15 @@ function KeyUsageCard({ label, usage, error }: { label: string; usage?: ZaiUsage
                   <Progress.Range />
                 </Progress.Track>
               </Progress.Root>
-              {kind !== "mcp" && l.nextResetTime ? (
+              {l.nextResetTime ? (
                 <Text fontSize="2xs" color="fg.subtle" mt={0.5}>
-                  resets {fmtResetAbs(l.nextResetTime)} · {fmtResetRel(l.nextResetTime)}
+                  {l.type === "TOKENS_LIMIT" ? "restores" : "resets"} {fmtResetAbs(l.nextResetTime)} · {fmtResetRel(l.nextResetTime)}
                 </Text>
-              ) : null}
+              ) : (
+                <Text fontSize="2xs" color="fg.subtle" mt={0.5}>
+                  {IDLE_RESET_LINE}
+                </Text>
+              )}
               {kind === "mcp" && (l.usageDetails ?? []).some((u) => u.usage > 0) ? (
                 <Text fontSize="2xs" color="fg.subtle" mt={0.5}>
                   {(l.usageDetails ?? [])
