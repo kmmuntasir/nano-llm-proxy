@@ -624,13 +624,13 @@ func TestProviderAPIAnthropicEndpointValidation(t *testing.T) {
 	}
 
 	// both endpoints empty -> 400
-	rec := post(`{"name":"zai","keys":["k1"]}`)
+	rec := post(`{"name":"zai","keys":[{"key":"k1","label":"test"}]}`)
 	if rec.Code != 400 || !strings.Contains(rec.Body.String(), "At least one endpoint is required") {
 		t.Fatalf("empty endpoints: got %d: %s", rec.Code, rec.Body.String())
 	}
 
 	// anthropic-only provider -> 201
-	rec = post(fmt.Sprintf(`{"name":"zai","anthropicBaseUrl":%q,"keys":["ak1"]}`, "https://api.z.ai/api/anthropic"))
+	rec = post(fmt.Sprintf(`{"name":"zai","anthropicBaseUrl":%q,"keys":[{"key":"ak1","label":"test"}]}`, "https://api.z.ai/api/anthropic"))
 	if rec.Code != 201 {
 		t.Fatalf("anthropic-only create: got %d: %s", rec.Code, rec.Body.String())
 	}
@@ -640,7 +640,7 @@ func TestProviderAPIAnthropicEndpointValidation(t *testing.T) {
 	json.Unmarshal(rec.Body.Bytes(), &created)
 
 	// invalid anthropic URL -> 400
-	rec = post(`{"name":"bad","anthropicBaseUrl":"ftp://x","keys":["k1"]}`)
+	rec = post(`{"name":"bad","anthropicBaseUrl":"ftp://x","keys":[{"key":"k1","label":"test"}]}`)
 	if rec.Code != 400 || !strings.Contains(rec.Body.String(), "anthropicBaseUrl") {
 		t.Fatalf("bad anthropic URL: got %d: %s", rec.Code, rec.Body.String())
 	}
