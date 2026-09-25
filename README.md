@@ -254,7 +254,7 @@ Served by the same binary at `/`.
 | Usage | everyone | Date-range usage: totals, top models, providers, per-key (admins also get per-user), recent activity — scoped to the signed-in user |
 | Profile | everyone | Account info, self-service password reset, own client keys (create/disable/delete) |
 | Users | superadmin | User CRUD, roles, password resets, per-user key management |
-| Providers | superadmin | Add providers from a curated preset dropdown (or its Custom Provider option), search/filter the provider card grid, edit base URLs, add/remove/toggle upstream keys, browse each provider's live model catalog (zen models with the Responses-API flag carry a toggle) |
+| Providers | superadmin | Add providers from a curated preset dropdown (or its Custom Provider option), search/filter the provider card grid, edit base URLs, add/remove/toggle/rename upstream keys, browse each provider's live model catalog (zen models with the Responses-API flag carry a toggle) |
 | Settings | superadmin | Rotation, retries/cooldowns, daily cap, Claude fallback, adapter knobs, Zen model-catalog sync |
 
 First boot requires `ADMIN_EMAIL` and `ADMIN_PASSWORD` (environment variables

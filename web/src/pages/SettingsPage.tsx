@@ -48,7 +48,7 @@ function ModelPicker({
 
   return (
     <Box position="relative">
-      <Input
+      <Input autoComplete="off"
         placeholder={placeholder}
         value={open ? query : value}
         fontFamily="mono"
@@ -329,7 +329,7 @@ export default function SettingsPage() {
           <HStack gap={4} align="end" flexWrap="wrap">
             <Field.Root w={{ base: "full", sm: "200px" }}>
               <Field.Label>Max keys per request</Field.Label>
-              <Input
+              <Input autoComplete="off"
                 type="number"
                 min={1}
                 max={100}
@@ -340,7 +340,7 @@ export default function SettingsPage() {
             </Field.Root>
             <Field.Root w={{ base: "full", sm: "200px" }}>
               <Field.Label>Cooldown seconds</Field.Label>
-              <Input
+              <Input autoComplete="off"
                 type="number"
                 min={0}
                 max={86400}
@@ -351,7 +351,7 @@ export default function SettingsPage() {
             </Field.Root>
             <Field.Root w={{ base: "full", sm: "200px" }}>
               <Field.Label>Daily cap per key</Field.Label>
-              <Input
+              <Input autoComplete="off"
                 type="number"
                 min={0}
                 value={form.retry.maxRequestsPerKeyPerDay}
@@ -413,7 +413,7 @@ export default function SettingsPage() {
           <VStack align="stretch" gap={4}>
             <Field.Root w={{ base: "full", md: "380px" }}>
               <Field.Label>User agent</Field.Label>
-              <Input
+              <Input autoComplete="off"
                 value={form.userAgent}
                 fontFamily="mono"
                 onChange={(e) => set({ userAgent: e.target.value })}

@@ -75,15 +75,15 @@ function ChangePasswordModal({ open, onOpenChange }: { open: boolean; onOpenChan
           <Dialog.Body>
             <VStack align="stretch" gap={3}>
               <Field.Root required>
-                <Field.Label>Current password</Field.Label>
+                <Field.Label>Current password <Field.RequiredIndicator /></Field.Label>
                 <PasswordInput
                   value={current}
                   onChange={(e) => setCurrent(e.target.value)}
-                  autoComplete="current-password"
+                  autoComplete="new-password"
                 />
               </Field.Root>
               <Field.Root required>
-                <Field.Label>New password</Field.Label>
+                <Field.Label>New password <Field.RequiredIndicator /></Field.Label>
                 <PasswordInput
                   value={next}
                   onChange={(e) => setNext(e.target.value)}
@@ -92,7 +92,7 @@ function ChangePasswordModal({ open, onOpenChange }: { open: boolean; onOpenChan
                 <Field.HelperText>min 10 chars</Field.HelperText>
               </Field.Root>
               <Field.Root required>
-                <Field.Label>Confirm new password</Field.Label>
+                <Field.Label>Confirm new password <Field.RequiredIndicator /></Field.Label>
                 <PasswordInput
                   value={confirm}
                   onChange={(e) => setConfirm(e.target.value)}

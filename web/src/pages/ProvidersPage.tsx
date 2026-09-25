@@ -20,7 +20,7 @@ import {
   Text,
   VStack,
 } from "@chakra-ui/react"
-import { ChevronDown, ChevronUp, List, Plus, Trash2 } from "lucide-react"
+import { ChevronDown, ChevronUp, List, Pencil, Plus, Trash2 } from "lucide-react"
 import { api, del, patch, post, put, ApiError } from "../api/client"
 import ModelCard from "../components/ModelCard"
 import type { PresetSpecView, ProviderKeyView, ProviderView } from "../api/types"
@@ -129,7 +129,7 @@ function AddProviderCard({ added }: { added: Set<string> }) {
         >
           <HStack gap={3} align="end" flexWrap="wrap">
             <Field.Root required w="220px">
-              <Field.Label>Provider</Field.Label>
+              <Field.Label>Provider <Field.RequiredIndicator /></Field.Label>
               <NativeSelect.Root size="sm">
                 <NativeSelect.Field value={presetID} onChange={(e) => select(e.target.value)}>
                   <option value="">Choose a provider…</option>
@@ -145,8 +145,8 @@ function AddProviderCard({ added }: { added: Set<string> }) {
               </NativeSelect.Root>
             </Field.Root>
             <Field.Root required flex={1} minW="160px">
-              <Field.Label>Name</Field.Label>
-              <Input
+              <Field.Label>Name <Field.RequiredIndicator /></Field.Label>
+              <Input autoComplete="off"
                 placeholder={isCustom ? "e.g. together" : spec?.id}
                 value={name}
                 onChange={(e) => setName(e.target.value.toLowerCase())}
@@ -157,7 +157,7 @@ function AddProviderCard({ added }: { added: Set<string> }) {
               <>
                 <Field.Root minW="280px" flex={1}>
                   <Field.Label>OpenAI-compatible endpoint</Field.Label>
-                  <Input
+                  <Input autoComplete="off"
                     placeholder="https://api.example.com/v1"
                     value={baseURL}
                     onChange={(e) => setBaseURL(e.target.value)}
@@ -166,7 +166,7 @@ function AddProviderCard({ added }: { added: Set<string> }) {
                 </Field.Root>
                 <Field.Root minW="280px" flex={1}>
                   <Field.Label>Anthropic-compatible endpoint</Field.Label>
-                  <Input
+                  <Input autoComplete="off"
                     placeholder="https://api.z.ai/api/anthropic"
                     value={anthropicURL}
                     onChange={(e) => setAnthropicURL(e.target.value)}
@@ -176,8 +176,8 @@ function AddProviderCard({ added }: { added: Set<string> }) {
               </>
             )}
             <Field.Root required minW="220px" flex={1}>
-              <Field.Label>API key</Field.Label>
-              <Input
+              <Field.Label>API key <Field.RequiredIndicator /></Field.Label>
+              <Input autoComplete="new-password"
                 type="password"
                 value={key}
                 onChange={(e) => setKey(e.target.value)}
@@ -185,8 +185,8 @@ function AddProviderCard({ added }: { added: Set<string> }) {
               />
             </Field.Root>
             <Field.Root required w="170px">
-              <Field.Label>Key label</Field.Label>
-              <Input
+              <Field.Label>Key label <Field.RequiredIndicator /></Field.Label>
+              <Input autoComplete="off"
                 placeholder={isCustom ? "e.g. primary" : "e.g. glm"}
                 value={keyLabel}
                 onChange={(e) => setKeyLabel(e.target.value)}
@@ -230,6 +230,8 @@ function AddProviderCard({ added }: { added: Set<string> }) {
 function ProviderKeyRow({ provider, k }: { provider: ProviderView; k: ProviderKeyView }) {
   const qc = useQueryClient()
   const [toDelete, setToDelete] = useState(false)
+  const [renaming, setRenaming] = useState(false)
+  const [labelDraft, setLabelDraft] = useState("")
   const invalidate = () => void qc.invalidateQueries({ queryKey: ["providers"] })
 
   const toggle = useMutation({
@@ -241,6 +243,16 @@ function ProviderKeyRow({ provider, k }: { provider: ProviderView; k: ProviderKe
     },
     onError: (e) =>
       toaster.create({ title: e instanceof ApiError ? e.message : "Failed to update the key", type: "error" }),
+  })
+  const rename = useMutation({
+    mutationFn: () => patch(`/api/providers/${provider.id}/keys/${k.id}`, { label: labelDraft }),
+    onSuccess: async () => {
+      setRenaming(false)
+      invalidate()
+      toaster.create({ title: "Key renamed", type: "success" })
+    },
+    onError: (e) =>
+      toaster.create({ title: e instanceof ApiError ? e.message : "Failed to rename the key", type: "error" }),
   })
   const remove = useMutation({
     mutationFn: () => del(`/api/providers/${provider.id}/keys/${k.id}`),
@@ -255,9 +267,46 @@ function ProviderKeyRow({ provider, k }: { provider: ProviderView; k: ProviderKe
 
   return (
     <HStack gap={3} fontSize="sm" py={1}>
-      <Code fontFamily="mono" fontSize="xs">
-        {k.label || k.hash || `#${k.id}`}
-      </Code>
+      {renaming ? (
+        <>
+          <Input autoComplete="off"
+            size="xs"
+            fontFamily="mono"
+            value={labelDraft}
+            onChange={(e) => setLabelDraft(e.target.value)}
+            maxW="160px"
+            autoFocus
+          />
+          <Button
+            size="2xs"
+            colorPalette="blue"
+            loading={rename.isPending}
+            onClick={() => rename.mutate()}
+          >
+            Save
+          </Button>
+          <Button size="2xs" variant="ghost" onClick={() => setRenaming(false)}>
+            Cancel
+          </Button>
+        </>
+      ) : (
+        <>
+          <Code fontFamily="mono" fontSize="xs">
+            {k.label || k.hash || `#${k.id}`}
+          </Code>
+          <IconButton
+            variant="ghost"
+            size="2xs"
+            aria-label={`rename key ${k.label || k.hash || `#${k.id}`}`}
+            onClick={() => {
+              setLabelDraft(k.label)
+              setRenaming(true)
+            }}
+          >
+            <Pencil />
+          </IconButton>
+        </>
+      )}
       {k.status && <StatusBadge status={k.status} />}
       {k.cooldownRemaining && (
         <Text fontSize="xs" color="fg.muted">
@@ -365,7 +414,7 @@ function ModelsListModal({
           </Dialog.Header>
           <Dialog.Body px={6}>
             <HStack mb={4} flexWrap="wrap" gap={2} align="center">
-              <Input
+              <Input autoComplete="off"
                 placeholder="Search models…"
                 flex={1}
                 minW="200px"
@@ -543,7 +592,7 @@ function ProviderCard({ p }: { p: ProviderView }) {
                 </Badge>
                 {editing ? (
                   <>
-                    <Input
+                    <Input autoComplete="off"
                       size="xs"
                       fontFamily="mono"
                       value={editURL}
@@ -628,25 +677,27 @@ function ProviderCard({ p }: { p: ProviderView }) {
                     addKey.mutate()
                   }}
                 >
-                  <HStack gap={2} mt={2} flexWrap="wrap">
-                    <Input
-                      size="xs"
-                      placeholder="key label"
-                      value={newKeyLabel}
-                      onChange={(e) => setNewKeyLabel(e.target.value)}
-                      required
-                      maxW="160px"
-                    />
-                    <Input
-                      size="xs"
-                      type="password"
-                      placeholder="upstream API key"
-                      value={newKey}
-                      onChange={(e) => setNewKey(e.target.value)}
-                      fontFamily="mono"
-                      required
-                      maxW="280px"
-                    />
+                  <HStack gap={2} mt={2} flexWrap="wrap" align="end">
+                    <Field.Root required w="160px">
+                      <Field.Label>Key label <Field.RequiredIndicator /></Field.Label>
+                      <Input autoComplete="off"
+                        size="xs"
+                        placeholder="e.g. backup"
+                        value={newKeyLabel}
+                        onChange={(e) => setNewKeyLabel(e.target.value)}
+                      />
+                    </Field.Root>
+                    <Field.Root required flex={1} minW="220px">
+                      <Field.Label>API key <Field.RequiredIndicator /></Field.Label>
+                      <Input autoComplete="new-password"
+                        size="xs"
+                        type="password"
+                        placeholder="upstream API key"
+                        value={newKey}
+                        onChange={(e) => setNewKey(e.target.value)}
+                        fontFamily="mono"
+                      />
+                    </Field.Root>
                     <Button size="2xs" type="submit" loading={addKey.isPending}>
                       <Plus /> Add key
                     </Button>
@@ -714,7 +765,7 @@ export default function ProvidersPage() {
           <HStack flexWrap="wrap" gap={3} align="end">
             <Field.Root flex={1} minW="220px">
               <Field.Label>Search</Field.Label>
-              <Input
+              <Input autoComplete="off"
                 placeholder="Name, endpoint, preset…"
                 value={search}
                 onChange={(e) => setSearch(e.target.value)}
