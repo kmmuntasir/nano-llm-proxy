@@ -17,8 +17,8 @@ import {
   VStack,
 } from "@chakra-ui/react"
 import { KeyRound, Plus, Trash2 } from "lucide-react"
-import { api, del, patch, post, ApiError } from "../api/client"
-import type { ClientKeyView, UserView } from "../api/types"
+import { api, del, patch, post, put, ApiError } from "../api/client"
+import type { ClientKeyView, UserProviderView, UserView } from "../api/types"
 import ConfirmDialog from "../components/ConfirmDialog"
 import KeyRevealDialog from "../components/KeyRevealDialog"
 import { PasswordInput } from "../components/ui/password-input"
@@ -361,10 +361,108 @@ function UserKeysModal({
   )
 }
 
+// UserProviderAccessModal lets a superadmin grant or revoke each provider for
+// one user. Everything is allowed by default — a revoked provider behaves as
+// if it does not exist for them (absent from their /v1/models, unknown prefix
+// when routed).
+function UserProviderAccessModal({
+  user,
+  open,
+  onOpenChange,
+}: {
+  user: UserView
+  open: boolean
+  onOpenChange: (o: boolean) => void
+}) {
+  const qc = useQueryClient()
+  const { data, isLoading } = useQuery({
+    queryKey: ["userProviders", user.id],
+    queryFn: () => api<{ providers: UserProviderView[] }>(`/api/users/${user.id}/providers`),
+    enabled: open,
+  })
+
+  const setAccess = useMutation({
+    mutationFn: ({ providerId, disabled }: { providerId: number; disabled: boolean }) =>
+      put(`/api/users/${user.id}/providers/${providerId}/access`, { disabled }),
+    onSuccess: async () => {
+      await qc.invalidateQueries({ queryKey: ["userProviders", user.id] })
+      toaster.create({ title: "Provider access updated", type: "success" })
+    },
+    onError: (e) =>
+      toaster.create({ title: e instanceof ApiError ? e.message : "update failed", type: "error" }),
+  })
+
+  const providers = data?.providers ?? []
+  const revoked = providers.filter((p) => p.enabled && p.disabledForUser).length
+
+  return (
+    <Dialog.Root open={open} onOpenChange={(e) => onOpenChange(e.open)} size="lg">
+      <Dialog.Backdrop />
+      <Dialog.Positioner>
+        <Dialog.Content>
+          <Dialog.Header pb={2}>
+            <Dialog.Title>Provider access — {user.name}</Dialog.Title>
+          </Dialog.Header>
+          <Dialog.Body>
+            <Text fontSize="sm" color="fg.muted" mb={3}>
+              Every provider is allowed by default. Turn one off and it disappears from
+              this user's model list; their requests to it fail like an unknown provider.
+            </Text>
+            {isLoading && <Text fontSize="sm">Loading…</Text>}
+            <VStack align="stretch" gap={1}>
+              {providers.map((p) => (
+                <HStack key={p.id} justify="space-between" gap={3} fontSize="sm" px={1} py={1}>
+                  <HStack gap={2}>
+                    <Text fontWeight="medium">{p.name}</Text>
+                    {!p.enabled && (
+                      <Badge variant="subtle" colorPalette="gray">
+                        disabled globally
+                      </Badge>
+                    )}
+                  </HStack>
+                  <Switch.Root
+                    size="sm"
+                    disabled={!p.enabled}
+                    checked={p.enabled && !p.disabledForUser}
+                    onCheckedChange={(e) =>
+                      setAccess.mutate({ providerId: p.id, disabled: !e.checked })
+                    }
+                  >
+                    <Switch.HiddenInput />
+                    <Switch.Control>
+                      <Switch.Thumb />
+                    </Switch.Control>
+                  </Switch.Root>
+                </HStack>
+              ))}
+              {!isLoading && providers.length === 0 && (
+                <Text fontSize="sm" color="fg.muted">
+                  No providers configured yet.
+                </Text>
+              )}
+            </VStack>
+          </Dialog.Body>
+          <Dialog.Footer>
+            <Text fontSize="xs" color="fg.muted">
+              {providers.length === 0
+                ? ""
+                : revoked === 0
+                  ? "All providers allowed for this user"
+                  : `${revoked} provider${revoked === 1 ? "" : "s"} blocked`}
+            </Text>
+          </Dialog.Footer>
+          <Dialog.CloseTrigger />
+        </Dialog.Content>
+      </Dialog.Positioner>
+    </Dialog.Root>
+  )
+}
+
 function UserCard({ u, isSelf }: { u: UserView; isSelf: boolean }) {
   const qc = useQueryClient()
   const [toDelete, setToDelete] = useState(false)
   const [managingKeys, setManagingKeys] = useState(false)
+  const [managingAccess, setManagingAccess] = useState(false)
   const [resetting, setResetting] = useState(false)
 
   const patchU = useMutation({
@@ -427,6 +525,11 @@ function UserCard({ u, isSelf }: { u: UserView; isSelf: boolean }) {
             Keys
           </Button>
           {!isSelf && (
+            <Button variant="ghost" size="2xs" onClick={() => setManagingAccess(true)}>
+              Provider access
+            </Button>
+          )}
+          {!isSelf && (
             <Button variant="ghost" size="2xs" onClick={() => setResetting(true)}>
               <KeyRound /> Reset password
             </Button>
@@ -445,6 +548,7 @@ function UserCard({ u, isSelf }: { u: UserView; isSelf: boolean }) {
         </HStack>
       </Card.Body>
       <UserKeysModal userID={u.id} open={managingKeys} onOpenChange={setManagingKeys} />
+      <UserProviderAccessModal user={u} open={managingAccess} onOpenChange={setManagingAccess} />
       <ResetPasswordModal user={u} open={resetting} onOpenChange={setResetting} />
       <ConfirmDialog
         open={toDelete}

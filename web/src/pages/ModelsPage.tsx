@@ -3,6 +3,7 @@ import { useQuery } from "@tanstack/react-query"
 import {
   Button,
   Card,
+  Code,
   Field,
   Heading,
   HStack,
@@ -13,8 +14,11 @@ import {
   Text,
   VStack,
 } from "@chakra-ui/react"
+import { Bot } from "lucide-react"
 import { api } from "../api/client"
 import ModelCard from "../components/ModelCard"
+import CopyButton from "../components/CopyButton"
+import ClaudeCodeSetupDialog from "../components/ClaudeCodeSetupDialog"
 
 // Models page: every model the gateway currently serves, merged across
 // providers. Read-only browsing — search plus filters over provider,
@@ -55,6 +59,7 @@ export default function ModelsPage() {
   const [reasoningOnly, setReasoningOnly] = useState(false)
   const [responsesOnly, setResponsesOnly] = useState(false)
   const [modalities, setModalities] = useState<string[]>([])
+  const [claudeOpen, setClaudeOpen] = useState(false)
 
   const entries = data?.data ?? []
   const providers = useMemo(
@@ -83,9 +88,41 @@ export default function ModelsPage() {
   const toggleModality = (m: string) =>
     setModalities((cur) => (cur.includes(m) ? cur.filter((x) => x !== m) : [...cur, m]))
 
+  const origin = window.location.origin
+
   return (
     <VStack align="stretch" gap={6}>
       <Heading size="lg">Models</Heading>
+
+      <Card.Root>
+        <Card.Body px={4} py={3}>
+          <HStack justify="space-between" flexWrap="wrap" gap={3}>
+            <VStack align="start" gap={0}>
+              <Text fontSize="xs" fontWeight="medium" color="fg.muted" letterSpacing="wide">
+                GATEWAY ENDPOINT
+              </Text>
+              <HStack gap={1}>
+                <Code fontFamily="mono" fontSize="sm">
+                  {origin}
+                </Code>
+                <CopyButton text={origin} label="copy base URL" />
+              </HStack>
+              <Text fontSize="xs" color="fg.muted">
+                One URL for OpenAI chat, OpenAI Responses, and Anthropic Messages —
+                authenticate with a client key (fg-…).
+              </Text>
+            </VStack>
+            <Button
+              size="sm"
+              variant="outline"
+              colorPalette="blue"
+              onClick={() => setClaudeOpen(true)}
+            >
+              <Bot /> Claude Code setup
+            </Button>
+          </HStack>
+        </Card.Body>
+      </Card.Root>
 
       <Card.Root>
         <Card.Body gap={4}>
@@ -184,6 +221,7 @@ export default function ModelsPage() {
             <ModelCard
               key={e.id}
               name={rest.join("/") || e.id}
+              modelId={e.id}
               provider={prov}
               description={e.description}
               contextWindow={e.context_window}
@@ -201,6 +239,12 @@ export default function ModelsPage() {
           No models match the current filters.
         </Text>
       )}
+
+      <ClaudeCodeSetupDialog
+        open={claudeOpen}
+        onOpenChange={setClaudeOpen}
+        entries={entries}
+      />
     </VStack>
   )
 }

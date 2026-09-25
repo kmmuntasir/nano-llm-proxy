@@ -95,7 +95,10 @@ described above.
 
 ## GET /v1/models
 
-Merged catalog of every enabled provider, enriched per entry:
+Merged catalog of every enabled provider the caller may use, enriched per
+entry. With per-user provider access (Admin API below) the catalog is
+scoped per client key: entries from a provider revoked for the key's owner
+are left out, so clients only ever see routable models:
 
 ```json
 {
@@ -136,6 +139,7 @@ Roles: `superadmin` (everything below) and `user` (own keys + dashboard).
 | `GET/POST /api/me/keys`, `PATCH/DELETE /api/me/keys/{keyId}` | user | Own client keys |
 | `GET/POST /api/users`, `PATCH/DELETE /api/users/{id}` | superadmin | User management |
 | `GET/POST /api/users/{id}/keys`, `PATCH/DELETE /api/users/{id}/keys/{keyId}` | superadmin | Per-user client keys |
+| `GET /api/users/{id}/providers`, `PUT /api/users/{id}/providers/{providerId}/access` | superadmin | Per-user provider access. The listing annotates each provider with `disabledForUser`; the PUT takes `{disabled: bool}`. Access is allow-by-default: a revoked provider vanishes from that user's `/v1/models` and their requests to it fail exactly like an unknown provider |
 | `GET/POST /api/providers`, `PATCH/DELETE /api/providers/{id}` | superadmin | Providers (generic CRUD; `baseUrl` and/or `anthropicBaseUrl`, at least one required; built-ins cannot be deleted). Create takes `keys` as `{key, label}` objects — every upstream key needs a label (1-64 characters). It also accepts a `preset` id: unknown presets are 400, the name defaults to the preset id, endpoint roots default from the registry, and the preset is immutable afterwards. Multiple providers per preset are allowed; only `zen` is reserved and undeletable |
 | `GET /api/providers/presets` | superadmin | The curated preset registry (id, label, endpoint roots) behind the GUI's Add Provider dropdown |
 | `POST /api/providers/{id}/keys`, `PATCH/DELETE /api/providers/{id}/keys/{keyId}` | superadmin | Upstream keys; POST requires a label, PATCH may rename a key but never blank its label |

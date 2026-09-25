@@ -159,6 +159,11 @@ func (s *Store) Migrate() error {
 			return err
 		}
 	}
+	if !version.Valid || version.Int64 < 5 {
+		if err := s.migrateV5(); err != nil {
+			return err
+		}
+	}
 	return nil
 }
 
@@ -303,6 +308,79 @@ func (s *Store) migrateV4() error {
 		return err
 	}
 	return tx.Commit()
+}
+
+// migrateV5 adds per-user provider access. Absence of a row means "allowed"
+// — existing users keep full access unless a superadmin restricts them. Only
+// disabled pairs are stored (enable = delete the row).
+func (s *Store) migrateV5() error {
+	tx, err := s.db.Begin()
+	if err != nil {
+		return err
+	}
+	defer tx.Rollback()
+	if _, err := tx.Exec(`CREATE TABLE IF NOT EXISTS user_provider_access (
+		user_id     INTEGER NOT NULL,
+		provider_id INTEGER NOT NULL,
+		PRIMARY KEY (user_id, provider_id))`); err != nil {
+		return err
+	}
+	if _, err := tx.Exec(`INSERT INTO schema_migrations (version, applied_at) VALUES (5, ?)`, time.Now().Unix()); err != nil {
+		return err
+	}
+	return tx.Commit()
+}
+
+// SetUserProviderAccess grants (disabled=false, row removed) or revokes
+// (disabled=true, row ensured) one provider for one user.
+func (s *Store) SetUserProviderAccess(userID, providerID int64, disabled bool) error {
+	if !disabled {
+		_, err := s.db.Exec(`DELETE FROM user_provider_access WHERE user_id=? AND provider_id=?`, userID, providerID)
+		return err
+	}
+	_, err := s.db.Exec(`INSERT INTO user_provider_access (user_id, provider_id) VALUES (?, ?)
+		ON CONFLICT (user_id, provider_id) DO NOTHING`, userID, providerID)
+	return err
+}
+
+// DisabledProviderIDs lists the provider ids one user may not use.
+func (s *Store) DisabledProviderIDs(userID int64) (map[int64]bool, error) {
+	rows, err := s.db.Query(`SELECT provider_id FROM user_provider_access WHERE user_id=?`, userID)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	out := map[int64]bool{}
+	for rows.Next() {
+		var id int64
+		if err := rows.Scan(&id); err != nil {
+			return nil, err
+		}
+		out[id] = true
+	}
+	return out, rows.Err()
+}
+
+// AllProviderAccess loads every restricted pair for the gateway's hot-path
+// cache: userID -> set of disabled provider ids.
+func (s *Store) AllProviderAccess() (map[int64]map[int64]bool, error) {
+	rows, err := s.db.Query(`SELECT user_id, provider_id FROM user_provider_access`)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	out := map[int64]map[int64]bool{}
+	for rows.Next() {
+		var uid, pid int64
+		if err := rows.Scan(&uid, &pid); err != nil {
+			return nil, err
+		}
+		if out[uid] == nil {
+			out[uid] = map[int64]bool{}
+		}
+		out[uid][pid] = true
+	}
+	return out, rows.Err()
 }
 
 // Bootstrap seeds a fresh database: superadmin from env, and the builtin zen

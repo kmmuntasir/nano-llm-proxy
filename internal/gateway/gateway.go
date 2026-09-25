@@ -30,6 +30,7 @@ const upgradeHint = "upstream UpgradeRequired: the configured zen.userAgent is b
 // Z.ai GLM Coding Plan) — whichever roots are set decide the routing below.
 // Built by rebuildPools from the store (or from config in store==nil test mode).
 type providerRef struct {
+	id               int64  // provider row id — keys the per-user access rules
 	name             string // routing prefix ("zen/...")
 	typ              string // "openai" | "opencode"
 	pool             *Pool
@@ -53,9 +54,10 @@ type gateway struct {
 	regMu    sync.RWMutex
 	registry []providerRef // every enabled provider, sort_order first
 
-	ck      clientKeyCache // client API keys, hot path
-	usage   *usageTracker  // per-client-key counters + activity ring
-	backoff loginBackoff   // login rate limiting
+	ck      clientKeyCache  // client API keys, hot path
+	access  userAccessCache // per-user provider restrictions, hot path
+	usage   *usageTracker   // per-client-key counters + activity ring
+	backoff loginBackoff    // login rate limiting
 
 	client *http.Client
 
@@ -63,7 +65,7 @@ type gateway struct {
 	surfaceOver map[string]string // learned model -> surface flips ("chat"/"responses")
 
 	catMu     sync.Mutex
-	catalog   []byte // cached merged /v1/models body
+	catalog   []any // cached merged /v1/models entries (scoped per caller on serve)
 	catalogAt time.Time
 
 	usageBuf usageBuffer // per-request usage events, drained to the DB by the maintenance loop
@@ -163,7 +165,7 @@ func (g *gateway) rebuildPools() error {
 			continue // disabled providers leave the registry: routing 400s
 		}
 		registry = append(registry, providerRef{
-			name: row.Name, typ: row.Type, pool: pool,
+			id: row.ID, name: row.Name, typ: row.Type, pool: pool,
 			baseURL: row.BaseURL, anthropicBaseURL: row.AnthropicBaseURL,
 			builtin: row.Builtin, preset: row.Preset,
 		})
@@ -177,6 +179,9 @@ func (g *gateway) rebuildPools() error {
 	g.regMu.Unlock()
 
 	if err := g.ck.reload(g.store); err != nil {
+		return err
+	}
+	if err := g.access.reload(g.store); err != nil {
 		return err
 	}
 	g.invalidateCatalog()
@@ -362,7 +367,7 @@ func (g *gateway) handleChat(w http.ResponseWriter, r *http.Request) {
 		writeErr(w, http.StatusBadRequest, `Model must be "<provider>/<id>" (e.g. zen/mimo-...)`)
 		return
 	}
-	ref, ok := g.provider(parts[0])
+	ref, ok := g.providerFor(r, parts[0])
 	if !ok {
 		writeErr(w, http.StatusBadRequest, fmt.Sprintf("Unknown provider %q — see GET /v1/models", parts[0]))
 		return

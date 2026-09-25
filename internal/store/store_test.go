@@ -142,7 +142,7 @@ func TestMigrateV4ConvertsBuiltinKiloToPreset(t *testing.T) {
 	}
 
 	if err := s.Migrate(); err != nil {
-		t.Fatalf("Migrate to v4: %v", err)
+		t.Fatalf("Migrate: %v", err)
 	}
 
 	kilo, err := s.Provider(kiloID)
@@ -168,8 +168,8 @@ func TestMigrateV4ConvertsBuiltinKiloToPreset(t *testing.T) {
 	}
 
 	var version int64
-	if err := s.db.QueryRow(`SELECT MAX(version) FROM schema_migrations`).Scan(&version); err != nil || version != 4 {
-		t.Fatalf("schema version = %d, %v; want 4", version, err)
+	if err := s.db.QueryRow(`SELECT MAX(version) FROM schema_migrations`).Scan(&version); err != nil || version != 5 {
+		t.Fatalf("schema version = %d, %v; want 5", version, err)
 	}
 }
 

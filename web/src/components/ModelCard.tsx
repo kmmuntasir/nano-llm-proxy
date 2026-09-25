@@ -1,8 +1,11 @@
 import type { ReactNode } from "react"
-import { Badge, Card, HStack, Text } from "@chakra-ui/react"
+import { Badge, Card, Code, HStack, Text } from "@chakra-ui/react"
+import CopyButton from "./CopyButton"
 
 export interface ModelCardData {
   name: string
+  /** the exact catalog string ("provider/model-1M-txt") — shown with a copy button when set */
+  modelId?: string
   description?: string
   contextWindow?: number
   maxOutputTokens?: number
@@ -21,11 +24,22 @@ export function fmtTokens(n: number) {
   return String(n)
 }
 
+// cosmetic context/modality suffix the gateway strips anyway
+const SUFFIX_RE = /-\d+(?:\.\d+)?[KMG](?:-txt|-img|-vid|-aud|-pdf)*$/
+
+// cleanModelId strips the cosmetic suffix from a catalog id, turning
+// "glm/glm-5.3-1M-txt" into "glm/glm-5.3".
+export function cleanModelId(id: string): string {
+  const [prov, ...rest] = id.split("/")
+  return rest.length > 0 ? `${prov}/${rest.join("/").replace(SUFFIX_RE, "")}` : id
+}
+
 // ModelCard is the shared rendering for one model: name, capability badges,
-// token limits, and modalities. Used by the Settings catalog view, the
-// Providers page model list, and the Models page.
+// token limits, and modalities. Used by the Providers page model list and the
+// Models page.
 export default function ModelCard({
   name,
+  modelId,
   description,
   contextWindow,
   maxOutputTokens,
@@ -66,6 +80,14 @@ export default function ModelCard({
             )}
           </HStack>
         </HStack>
+        {modelId && (
+          <HStack gap={1} align="center" justify="space-between">
+            <Code fontFamily="mono" fontSize="xs" px={2} py={1} truncate title={modelId}>
+              {modelId}
+            </Code>
+            <CopyButton text={modelId} label={`copy ${modelId}`} />
+          </HStack>
+        )}
         {description && (
           <Text fontSize="xs" color="fg.muted" lineClamp={2}>
             {description}

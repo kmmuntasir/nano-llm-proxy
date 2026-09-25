@@ -439,6 +439,7 @@ function ModelsListModal({
                   <ModelCard
                     key={m.id}
                     name={name}
+                    modelId={m.id}
                     provider={provider.name}
                     description={m.description}
                     contextWindow={m.context_window}

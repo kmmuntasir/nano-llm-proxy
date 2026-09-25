@@ -103,7 +103,10 @@ groq/llama-3.3-70b        → provider "groq",    model "llama-3.3-70b"
 
 `GET /v1/models` merges every enabled provider's catalog and enriches each
 entry with `context_window`, `max_output_tokens`, modalities, `reasoning`,
-and `responses_api`. Where metadata is available, IDs are advertised in a
+and `responses_api`. The catalog is scoped per client key when a superadmin
+has revoked providers for the key's owner (Users → Provider access):
+revoked providers vanish from the list and route like unknown prefixes.
+Where metadata is available, IDs are advertised in a
 self-describing form so model pickers can show the facts:
 
 ```text
@@ -252,10 +255,10 @@ Served by the same binary at `/`.
 | Page | Who | What |
 | --- | --- | --- |
 | Dashboard | everyone | Uptime, 24h requests/tokens/errors, usage charts (Today / 7d / 30d: requests, tokens, providers, top models), recent requests |
-| Models | everyone | Every live model across providers — search, and filter by provider, context window, reasoning, Responses API, and input modalities |
+| Models | everyone | Every live model across providers — the gateway's base URL with a one-click Claude Code `settings.json` env generator (pick opus/sonnet/haiku, copy the env object; `[1m]` is added automatically for 1M-context models) — plus search and filters by provider, context window, reasoning, Responses API, and input modalities; every model shows its exact ID with a copy button |
 | Usage | everyone | Date-range usage: totals, top models, providers, per-key (admins also get per-user), recent activity — scoped to the signed-in user |
 | Profile | everyone | Account info, self-service password reset, own client keys (create/disable/delete) |
-| Users | superadmin | User CRUD, roles, password resets, per-user key management |
+| Users | superadmin | User CRUD, roles, password resets, per-user key management, per-user provider access (revoke a provider and it vanishes from that user's model list; their requests to it fail like an unknown provider) |
 | Providers | superadmin | Add providers from a curated preset dropdown (or its Custom Provider option), search/filter the provider card grid, edit base URLs, add/remove/toggle/rename upstream keys, fetch per-key plan usage for Z.ai (5-hour/weekly windows, tier, resets), browse each provider's live model catalog (zen models with the Responses-API flag carry a toggle) |
 | Settings | superadmin | Rotation, retries/cooldowns, daily cap, Claude fallback, adapter knobs, model-catalog sync (zen + zai, models.dev) |
 
