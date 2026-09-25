@@ -135,20 +135,22 @@ func (g *gateway) rejectClient(w http.ResponseWriter) {
 }
 
 func (g *gateway) handleHealth(w http.ResponseWriter, r *http.Request) {
-	provs := map[string]int{}
+	type poolHealth struct {
+		Total   int `json:"total"`
+		Healthy int `json:"healthy"`
+	}
+	provs := map[string]poolHealth{}
 	for _, ref := range g.allProviders() {
-		provs[ref.name] = ref.pool.healthyCount()
+		provs[ref.name] = poolHealth{
+			Total:   len(ref.pool.snapshot()),
+			Healthy: ref.pool.healthyCount(),
+		}
 	}
 	w.Header().Set("Content-Type", "application/json")
-	// kilo_healthy is a legacy name-keyed field: since kilo became a preset
-	// (renames/deletes possible) it reads 0 when no provider is literally
-	// named kilo — the providers map is the complete source of truth.
 	json.NewEncoder(w).Encode(map[string]any{
-		"status":       "ok",
-		"uptime_s":     int(time.Since(startTime).Seconds()),
-		"zen_healthy":  provs["zen"],
-		"kilo_healthy": provs["kilo"],
-		"providers":    provs,
+		"status":    "ok",
+		"uptime_s":  int(time.Since(startTime).Seconds()),
+		"providers": provs,
 	})
 }
 
@@ -273,7 +275,6 @@ func (g *gateway) decodeModelList(ref providerRef, resp *http.Response) ([]any, 
 				}
 				break
 			}
-			// generic provider: passthrough, no enrichment, no suffixes
 			// generic provider: passthrough, no enrichment, no suffixes
 			if d, ok := m["context_length"].(float64); ok {
 				entry["context_window"] = int64(d)
