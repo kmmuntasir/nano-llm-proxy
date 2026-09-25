@@ -1,6 +1,7 @@
 # secrets & runtime state — never commit
 keys.json
 .env
+.secrets.md
 temporary.md
 gateway.db
 gateway.db-wal
