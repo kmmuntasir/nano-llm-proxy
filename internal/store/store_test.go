@@ -185,11 +185,47 @@ func TestBootstrapFailsWithoutAdminEnv(t *testing.T) {
 		t.Fatalf("bootstrap partially wrote users: %d", len(users))
 	}
 
-	// missing keys.json on an empty DB also fails cleanly
+	// A missing keys.json is NOT a bootstrap failure. keys.json is a legacy
+	// schema, it is gitignored, and it ships no example — so a fresh install
+	// has none, and the operator is expected to add keys in the GUI. Seeding
+	// the built-in zen provider keyless is what makes the GUI reachable.
 	st2 := openTestStore(t)
-	err = st2.Bootstrap(testCfg(), nil, "admin@example.com", "super-secret-pass")
-	if !errors.Is(err, ErrLegacyKeysMissing) {
-		t.Fatalf("want ErrLegacyKeysMissing, got %v", err)
+	if err := st2.Bootstrap(testCfg(), nil, "admin@example.com", "super-secret-pass"); err != nil {
+		t.Fatalf("bootstrap without keys.json: %v", err)
+	}
+	providers, err := st2.ListProviders()
+	if err != nil {
+		t.Fatalf("ListProviders: %v", err)
+	}
+	if len(providers) != 1 || providers[0].Name != "zen" {
+		t.Fatalf("want the built-in zen provider seeded, got %+v", providers)
+	}
+	keys, err := st2.ListProviderKeys(providers[0].ID)
+	if err != nil {
+		t.Fatalf("ListProviderKeys: %v", err)
+	}
+	if len(keys) != 0 {
+		t.Fatalf("zen should be keyless on a fresh install, got %d keys", len(keys))
+	}
+}
+
+func TestBootstrapIsIdempotentWithoutKeyFile(t *testing.T) {
+	// A second boot with no keys.json must not re-seed or duplicate the
+	// provider, and must not resurrect the removed ErrLegacyKeysMissing.
+	st := openTestStore(t)
+	cfg := testCfg()
+	if err := st.Bootstrap(cfg, nil, "admin@example.com", "super-secret-pass"); err != nil {
+		t.Fatalf("first bootstrap: %v", err)
+	}
+	if err := st.Bootstrap(cfg, nil, "admin@example.com", "super-secret-pass"); err != nil {
+		t.Fatalf("second bootstrap: %v", err)
+	}
+	providers, err := st.ListProviders()
+	if err != nil {
+		t.Fatalf("ListProviders: %v", err)
+	}
+	if len(providers) != 1 {
+		t.Fatalf("second boot duplicated providers: %d", len(providers))
 	}
 }
 

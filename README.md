@@ -193,6 +193,11 @@ No `.env`? That works too — the gateway runs on built-in defaults (port
 8787, loopback bind, `gateway.db` in the working directory); only the
 first-boot superadmin credentials are mandatory.
 
+On a fresh install the gateway seeds the built-in `zen` provider with **no
+keys** and starts anyway, so you can log in and add a key in the GUI. There
+is no `keys.json` to write first — that file is a legacy seeding schema,
+imported when present and otherwise ignored.
+
 ## Model routing
 
 Requests pick a provider by model prefix; the prefix (and any metadata

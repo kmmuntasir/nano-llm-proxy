@@ -432,24 +432,34 @@ func (s *Store) Bootstrap(cfg *config.Config, kf *config.KeyFile, adminEmail, ad
 		return err
 	}
 	if nProviders == 0 {
-		if kf == nil {
-			return ErrLegacyKeysMissing
-		}
+		// Seed the built-in zen provider unconditionally, with or without a
+		// legacy keys.json. A fresh install has no keys.json — it is
+		// gitignored and ships no example — and a first-time user adds keys
+		// in the GUI. Refusing to boot without the legacy file made that
+		// impossible: the process exited before the GUI could be reached.
+		// A keyless zen provider is inert (no healthy keys) until the
+		// operator adds one.
 		res, err := tx.Exec(`INSERT INTO providers (name, type, base_url, enabled, builtin, sort_order, created_at)
 			VALUES ('zen', 'opencode', ?, 1, 1, 0, ?)`, cfg.Zen.BaseURL, now)
 		if err != nil {
 			return err
 		}
 		zenID, _ := res.LastInsertId()
-		for i, e := range kf.Zen {
-			if _, err := tx.Exec(`INSERT INTO provider_keys (provider_id, key, label, sort_order, disabled, created_at)
-				VALUES (?, ?, ?, ?, 0, ?)`, zenID, e.Key, e.Label, i, now); err != nil {
-				return err
+		if kf != nil {
+			for i, e := range kf.Zen {
+				if _, err := tx.Exec(`INSERT INTO provider_keys (provider_id, key, label, sort_order, disabled, created_at)
+					VALUES (?, ?, ?, ?, 0, ?)`, zenID, e.Key, e.Label, i, now); err != nil {
+					return err
+				}
 			}
 		}
-		log.Printf("store: seeded providers zen=%d keys", len(kf.Zen))
-		if len(kf.Kilo) > 0 {
-			log.Printf("store: %d kilo keys in keys.json are no longer auto-seeded — add the Kilo preset in the GUI and import them there", len(kf.Kilo))
+		if kf != nil {
+			log.Printf("store: seeded providers zen=%d keys", len(kf.Zen))
+			if len(kf.Kilo) > 0 {
+				log.Printf("store: %d kilo keys in keys.json are no longer auto-seeded — add the Kilo preset in the GUI and import them there", len(kf.Kilo))
+			}
+		} else {
+			log.Printf("store: seeded the built-in zen provider with no keys — add a key in the GUI (Providers) to start serving traffic")
 		}
 	}
 
