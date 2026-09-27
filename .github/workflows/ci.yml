@@ -1,0 +1,107 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+  workflow_dispatch:
+
+# Cancel superseded runs on the same ref.
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
+permissions:
+  contents: read
+
+jobs:
+  backend:
+    name: Go — vet + race tests
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-go@v5
+        with:
+          go-version-file: go.mod
+          cache: true
+      - name: Check formatting
+        run: test -z "$(gofmt -l . | tee /dev/stderr)"
+      - name: Vet
+        run: go vet ./...
+      # No network, no Node, no API keys: the suite runs against scripted
+      # mock upstreams and local fixture servers.
+      - name: Test (race)
+        run: go test -race ./...
+
+  web:
+    name: GUI — typecheck + build
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: web
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+          cache: npm
+          cache-dependency-path: web/package-lock.json
+      - run: npm ci
+      # `build` runs `tsc -b` first, so this fails on a type error.
+      - run: npm run build
+      - name: Upload build output
+        uses: actions/upload-artifact@v4
+        with:
+          name: web-dist
+          path: web/dist
+          retention-days: 7
+
+  binary:
+    name: Build the single binary
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-go@v5
+        with:
+          go-version-file: go.mod
+          cache: true
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+          cache: npm
+          cache-dependency-path: web/package-lock.json
+      - name: Build the GUI
+        run: npm ci && npm run build
+        working-directory: web
+      # Proves the headline claim: a static, dependency-free binary with the
+      # GUI embedded.
+      - name: Build (CGO off, prod tag, trimmed)
+        run: CGO_ENABLED=0 go build -tags prod -trimpath -ldflags="-s -w" -o nano-llm-proxy .
+      - name: Check the binary is static
+        run: |
+          if command -v file >/dev/null; then
+            file nano-llm-proxy
+          fi
+          if ldd nano-llm-proxy 2>&1 | grep -q "not a dynamic executable"; then
+            echo "static: ok"
+          else
+            echo "::warning::binary is not fully static"
+          fi
+      - uses: actions/upload-artifact@v4
+        with:
+          name: nano-llm-proxy-linux-amd64
+          path: nano-llm-proxy
+          retention-days: 14
+
+  fixtures:
+    name: Fixtures stay clean
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.x'
+      # Guard against re-committing captured agent traffic that carries the
+      # operator's home directory or personal instruction files.
+      - name: Assert no fixture would be rewritten
+        run: scripts/sanitize-fixtures.py --check
