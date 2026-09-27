@@ -151,6 +151,15 @@ Tools:
   needs a browser, or when plain content comes back empty). Private/loopback
   addresses are refused (SSRF protection).
 
+The optional scalars (`maxResults`, `render`, `maxChars`) are advertised as
+`["integer","string"]` / `["boolean","string"]` and coerced server-side, so
+a client that stringifies tool arguments still gets the value it asked for.
+This is deliberate: MCP clients validate arguments against the advertised
+schema *before* sending the request, so a scalar-typed property makes those
+clients reject the call with `must be integer` / `must be boolean` and the
+tool never runs. Values outside the union (say `maxResults: "lots"`) are
+still rejected, as a tool error naming the argument.
+
 Tool-level failures (site unreachable, blocked URL, SearXNG down) come back
 as MCP tool errors (`isError: true`) with actionable text, so agents can
 adapt — they don't break the protocol session. Each tool call is metered as
