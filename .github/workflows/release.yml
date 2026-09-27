@@ -1,0 +1,59 @@
+name: Release
+
+# Cut a release by pushing a v* tag. GoReleaser builds the static binaries,
+# checksums, and archives; this workflow then creates the GitHub release with
+# the generated notes and attaches the artifacts.
+on:
+  push:
+    tags: ['v*']
+  workflow_dispatch:
+    inputs:
+      tag:
+        description: 'Existing tag to publish (e.g. v0.1.0)'
+        required: true
+
+permissions:
+  contents: write
+
+jobs:
+  goreleaser:
+    name: Build release artifacts
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+          ref: ${{ inputs.tag || github.ref }}
+
+      - uses: actions/setup-go@v5
+        with:
+          go-version-file: go.mod
+          cache: true
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+          cache: npm
+          cache-dependency-path: web/package-lock.json
+
+      # The GUI is embedded only under the `prod` build tag, so it has to be
+      # built before the binary. Cached on the lockfile so a release rebuild
+      # is fast.
+      - name: Build the admin GUI
+        run: npm ci && npm run build
+        working-directory: web
+
+      - name: Run GoReleaser
+        uses: goreleaser/goreleaser-action@v6
+        with:
+          version: latest
+          args: release --clean
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Upload artifacts as a workflow artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: release-binaries
+          path: dist/
+          retention-days: 7

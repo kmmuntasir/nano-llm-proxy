@@ -21,6 +21,18 @@ import (
 	"github.com/kmmuntasir/nano-llm-proxy/internal/store"
 )
 
+// Build-stamped by the linker. Overridden in .goreleaser.yaml:
+//
+//	-ldflags "-X main.version=... -X main.commit=... -X main.date=..."
+//
+// A plain `go build` leaves these at the dev defaults below, which is why they
+// are deliberately obvious rather than blank.
+var (
+	version = "dev"
+	commit  = "none"
+	date    = "unknown"
+)
+
 func main() {
 	keysPath := "keys.json"
 	var sawKeys bool
@@ -29,6 +41,9 @@ func main() {
 		switch {
 		case arg == "-reset-admin-password":
 			resetPassword = true
+		case arg == "-version" || arg == "--version":
+			fmt.Printf("nano-llm-proxy %s (commit %s, built %s)\n", version, commit, date)
+			return
 		case !sawKeys && !strings.HasPrefix(arg, "-"):
 			keysPath, sawKeys = arg, true
 		}
@@ -78,8 +93,8 @@ func main() {
 	if err != nil {
 		log.Fatalf("gateway: %v", err)
 	}
-	log.Printf("nano-llm-proxy starting: providers=%d upstream_keys_healthy=%d ua=%s bind=%s:%d db=%s",
-		g.ProviderCount(), g.HealthyUpstreamKeys(), rs.Zen.UserAgent, cfg.Bind, cfg.Port, cfg.DBPath)
+	log.Printf("nano-llm-proxy %s starting: providers=%d upstream_keys_healthy=%d ua=%s bind=%s:%d db=%s",
+		version, g.ProviderCount(), g.HealthyUpstreamKeys(), rs.Zen.UserAgent, cfg.Bind, cfg.Port, cfg.DBPath)
 	go g.MaintenanceLoop()
 
 	mux := http.NewServeMux()

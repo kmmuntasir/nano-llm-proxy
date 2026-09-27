@@ -1,0 +1,100 @@
+# GoReleaser configuration for nano-llm-proxy.
+#
+# The release workflow (.github/workflows/release.yml) drives this. The GUI is
+# expected to be built already — `web/dist` is embedded under the `prod` build
+# tag, so the binary step below would fail on a clean checkout without it.
+
+project_name: nano-llm-proxy
+
+before:
+  hooks:
+    - go mod tidy
+
+builds:
+  - id: nano-llm-proxy
+    # Pure Go, no cgo: one static binary per platform, GUI embedded.
+    env:
+      - CGO_ENABLED=0
+    mod_timestamp: '{{ .CommitTimestamp }}'
+    flags:
+      - -tags=prod
+      - -trimpath
+    ldflags:
+      - -s -w
+      - -X main.version={{ .Version }}
+      - -X main.commit={{ .Commit }}
+      - -X main.date={{ .CommitDate }}
+    goos:
+      - linux
+      - darwin
+      - windows
+    goarch:
+      - amd64
+      - arm64
+    goarm:
+      - '7'
+    ignore:
+      # The Windows GUI is served over HTTP; a headless build is the norm.
+      - goos: windows
+        goarch: arm64
+    binary: '{{ .ProjectName }}{{ if ne .Os "linux" }}-{{ .Os }}{{ end }}{{ if ne .Arch "amd64" }}-{{ .Arch }}{{ end }}{{ if .Arm }}v{{ .Arm }}{{ end }}{{ if eq .Os "windows" }}.exe{{ end }}'
+
+archives:
+  - id: default
+    formats: [tar.gz]
+    format_overrides:
+      - goos: windows
+        formats: [zip]
+    name_template: '{{ .ProjectName }}_{{ .Version }}_{{ .Os }}_{{ .Arch }}{{ with .Arm }}v{{ . }}{{ end }}'
+    files:
+      - LICENSE
+      - README.md
+      - .env.example
+
+checksum:
+  name_template: checksums.txt
+
+snapshot:
+  version_template: '{{ incpatch .Version }}-next'
+
+changelog:
+  sort: asc
+  filters:
+    exclude:
+      - '^docs:'
+      - '^test:'
+      - '^chore:'
+      - '^\s*ci:'
+  groups:
+    - title: Features
+      regexp: '^.*?(feat|add|support|implement).*$'
+    - title: Fixes
+      regexp: '^.*?(fix|resolve|correct|handle).*$'
+    - title: Security
+      regexp: '^.*?(security|redact|vuln|CVE).*$'
+
+release:
+  draft: false
+  prerelease: auto
+  header: |
+    ## Installing
+
+    Download the binary for your platform, make it executable, and run it.
+
+    ```bash
+    tar xzf nano-llm-proxy_*_linux_amd64.tar.gz
+    cp .env.example .env   # then set ADMIN_EMAIL and ADMIN_PASSWORD
+    ./nano-llm-proxy
+    ```
+
+    The admin GUI is embedded in the binary — no Node, no container runtime,
+    no database server. The only runtime state is a single `gateway.db`.
+
+    See the [README](https://github.com/kmmuntasir/nano-llm-proxy#readme) for
+    the full walkthrough, or `sudo ./deploy.sh` for a hardened systemd unit.
+
+  footer: |
+    ---
+
+    Upstream provider accounts you configure remain subject to their own terms
+    of service. Use keys you are authorized to use.
