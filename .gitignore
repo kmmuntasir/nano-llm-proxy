@@ -17,3 +17,11 @@ nano-llm-proxy-linux
 web/node_modules/
 web/dist/
 web/tsconfig.tsbuildinfo
+
+# AI-generated working notes — the folder is tracked (via .gitkeep) so it
+# survives clones, but its contents are scratch and never committed.
+# Rule lives here rather than in docs/ai-generated/.gitignore on purpose: a
+# .gitignore inside that folder would be ignored by the pattern below and
+# would never reach anyone else.
+docs/ai-generated/*
+!docs/ai-generated/.gitkeep
