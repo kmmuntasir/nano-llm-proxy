@@ -37,7 +37,11 @@ builds:
       # The Windows GUI is served over HTTP; a headless build is the norm.
       - goos: windows
         goarch: arm64
-    binary: '{{ .ProjectName }}{{ if ne .Os "linux" }}-{{ .Os }}{{ end }}{{ if ne .Arch "amd64" }}-{{ .Arch }}{{ end }}{{ if .Arm }}v{{ .Arm }}{{ end }}{{ if eq .Os "windows" }}.exe{{ end }}'
+    # Always the bare project name inside the archive. The OS/arch
+    # disambiguation belongs on the archive (see name_template below), not on
+    # the extracted binary — a user who untars should be able to run
+    # ./nano-llm-proxy, which is what the release notes tell them to do.
+    binary: '{{ .ProjectName }}{{ if eq .Os "windows" }}.exe{{ end }}'
 
 archives:
   - id: default
