@@ -2,12 +2,20 @@
 
 [![Go](https://img.shields.io/badge/Go-1.26%2B-00ADD8?logo=go&logoColor=white)](https://go.dev)
 [![License: GPL v3](https://img.shields.io/badge/License-GPLv3-blue.svg)](https://www.gnu.org/licenses/gpl-3.0)
+[![CI](https://github.com/kmmuntasir/nano-llm-proxy/actions/workflows/ci.yml/badge.svg)](https://github.com/kmmuntasir/nano-llm-proxy/actions/workflows/ci.yml)
+[![Go Report](https://img.shields.io/badge/go_report-A00000?style=flat-square)](https://pkg.go.dev/github.com/kmmuntasir/nano-llm-proxy)
 
-A tiny, single-binary LLM gateway. Pool several upstream providers and their
-API keys behind one endpoint that speaks **OpenAI chat**, **OpenAI
-Responses**, and **Anthropic Messages** — with health-tracking key rotation,
-an embedded admin GUI, and no runtime dependencies beyond a single SQLite
-file.
+**A tiny, single-binary LLM gateway. Five direct Go dependencies, all pure Go
+— no cgo, no container runtime, no Postgres.** One static binary plus one
+SQLite file is the entire deployment.
+
+[![Release](https://img.shields.io/github/v/release/kmmuntasir/nano-llm-proxy?label=release)](https://github.com/kmmuntasir/nano-llm-proxy/releases/latest)
+[![License](https://img.shields.io/github/license/kmmuntasir/nano-llm-proxy)](LICENSE)
+
+Pool several upstream providers and their API keys behind one endpoint that
+speaks **OpenAI chat**, **OpenAI Responses**, and **Anthropic Messages** — with
+health-tracking key rotation, an embedded admin GUI, and no runtime
+dependencies beyond a single SQLite file.
 
 Think "personal API gateway for language models": point your scripts, IDE
 extensions, and CLI agents at one URL with one key, while the gateway rotates
@@ -138,9 +146,22 @@ Being straight about the gaps, so you don't pick it and find out later:
   endpoints, `claude-*` fallback rewriting, `[1m]` context suffixes, and a
   generated `settings.json`.
 
-## Quickstart (from source)
+## Quickstart
 
-Prerequisites: Go 1.26+ and Node 22+.
+### Prebuilt binary
+
+Download the latest release for your platform, make it executable, and run
+it — no toolchain, no container runtime:
+
+```bash
+tar xzf nano-llm-proxy_*_linux_amd64.tar.gz
+cp .env.example .env      # set ADMIN_EMAIL and ADMIN_PASSWORD
+./nano-llm-proxy
+```
+
+### From source
+
+Prerequisites: Go 1.26+ and Node 22+ (Node only to build the GUI).
 
 ```bash
 git clone https://github.com/kmmuntasir/nano-llm-proxy.git
@@ -408,6 +429,20 @@ cap, the Claude fallback, adapter knobs, the model catalogs, web tools)
 lives in the database and is edited in the GUI under **Settings**. Changes
 apply in-request; no restarts.
 
+## Documentation
+
+| Document | What it covers |
+| --- | --- |
+| [docs/api.md](docs/api.md) | Every request surface and admin endpoint: authentication, the three protocol endpoints, the merged model catalog, `/health`, `/mcp`, and the error shapes |
+| [docs/configuration.md](docs/configuration.md) | Bootstrap environment variables and the runtime-settings document, field by field |
+| [docs/deployment.md](docs/deployment.md) | First boot, `deploy.sh`, remote updates, the optional web-tool backends, and post-deploy checks |
+| [SECURITY.md](SECURITY.md) | Private disclosure, supported versions, and the deployment trade-offs to understand first |
+| [CONTRIBUTING.md](CONTRIBUTING.md) | Setup, the checks CI runs, and the house rules |
+| [CHANGELOG.md](CHANGELOG.md) | Release history, generated from commit prefixes |
+
+The GUI also serves a condensed version of this under **Guide**, so an
+operator who has the binary running does not need the repository checked out.
+
 ## Deploying
 
 `sudo ./deploy.sh` does the whole setup on a systemd host: it requires a
@@ -486,3 +521,13 @@ dashboard, and keep volumes within what the accounts are meant for.
 ## License
 
 GPL-3.0-or-later — see [LICENSE](LICENSE).
+
+## Contributing
+
+Bug reports, provider requests, and pull requests are all welcome. See
+[CONTRIBUTING.md](CONTRIBUTING.md) for the setup, the checks CI runs, and the
+house rules. Changelog: [CHANGELOG.md](CHANGELOG.md).
+
+**Security issues:** please report them privately rather than opening a public
+issue — see [SECURITY.md](SECURITY.md), which also documents the deployment
+trade-offs worth understanding before you expose this to a network.

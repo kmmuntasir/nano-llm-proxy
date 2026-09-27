@@ -3,6 +3,7 @@
   "private": true,
   "version": "1.0.0",
   "type": "module",
+  "license": "GPL-3.0-or-later",
   "scripts": {
     "dev": "vite",
     "build": "tsc -b && vite build",
@@ -25,5 +26,17 @@
     "@vitejs/plugin-react": "^6.1.1",
     "typescript": "~5.9.3",
     "vite": "^8.3.0"
+  },
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/kmmuntasir/nano-llm-proxy.git",
+    "directory": "web"
+  },
+  "homepage": "https://github.com/kmmuntasir/nano-llm-proxy#readme",
+  "bugs": {
+    "url": "https://github.com/kmmuntasir/nano-llm-proxy/issues"
+  },
+  "engines": {
+    "node": ">=22"
   }
 }

@@ -1,6 +1,6 @@
 module github.com/kmmuntasir/nano-llm-proxy
 
-go 1.26.3
+go 1.26.0
 
 require (
 	codeberg.org/readeck/go-readability/v2 v2.1.2
