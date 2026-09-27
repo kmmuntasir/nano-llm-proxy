@@ -1,0 +1,52 @@
+name: Provider request
+description: Add an upstream provider preset, or document a custom provider
+title: "[provider] "
+labels: ["provider"]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Presets live in `internal/gateway/providerspec.go` and are served by
+        `GET /api/providers/presets`. A custom provider needs no code at all —
+        add it through the GUI — so this is only worth an issue when the
+        upstream needs a built-in preset or special catalog handling.
+
+  - type: input
+    id: provider
+    attributes:
+      label: Provider name
+      placeholder: "Example: Groq, OpenRouter, Together"
+    validations:
+      required: true
+
+  - type: input
+    id: openai-root
+    attributes:
+      label: OpenAI-compatible root
+      placeholder: https://api.example.com/v1
+
+  - type: input
+    id: anthropic-root
+    attributes:
+      label: Anthropic-compatible root
+      placeholder: https://api.example.com/anthropic
+
+  - type: textarea
+    id: quirks
+    attributes:
+      label: Quirks worth knowing
+      description: |
+        Auth style (Bearer vs x-api-key), required User-Agent, whether it
+        serves /v1/models, any client-shape checks it enforces, and where its
+        model metadata comes from.
+      render: markdown
+
+  - type: checkboxes
+    id: checks
+    attributes:
+      label: Checks
+      options:
+        - label: I am authorized to use this provider's terms.
+          required: true
+        - label: I checked it is not already on the preset list in the README.
+          required: true

@@ -1,0 +1,74 @@
+name: Bug report
+description: Something does not work as documented
+title: "[bug] "
+labels: ["bug"]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Thanks for filing this. The more precise the reproduction, the faster
+        it gets fixed.
+
+  - type: textarea
+    id: what-happened
+    attributes:
+      label: What happened
+      description: What you saw, and what you expected instead.
+    validations:
+      required: true
+
+  - type: textarea
+    id: repro
+    attributes:
+      label: Steps to reproduce
+      placeholder: |
+        1. Start the gateway with ...
+        2. Add provider ...
+        3. Send a request to ...
+    validations:
+      required: true
+
+  - type: input
+    id: version
+    attributes:
+      label: Version
+      description: Output of `./nano-llm-proxy -version`
+      placeholder: v0.1.0 (commit abc1234, built 2026-09-27)
+    validations:
+      required: true
+
+  - type: dropdown
+    id: surface
+    attributes:
+      label: Which surface
+      options:
+        - /v1/chat/completions
+        - /v1/responses
+        - /v1/messages (Anthropic)
+        - /v1/models
+        - /mcp (web tools)
+        - Admin GUI
+        - Admin API
+        - Deployment / systemd
+        - Scripts (deploy.sh, install-web-tools.sh)
+        - Other
+    validations:
+      required: true
+
+  - type: textarea
+    id: logs
+    attributes:
+      label: Relevant log output
+      description: |
+        `journalctl -u nano-llm-proxy -n 100` is usually enough.
+        **Redact any API keys before pasting.**
+      render: shell
+
+  - type: checkboxes
+    id: checks
+    attributes:
+      label: Checks
+      options:
+        - label: I searched existing issues for this.
+          required: true
+        - label: I can reproduce this on a fresh checkout.
