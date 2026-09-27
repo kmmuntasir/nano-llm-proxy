@@ -1,5 +1,9 @@
 # nano-llm-proxy
 
+<p align="center">
+  <img src="docs/logo.svg" alt="" width="76"><br>
+</p>
+
 [![Go](https://img.shields.io/badge/Go-1.26%2B-00ADD8?logo=go&logoColor=white)](https://go.dev)
 [![License: GPL v3](https://img.shields.io/badge/License-GPLv3-blue.svg)](https://www.gnu.org/licenses/gpl-3.0)
 [![CI](https://github.com/kmmuntasir/nano-llm-proxy/actions/workflows/ci.yml/badge.svg)](https://github.com/kmmuntasir/nano-llm-proxy/actions/workflows/ci.yml)
@@ -28,6 +32,10 @@ and installs a hardened systemd unit. The whole point is that you can drop it
 on a cheap VPS, a NAS, or a laptop and have a working gateway in under a
 minute — the same job most gateways make you spin up a container and a
 database for.
+
+<p align="center">
+  <img src="docs/screenshots/dashboard.webp" alt="The admin dashboard: healthy upstream keys, requests and tokens over time, per-provider breakdown, and recent activity" width="880">
+</p>
 
 ## Why
 
@@ -380,6 +388,24 @@ claude mcp add -s user -t http nano-web https://your-gateway/mcp \
 ## Admin GUI
 
 Served by the same binary at `/`.
+
+<p align="center">
+  <img src="docs/screenshots/providers.webp" alt="Providers page: preset picker, per-provider key management, live model catalog" width="420">
+  <img src="docs/screenshots/models.webp" alt="Models page: every live model across providers, with context window, modalities, and copyable IDs" width="420">
+</p>
+<p align="center"><sub>Providers — add from a preset dropdown, manage keys, browse the live catalog. &nbsp;&nbsp; Models — the merged catalog, with a generated <code>settings.json</code>.</sub></p>
+
+<p align="center">
+  <img src="docs/screenshots/usage.webp" alt="Usage page: totals, top models and providers, and per-key or per-user breakdowns" width="420">
+  <img src="docs/screenshots/settings.webp" alt="Settings page: rotation mode, retry and cooldown knobs, adapter and model-catalog controls" width="420">
+</p>
+<p align="center"><sub>Usage — date-range totals, per-key and per-user. &nbsp;&nbsp; Settings — rotation, cooldowns, adapter knobs, web tools.</sub></p>
+
+<p align="center">
+  <img src="docs/screenshots/guide.webp" alt="Guide page: deployment-aware setup instructions for Claude Code, opencode, Codex CLI, Kilo Code, and Pi" width="420">
+  <img src="docs/screenshots/profile.webp" alt="Profile page: account info and self-service client key management" width="420">
+</p>
+<p align="center"><sub>Guide — setup for Claude Code, opencode, Codex, Kilo, and Pi, rendered with this deployment's URLs. &nbsp;&nbsp; Profile — keys and account.</sub></p>
 
 | Page | Who | What |
 | --- | --- | --- |
