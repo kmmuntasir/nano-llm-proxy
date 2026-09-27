@@ -1,6 +1,6 @@
 import { useState } from "react"
 import { NavLink, useNavigate } from "react-router-dom"
-import type { ComponentType, ReactNode } from "react"
+import type { ComponentProps, ComponentType, ReactNode } from "react"
 import { useMutation, useQueryClient } from "@tanstack/react-query"
 import {
   Box,
@@ -83,6 +83,29 @@ function ColorModeMenu() {
 }
 
 // SidebarContent is the shared nav: the desktop aside renders it inline, the
+// The brand lockup — logo plus wordmark. Defined once and shared by the
+// desktop rail and the mobile top bar: they had drifted apart, and only the
+// top bar carried the logo, so the wordmark appeared bare in the rail.
+//
+// Sized so it never widens the 220px rail: the logo never shrinks and the
+// wordmark truncates rather than wrapping or pushing the layout.
+function Brand({ size = "sm" }: { size?: ComponentProps<typeof Heading>["size"] }) {
+  return (
+    <HStack gap={2} align="center" minW={0} overflow="hidden">
+      <img
+        src={logoUrl}
+        alt="Nano LLM Proxy logo"
+        width={24}
+        height={24}
+        style={{ flexShrink: 0 }}
+      />
+      <Heading size={size} minW={0} truncate>
+        Nano LLM Proxy
+      </Heading>
+    </HStack>
+  )
+}
+
 // mobile drawer renders the same thing behind a hamburger. onNavigate fires
 // after a link is tapped so the drawer can close itself.
 function SidebarContent({
@@ -97,9 +120,9 @@ function SidebarContent({
   return (
     <>
       {showBrand && (
-        <Heading size="md" mb={6} px={2}>
-          Nano LLM Proxy
-        </Heading>
+        <Box mb={6} px={2} minW={0} overflow="hidden">
+          <Brand size="md" />
+        </Box>
       )}
       <VStack align="stretch" gap={1}>
         {items.map((item) => (
@@ -270,10 +293,7 @@ export default function AppLayout({ children }: { children: ReactNode }) {
           justifyContent="space-between"
           borderBottomWidth="1px"
         >
-          <HStack gap={2} align="center">
-            <img src={logoUrl} alt="Nano LLM Proxy logo" width={24} height={24} />
-            <Heading size="sm">Nano LLM Proxy</Heading>
-          </HStack>
+          <Brand />
           <IconButton
             variant="ghost"
             size="sm"

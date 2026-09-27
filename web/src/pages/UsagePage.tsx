@@ -28,10 +28,13 @@ interface UsageSummary {
   providers: UsageModelRow[]
 }
 
-// Presets snap to local midnights: "from" and "to" both sit at 00:00:00 of
-// their day, so the default window is the 7 full days before today. Custom
-// from/to edits set exact times.
+// Presets snap to local midnights, so a preset spans whole local days: "from"
+// is 00:00:00 of the day the window opens on, "to" is 23:59 of the day it
+// closes on. "Today" is days: 0 with toEndOfDay — it opens on today's
+// midnight and runs to the end of today, which is why it needs no special
+// case. Custom from/to edits set exact times.
 const RANGES = [
+  { label: "Today", days: 0, toEndOfDay: true },
   { label: "Yesterday", days: 1, toEndOfDay: false },
   { label: "7 days", days: 7, toEndOfDay: true },
   { label: "30 days", days: 30, toEndOfDay: true },
@@ -120,9 +123,10 @@ export default function UsagePage() {
   const preset = RANGES.find((r) => r.label === range)
   const days = preset?.days ?? 7
   // Preset bounds are day boundaries: "from" is the midnight N days before
-  // today. "to" is today's midnight for Yesterday, but 23:59 today for the
-  // 7/30-day presets so the window includes the current day without a
-  // timestamp that goes stale a minute later.
+  // today (N=0 for Today, i.e. this morning). "to" is today's midnight for
+  // Yesterday, but 23:59 today for the Today/7/30-day presets so the window
+  // includes the current day without a timestamp that goes stale a minute
+  // later.
   const to = custom?.to
     ? new Date(custom.to).getTime() / 1000
     : preset?.toEndOfDay
