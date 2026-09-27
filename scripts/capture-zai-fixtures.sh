@@ -2,7 +2,9 @@
 # Captures Z.ai GLM Coding Plan API fixtures (request/response pairs) so the
 # proxy's Z.ai support can be developed and tested offline. Makes 7 small
 # requests in one sequence (max_tokens <= 128 each) and stores everything under
-# internal/gateway/testdata/zai/. The API key is redacted from all stored files.
+# internal/gateway/testdata/zai/. Both the API key and the operator's own
+# machine details are redacted from everything stored here — see redact() and
+# scripts/sanitize-fixtures.py.
 #
 # Usage:
 #   ZAI_KEY=<key> [ZAI_MODEL=glm-5.3-flash] ./scripts/capture-zai-fixtures.sh
@@ -19,6 +21,10 @@ ANTHROPIC="https://api.z.ai/api/anthropic"
 
 redact() { # scrub the key out of everything we just stored (no-op if absent)
   grep -rl "$KEY" "$OUT" 2>/dev/null | xargs -r sed -i "s|$KEY|<REDACTED>|g" || true
+  # Redact what the key pass cannot catch: home directory paths, and any
+  # personal instruction files a coding agent inlines into the request.
+  # Committed fixtures must never carry the operator's machine details.
+  python3 "$ROOT/scripts/sanitize-fixtures.py" "$OUT" >/dev/null
 }
 
 capture() { # <name> <curl args...> — stores headers + body, prints status

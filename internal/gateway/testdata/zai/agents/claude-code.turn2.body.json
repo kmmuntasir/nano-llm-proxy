@@ -6,7 +6,7 @@
    "content": [
     {
      "type": "text",
-     "text": "<system-reminder>\nCodebase and user instructions are shown below. Be sure to adhere to these instructions. IMPORTANT: These instructions OVERRIDE any default behavior and you MUST follow them exactly as written.\n\nContents of /home/<user>/.claude/CLAUDE.md (redacted: operator's private global instructions):\n\n<redacted for publication>\n</system-reminder>\n"
+     "text": "[redacted for publication: the coding agent's built-in system prompt. Retained in outline because its size and structure are the point of this fixture — a real agent prepends a multi-kilobyte system message ahead of the conversation, and the gateway has to pass it through untouched.]"
     },
     {
      "type": "text",
