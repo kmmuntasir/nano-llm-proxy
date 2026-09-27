@@ -11,6 +11,22 @@ Release notes are generated from commit prefixes, so `feat:`, `fix:`,
 
 Nothing yet.
 
+## [0.1.1] — 2026-09-27
+
+Fixes to the first release, both found by downloading the v0.1.0 artifact and
+following its own instructions.
+
+### Fixed
+
+- The binary inside the release archive is named `nano-llm-proxy` rather than
+  `nano-llm-proxy-<os>-<arch>`, so the documented `./nano-llm-proxy` works
+  after extracting.
+- A fresh install no longer requires a legacy `keys.json` to boot. The gateway
+  seeds the built-in `zen` provider keyless and starts, so the GUI is reachable
+  and keys can be added there — the documented path. Previously the process
+  exited on first boot with an error naming a gitignored file that ships no
+  example.
+
 ## [0.1.0] — 2026-09-27
 
 First public release. Pre-1.0: the API and the SQLite schema may still change.
@@ -65,5 +81,6 @@ instance with no shared pool across replicas; and upstream provider keys
 stored reversibly in the SQLite file, so the database must stay at mode
 `0600` on a host you trust.
 
-[Unreleased]: https://github.com/kmmuntasir/nano-llm-proxy/compare/v0.1.0...HEAD
+[Unreleased]: https://github.com/kmmuntasir/nano-llm-proxy/compare/v0.1.1...HEAD
+[0.1.1]: https://github.com/kmmuntasir/nano-llm-proxy/compare/v0.1.0...v0.1.1
 [0.1.0]: https://github.com/kmmuntasir/nano-llm-proxy/releases/tag/v0.1.0
