@@ -7,11 +7,11 @@ import {
   HStack,
   Link,
   List,
-  Table,
   Text,
   VStack,
 } from "@chakra-ui/react"
 import JsonBlock from "../components/JsonBlock"
+import { DataTable } from "../components/DataTable"
 
 // DocsPage — the user guide. Everything renders from window.location.origin
 // so the same binary serves correct snippets whether the gateway is reached
@@ -19,6 +19,22 @@ import JsonBlock from "../components/JsonBlock"
 // placeholders, never fetched.
 
 const FG_PLACEHOLDER = "fg-paste-your-client-key"
+
+interface TroubleshootingRow {
+  symptom: string
+  meaning: string
+}
+
+const TROUBLESHOOTING: TroubleshootingRow[] = [
+  { symptom: "401 from /v1 or /mcp", meaning: "Missing/revoked key — create a new one in Profile → My API Keys" },
+  { symptom: "502 no healthy keys", meaning: "The provider's upstream keys are exhausted or cooling — an admin adds/fixes keys on the Providers page" },
+  { symptom: "404 from /mcp", meaning: "Web tools are disabled in Settings → Web tools (superadmin)" },
+  { symptom: "web_search returns no results", meaning: "Search engines may be CAPTCHA-blocked from this deployment's IP — an admin can trim engines in /etc/searxng/settings.yml (see docs/deployment.md)" },
+  { symptom: "web_read returns empty/JS-shell text", meaning: "Re-run with render: true — the page needs a real browser" },
+  { symptom: "Empty reply that stops after a long pause (Pi)", meaning: "The model burned Pi's 4096-token output cap on hidden reasoning — switch models or just say continue; the gateway relays upstream finish reasons verbatim" },
+  { symptom: "5xx / 523 from the public URL", meaning: "The host or network in front of the gateway is down, not the gateway — retry shortly; if it persists, check the deployment's host" },
+  { symptom: "model not found", meaning: "Use the exact provider/model id from the Models page" },
+]
 
 function Section({
   title,
@@ -312,31 +328,21 @@ wire_api = "chat"          # the gateway also speaks "responses"`,
       </Section>
 
       <Section title="Troubleshooting">
-        <Table.Root size="sm">
-          <Table.Header>
-            <Table.Row>
-              <Table.ColumnHeader>Symptom</Table.ColumnHeader>
-              <Table.ColumnHeader>Meaning</Table.ColumnHeader>
-            </Table.Row>
-          </Table.Header>
-          <Table.Body>
-            {[
-              ["401 from /v1 or /mcp", "Missing/revoked key — create a new one in Profile → My API Keys"],
-              ["502 no healthy keys", "The provider's upstream keys are exhausted or cooling — an admin adds/fixes keys on the Providers page"],
-              ["404 from /mcp", "Web tools are disabled in Settings → Web tools (superadmin)"],
-              ["web_search returns no results", "Search engines may be CAPTCHA-blocked from this deployment's IP — an admin can trim engines in /etc/searxng/settings.yml (see docs/deployment.md)"],
-              ["web_read returns empty/JS-shell text", "Re-run with render: true — the page needs a real browser"],
-              ["Empty reply that stops after a long pause (Pi)", "The model burned Pi's 4096-token output cap on hidden reasoning — switch models or just say continue; the gateway relays upstream finish reasons verbatim"],
-              ["5xx / 523 from the public URL", "The host or network in front of the gateway is down, not the gateway — retry shortly; if it persists, check the deployment's host"],
-              ["model not found", "Use the exact provider/model id from the Models page"],
-            ].map(([sym, meaning]) => (
-              <Table.Row key={sym}>
-                <Table.Cell fontFamily="mono" fontSize="xs" whiteSpace="nowrap">{sym}</Table.Cell>
-                <Table.Cell fontSize="sm">{meaning}</Table.Cell>
-              </Table.Row>
-            ))}
-          </Table.Body>
-        </Table.Root>
+        <DataTable
+          rows={TROUBLESHOOTING}
+          rowKey={(r) => r.symptom}
+          columns={[
+            {
+              header: "Symptom",
+              render: (r) => (
+                <Text fontFamily="mono" fontSize="xs">
+                  {r.symptom}
+                </Text>
+              ),
+            },
+            { header: "Meaning", render: (r) => <Text fontSize="sm">{r.meaning}</Text> },
+          ]}
+        />
       </Section>
     </VStack>
   )
