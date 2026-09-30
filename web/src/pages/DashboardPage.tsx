@@ -107,7 +107,9 @@ export default function DashboardPage() {
           <Card.Body>
             <Stat.Root>
               <Stat.Label>Tokens (24h)</Stat.Label>
-              <Stat.ValueText>
+              {/* ValueText is an inline-flex that never wraps by default — let the
+                  in/out pair drop to a second line on narrow cards */}
+              <Stat.ValueText flexWrap="wrap">
                 {t ? fmtTokens(t.inputTokens) : "—"}
                 <Stat.ValueUnit>in</Stat.ValueUnit>
                 {t ? fmtTokens(t.outputTokens) : ""}
