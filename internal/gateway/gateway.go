@@ -308,6 +308,15 @@ func (g *gateway) classify(pool *Pool, k *KeyState, resp *http.Response) verdict
 		if resp.StatusCode >= 500 {
 			v.cooldown = 10 * time.Second
 			pool.recordError(k)
+		} else if strings.Contains(string(body), "ModelProtocolUnsupported") {
+			// "This model does not serve the surface you called." The
+			// per-model responsesApi flag can go stale — zen moves a model
+			// between the chat and Responses surfaces, and a flag left on
+			// (or off) from last week then sends every request to the wrong
+			// one forever. Flip and retry instead of failing the client; the
+			// caller knows which way to flip and the corrected surface is
+			// learned for the rest of the process.
+			v.action = "flipsurface"
 		} else {
 			// 4xx model-level error (bad model, bad params) — same result either
 			// way, so no retry: surface it to the client.

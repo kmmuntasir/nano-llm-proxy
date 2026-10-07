@@ -64,7 +64,11 @@ type modelsDevModel struct {
 	} `json:"limit"`
 	Reasoning        bool                       `json:"reasoning"`
 	ReasoningOptions []settings.ReasoningOption `json:"reasoning_options"`
-	Modalities       struct {
+	Cost             struct {
+		Input  float64 `json:"input"`
+		Output float64 `json:"output"`
+	} `json:"cost"`
+	Modalities struct {
 		Input []string `json:"input"`
 	} `json:"modalities"`
 	Description string `json:"description"`
@@ -281,6 +285,7 @@ func (g *gateway) mergeModelMeta(ctx context.Context, subtrees map[string]map[st
 			InputModalities:  dev.Modalities.Input,
 			Description:      dev.Description,
 			ReasoningOptions: cleanReasoningOptions(dev),
+			Cost:             &settings.ModelCost{Input: dev.Cost.Input, Output: dev.Cost.Output},
 		}
 	}
 	for id := range current.Zen.ModelMeta {

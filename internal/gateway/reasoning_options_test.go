@@ -468,3 +468,158 @@ func TestGenericCatalogMirrorsContextLength(t *testing.T) {
 		t.Errorf("generic context mirror wrong: %v", e)
 	}
 }
+
+// FreeOnly filtering and the "free" badge share one predicate, and that
+// predicate prefers models.dev's price over the id suffix. big-pickle is the
+// case that matters: free per the catalog (cost 0/0), no "-free" suffix in
+// the id, so a suffix-only rule hides a model users can see working in
+// opencode.
+func TestZenFreeFilterPrefersCatalogPrice(t *testing.T) {
+	ids := []string{"big-pickle", "grok-code", "claude-opus-5-5", "space-bunny-free", "fresh-free", "brand-new"}
+	catalog := func(t *testing.T, freeOnly bool) map[string]bool {
+		t.Helper()
+		var b strings.Builder
+		b.WriteString(`{"data":[`)
+		for i, id := range ids {
+			if i > 0 {
+				b.WriteString(",")
+			}
+			b.WriteString(`{"id":"` + id + `"}`)
+		}
+		b.WriteString(`]}`)
+
+		up := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			if strings.HasSuffix(r.URL.Path, "/models") {
+				w.Write([]byte(b.String()))
+				return
+			}
+			w.Write([]byte(`{}`))
+		}))
+		defer up.Close()
+
+		cfg := testCfg()
+		cfg.Zen.BaseURL = up.URL + "/v1"
+		g := newGateway(cfg, testRuntime(), testKeyFile())
+		rs := g.rs()
+		rs.Zen.FreeOnly = freeOnly
+		rs.Zen.ModelMeta = map[string]settings.ModelMeta{
+			// zero cost, no "-free" in the id
+			"big-pickle": {ContextWindow: 262144, MaxOutputTokens: 8192, Cost: &settings.ModelCost{}},
+			"grok-code":  {ContextWindow: 200000, MaxOutputTokens: 32000, Cost: &settings.ModelCost{}},
+			// priced, no suffix — must stay hidden
+			"claude-opus-5-5": {ContextWindow: 200000, MaxOutputTokens: 64000,
+				Cost: &settings.ModelCost{Input: 5, Output: 25}},
+			// suffix + free price — in both regimes
+			"space-bunny-free": {ContextWindow: 1048576, MaxOutputTokens: 524288,
+				Cost: &settings.ModelCost{}},
+		}
+		g.rsPtr.Store(rs)
+
+		ref, _ := g.provider("zen")
+		models, err := g.fetchUpstreamModels(ref)
+		if err != nil {
+			t.Fatalf("fetchUpstreamModels: %v", err)
+		}
+		out := map[string]bool{}
+		for _, m := range models {
+			e, _ := m.(map[string]any)
+			id, _ := e["id"].(string)
+			// strip the cosmetic suffix for the lookup key
+			out[stripModelSuffix(id[len("zen/"):])] = e["free"] == true
+		}
+		return out
+	}
+
+	all := catalog(t, false)
+	if len(all) != len(ids) {
+		t.Fatalf("freeOnly=OFF should expose all %d models, got %d (%v)", len(ids), len(all), all)
+	}
+	filtered := catalog(t, true)
+
+	for _, tc := range []struct {
+		id   string
+		free bool
+		why  string
+	}{
+		{"big-pickle", true, "zero cost, no -free suffix"},
+		{"grok-code", true, "zero cost, no -free suffix"},
+		{"space-bunny-free", true, "suffix and zero cost"},
+		{"fresh-free", true, "suffix only, no catalog entry — the fallback still works"},
+		{"brand-new", false, "no catalog entry and no suffix — nothing claims it's free"},
+		{"claude-opus-5-5", false, "priced, no suffix"},
+	} {
+		if all[tc.id] != tc.free {
+			t.Errorf("%s: badge free=%v, want %v (%s)", tc.id, all[tc.id], tc.free, tc.why)
+		}
+	}
+	// freeOnly removes exactly the paid models, and never a badged-free one
+	if filtered["claude-opus-5-5"] {
+		t.Error("paid model survived freeOnly")
+	}
+	if filtered["brand-new"] {
+		t.Error("uncatalogued id with no suffix must not be advertised as free")
+	}
+	if !filtered["fresh-free"] {
+		t.Error("uncatalogued -free id dropped by freeOnly before the first sync")
+	}
+	for _, id := range []string{"big-pickle", "grok-code", "space-bunny-free"} {
+		if !filtered[id] {
+			t.Errorf("%s: free model dropped by freeOnly despite being badged free", id)
+		}
+		if all[id] != filtered[id] {
+			t.Errorf("%s: badge disagrees with the filter", id)
+		}
+	}
+	if len(filtered) != 4 {
+		t.Errorf("freeOnly kept %d models, want 4: %v", len(filtered), filtered)
+	}
+}
+
+// A stale per-model responsesApi flag sends every request to the surface the
+// model no longer serves; zen answers 400 ModelProtocolUnsupported. The proxy
+// must flip and retry rather than fail the client — big-pickle was unreachable
+// through the gateway (while opencode, which picks the protocol from its own
+// registry, kept working).
+func TestZenFlipsSurfaceOnProtocolUnsupported(t *testing.T) {
+	var paths []string
+	up := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path == "/models" {
+			w.Write([]byte(`{"data":[{"id":"big-pickle"}]}`))
+			return
+		}
+		paths = append(paths, r.URL.Path)
+		if strings.HasSuffix(r.URL.Path, "/responses") {
+			w.WriteHeader(http.StatusBadRequest)
+			w.Write([]byte(`{"type":"error","error":{"type":"ModelProtocolUnsupported","message":"Model does not support this protocol."}}`))
+			return
+		}
+		w.Header().Set("Content-Type", "application/json")
+		w.Write([]byte(`{"choices":[{"message":{"role":"assistant","content":"ok"}}]}`))
+	}))
+	defer up.Close()
+
+	cfg := testCfg()
+	cfg.Zen.BaseURL = up.URL + "/v1"
+	rs := testRuntime()
+	rs.Zen.ModelMeta["big-pickle"] = settings.ModelMeta{
+		ContextWindow: 200000, MaxOutputTokens: 8192, ResponsesAPI: true, // the stale flag
+	}
+	g := newGateway(cfg, rs, testKeyFile())
+
+	body := `{"model":"zen/big-pickle","messages":[{"role":"user","content":"hi"}],"max_tokens":100}`
+	r := httptest.NewRequest("POST", "/v1/chat/completions", strings.NewReader(body))
+	r.Header.Set("Content-Type", "application/json")
+	rec := httptest.NewRecorder()
+	g.handleChat(rec, r)
+
+	if rec.Code != http.StatusOK {
+		t.Fatalf("stale surface flag broke the request: %d: %s", rec.Code, rec.Body.String())
+	}
+	if len(paths) < 2 ||
+		!strings.HasSuffix(paths[0], "/responses") || !strings.HasSuffix(paths[1], "/chat/completions") {
+		t.Fatalf("expected responses→chat flip, got %v", paths)
+	}
+	if g.surfaceFor("big-pickle") != "chat" {
+		t.Errorf("corrected surface not learned: %s", g.surfaceFor("big-pickle"))
+	}
+}

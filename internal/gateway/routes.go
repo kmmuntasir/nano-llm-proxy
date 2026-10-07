@@ -238,7 +238,9 @@ func (g *gateway) decodeModelList(ref providerRef, resp *http.Response) ([]any, 
 		if id == "" {
 			continue
 		}
-		if ref.typ == "opencode" && g.rs().Zen.FreeOnly && !hasFreeSuffix(id) {
+		meta, known := g.rs().Zen.ModelMeta[id]
+		free := zenModelIsFree(id, meta, known)
+		if ref.typ == "opencode" && g.rs().Zen.FreeOnly && !free {
 			continue
 		}
 		entry := map[string]any{
@@ -251,15 +253,15 @@ func (g *gateway) decodeModelList(ref providerRef, resp *http.Response) ([]any, 
 			// Zen advertises ids only — enrich from settings meta + defaults.
 			//
 			// Zen's catalog is NOT purely the free tier: it also carries
-			// subscription models, and upstream marks the free ones with a
-			// "-free" suffix on the id (big-pickle, claude-opus-5-5 and
-			// friends are all served from the same /models list). So "free"
-			// comes from that suffix — the same predicate the FreeOnly filter
-			// above uses. Deriving the badge from anything else would let the
-			// two disagree: a card badged free that vanishes under the
-			// free-models-only toggle, or a paid model advertised as free.
+			// subscription models, and upstream marks most of the free ones
+			// with a "-free" suffix on the id (claude-opus-5-5, gpt-5.5 and
+			// friends all sit in the same /models list). "free" is therefore
+			// resolved by zenModelIsFree — models.dev's price first, the
+			// suffix as the fallback for models the catalog doesn't price —
+			// and the same value drives the filter above and the badge below,
+			// so a card can never be badged free and then vanish under the
+			// free-models-only toggle (or vice versa).
 			const defCtx, defOut = int64(262144), int64(8192)
-			meta, known := g.rs().Zen.ModelMeta[id]
 			if !known {
 				meta = settings.ModelMeta{ContextWindow: defCtx, MaxOutputTokens: defOut, Reasoning: true}
 			}
@@ -275,7 +277,7 @@ func (g *gateway) decodeModelList(ref providerRef, resp *http.Response) ([]any, 
 			entry["max_output_tokens"] = mo
 			applyReasoningFacts(entry, meta, known)
 			entry["responses_api"] = meta.ResponsesAPI
-			entry["free"] = hasFreeSuffix(id)
+			entry["free"] = free
 			if len(meta.InputModalities) > 0 {
 				entry["input_modalities"] = meta.InputModalities
 			}
@@ -365,12 +367,27 @@ func (g *gateway) handleAllModels(w http.ResponseWriter, r *http.Request) {
 }
 
 // hasFreeSuffix reports whether a raw upstream model id carries Zen's
-// "-free" marker. It is the single source of truth for a zen model's free
-// status: both the "free" badge and the Zen.FreeOnly filter call it, so the
-// badge can never contradict the filter. The test is on the raw id, before
-// the cosmetic context/modality suffix is appended.
+// "-free" marker. It is the fallback half of zenModelIsFree: authoritative
+// for models the models.dev catalog doesn't price, and a second opinion for
+// the ones it does. The test is on the raw id, before the cosmetic
+// context/modality suffix is appended.
 func hasFreeSuffix(id string) bool {
 	return len(id) > 5 && id[len(id)-5:] == "-free"
+}
+
+// zenModelIsFree is the single source of truth for a zen model's free status:
+// the FreeOnly filter and the "free" badge both call it, so they cannot
+// disagree. The catalog's price wins when it has one — models.dev publishes
+// cost.input/cost.output per model and marks a model free exactly when both
+// are zero, which catches free models whose id carries no "-free" marker
+// (big-pickle, grok-code) and would otherwise be invisible under FreeOnly.
+// The suffix remains the fallback for models the catalog doesn't price, so a
+// freshly-launched free model is never hidden before the first sync.
+func zenModelIsFree(id string, meta settings.ModelMeta, known bool) bool {
+	if known && meta.Cost.Free() {
+		return true
+	}
+	return hasFreeSuffix(id)
 }
 
 // defaultReasoningOptions is the ladder advertised for a model the catalog

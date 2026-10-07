@@ -25,6 +25,21 @@ type ReasoningOption struct {
 	Max    *int64   `json:"max,omitempty"`
 }
 
+// ModelCost is models.dev's price for a model. Zero input and output is the
+// catalog's statement that the model is free — the fact FreeOnly filtering
+// needs, because a free model need not carry the "-free" marker in its id
+// (big-pickle does not). A nil pointer means the catalog doesn't price this
+// model, which is different from "priced at zero".
+type ModelCost struct {
+	Input  float64 `json:"input"`
+	Output float64 `json:"output"`
+}
+
+// Free reports whether the catalog priced this model as free.
+func (c *ModelCost) Free() bool {
+	return c != nil && c.Input == 0 && c.Output == 0
+}
+
 // ModelMeta describes a model for agents reading /v1/models. Zen's own
 // /models payload is sparse (id only), so per-model facts live here; anything
 // missing falls back to the defaults.
@@ -36,6 +51,7 @@ type ModelMeta struct {
 	InputModalities  []string          `json:"inputModalities,omitempty"`
 	Description      string            `json:"description,omitempty"`
 	ReasoningOptions []ReasoningOption `json:"reasoningOptions,omitempty"`
+	Cost             *ModelCost        `json:"cost,omitempty"`
 }
 
 // UAVersionOK validates "opencode/<semver>" against the server's 1.18.0
