@@ -537,6 +537,7 @@ cd web && npm ci && npm run dev       # GUI dev server
 | --- | --- | --- |
 | 401 on `/v1/*` | missing or wrong client key | create one in the GUI (Profile → My API Keys) |
 | 502 with a client-shape hint | provider rejected the adapted request | check the adapter's config (`userAgent`, injection flags) |
+| zen model 502s from pi/oh-my-pi only, with `unknown variant 'developer'` in the log | the client sends the newer `developer` instruction role; that model's upstream validates the role enum strictly | already handled — the zen adapter renames it to `system`; a `developer` message in your own code should use `system` |
 | 502 "no healthy keys" | all keys cooling or disabled | check the Providers page; re-enable or wait out cooldowns |
 | Boot refuses to start: "zen.userAgent ... fails the 1.18.0 floor" | the DB holds a too-old user agent | fix it in Settings → Zen, or reset all settings: `sqlite3 gateway.db "DELETE FROM settings WHERE key='runtime_settings'"` |
 | GUI login loop over plain HTTP | `NANO_COOKIE_SECURE=true` without TLS | set it false locally, or serve over HTTPS |

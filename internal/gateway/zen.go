@@ -200,11 +200,61 @@ func toResponsesBody(chat map[string]any) map[string]any {
 	return out
 }
 
+// normalizeInstructionRoles renames the newer "developer" message role to
+// "system" on the way upstream, in both the chat (messages) and Responses
+// (input) shapes.
+//
+// Why: pi and oh-my-pi send the instruction message as role:"developer"
+// whenever the catalog says the model reasons and their compat profile
+// advertises the role — which our own /v1/models does (reasoning:true). Most
+// upstreams ignore it, but zen's free tier is fronted by an "airlock" layer
+// that validates the role enum strictly and answers
+//
+//	[airlock_error] invalid request: unknown variant `developer`,
+//	expected one of `system`, `user`, `assistant`, `tool`
+//
+// so every pi/oh-my-pi request to such a model (fledge-alpha-free today)
+// fails with a 400 the client reads as "model broken". opencode itself never
+// sends "developer", so upstream has no reason to accept it.
+//
+// "system" is the older spelling of the same instruction message and is
+// accepted everywhere (verified on zen, kilo and every other backend here),
+// so the rename is lossless: content and message order are untouched, and a
+// client that sent both roles keeps both messages in place.
+//
+// Only the zen adapter needs this today — kilo's own upstreams tolerate the
+// role (verified). If another provider ever fronts a strict schema, call
+// this from its path too; it is idempotent.
+func normalizeInstructionRoles(body map[string]any) bool {
+	changed := false
+	for _, field := range []string{"messages", "input"} {
+		items, ok := body[field].([]any)
+		if !ok {
+			continue
+		}
+		for _, it := range items {
+			m, ok := it.(map[string]any)
+			if !ok {
+				continue
+			}
+			if role, _ := m["role"].(string); role == "developer" {
+				m["role"] = "system"
+				changed = true
+			}
+		}
+	}
+	return changed
+}
+
 // proxyZen runs the rotation loop for zen models across both surfaces.
 func (g *gateway) proxyZen(ref providerRef, w http.ResponseWriter, r *http.Request, body map[string]any, model string, clientWantsStream bool, start time.Time) string {
 	exclude := map[string]bool{}
 	surface := g.surfaceFor(model)
 	var lastHint string
+
+	if normalizeInstructionRoles(body) {
+		log.Printf("zen model=%s: renamed developer role to system for upstream", model)
+	}
 
 	for attempt := 0; attempt < g.rs().Retry.MaxKeysPerRequest; attempt++ {
 		k := ref.pool.pick(exclude)

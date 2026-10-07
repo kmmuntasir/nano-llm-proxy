@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"encoding/json"
 	"fmt"
+	"log"
 	"net/http"
 	"strings"
 	"time"
@@ -77,6 +78,11 @@ func containsFlatTool(tools []any, name string) bool {
 func (g *gateway) proxyZenResponses(ref providerRef, w http.ResponseWriter, r *http.Request, body map[string]any, model string, clientWantsStream bool, start time.Time) string {
 	exclude := map[string]bool{}
 	var lastHint string
+
+	// same strict-role upstream as the chat surface (see normalizeInstructionRoles)
+	if normalizeInstructionRoles(body) {
+		log.Printf("zen responses model=%s: renamed developer role to system for upstream", model)
+	}
 
 	for attempt := 0; attempt < g.rs().Retry.MaxKeysPerRequest; attempt++ {
 		k := ref.pool.pick(exclude)

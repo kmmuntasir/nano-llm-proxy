@@ -9,6 +9,19 @@ Release notes are generated from commit prefixes, so `feat:`, `fix:`,
 
 ## [Unreleased]
 
+### Fixed
+
+- zen models fronted by a strict role validator (e.g. `fledge-alpha-free`)
+  no longer 502 for pi / oh-my-pi. Those clients send the instruction message
+  as `role: "developer"` whenever the catalog says the model reasons — which
+  our own `/v1/models` does — and the upstream answers
+  `[airlock_error] invalid request: unknown variant 'developer', expected one
+  of system, user, assistant, tool`. The zen adapter now renames the role to
+  `system` on the way upstream (chat `messages` and Responses `input` alike):
+  the older spelling of the same message, accepted everywhere, with content
+  and message order untouched. opencode never sends the role, which is why
+  the model worked there and failed here.
+
 ### Added
 
 - `/v1/models` entries now carry `context_length` alongside
