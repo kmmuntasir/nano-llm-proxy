@@ -166,6 +166,21 @@ accepted on every endpoint. Z.ai entries are enriched from a models.dev-synced
 catalog; a model the catalog doesn't know yet still advertises a 1M context
 window so agents don't downshift to 128K.
 
+Each entry also carries a nested `limits` object
+(`{"max_input_tokens": …, "max_output_tokens": …}`) alongside the top-level
+spellings. Some OpenAI-compatible discovery clients (oh-my-pi among them) read
+the output budget *only* from that object and fall back to a fixed 33K when it
+is missing, while reading the context window from the top-level field — so a
+catalog without `limits` shows every model as 33K max-out. It is derived from
+the same enriched values as `context_window` / `max_output_tokens`, and entries
+with no advertised output limit omit it rather than claiming zero.
+
+Note for oh-my-pi specifically: its `openai-models-list` discovery resolves
+reasoning and thinking levels from its own bundled catalog by model id, never
+from this payload. Ids carrying the cosmetic suffix therefore never match, and
+the gateway cannot fix that field from the server side — declare it in
+`~/.omp/agent/models.yml` under the provider's `modelOverrides` instead.
+
 ## GET /health
 
 Open, no auth. `providers` maps each provider to its upstream key-pool

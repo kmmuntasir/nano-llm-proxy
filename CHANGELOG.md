@@ -55,6 +55,14 @@ Release notes are generated from commit prefixes, so `feat:`, `fix:`,
   image-capable model read as text-only and the agent dropped pictures
   silently. Custom providers' modalities are mapped too, so a model behind
   one no longer looks text-only.
+- Catalog entries now carry a nested `limits` object
+  (`max_input_tokens` / `max_output_tokens`). Clients that read the output
+  budget only from there — oh-my-pi's model discovery among them — showed
+  every model as 33K max-out because it falls back to that default when the
+  object is absent, while reading context from the top-level field. Both
+  numbers come from the same enriched values as `context_window` and
+  `max_output_tokens`; entries with no advertised output limit omit the
+  object instead of claiming zero.
 
 ## [0.1.1] — 2026-09-27
 
