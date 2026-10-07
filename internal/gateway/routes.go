@@ -457,9 +457,26 @@ func rawModalities(raw map[string]any) []string {
 // and oh-my-pi say context_window; different clients look for different ones
 // and a missing field is read as "unknown, assume 128K". The two are emitted
 // from the single enriched value so they can never disagree.
+//
+// The nested limits object is the same fact in the spelling oh-my-pi (and
+// other OpenAI-compatible discovery clients) reads for the OUTPUT budget: its
+// model-discovery only consults `limits.max_output_tokens` /
+// `limits.max_input_tokens`, falling back to a fixed 33K when the object is
+// absent — which is why every model showed "33K" max-out regardless of its
+// real output ceiling. context_window itself is already sent top-level, which
+// that client reads for the context column, so max_input_tokens here is just
+// the complementary half of the pair.
 func mirrorContextLength(entry map[string]any) {
-	if cw, ok := entry["context_window"].(int64); ok {
-		entry["context_length"] = cw
+	cw, ok := entry["context_window"].(int64)
+	if !ok {
+		return
+	}
+	entry["context_length"] = cw
+	if out, ok := entry["max_output_tokens"].(int64); ok && out > 0 {
+		entry["limits"] = map[string]any{
+			"max_input_tokens":  cw,
+			"max_output_tokens": out,
+		}
 	}
 }
 

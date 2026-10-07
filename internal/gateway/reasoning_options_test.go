@@ -623,3 +623,56 @@ func TestZenFlipsSurfaceOnProtocolUnsupported(t *testing.T) {
 		t.Errorf("corrected surface not learned: %s", g.surfaceFor("big-pickle"))
 	}
 }
+
+// oh-my-pi (and other OpenAI-compatible discovery clients) read the OUTPUT
+// budget only from a nested limits object: max_input_tokens /
+// max_output_tokens. With it absent every model fell back to the client's
+// fixed 33K default regardless of its real ceiling, while context came from
+// context_length and looked fine — the asymmetry that made it look like a
+// context fix had worked but the output one hadn't.
+func TestCatalogPublishesNestedLimits(t *testing.T) {
+	up := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Write([]byte(`{"data":[{"id":"m1","context_length":262144,"top_provider":{"max_completion_tokens":32768}}]}`))
+	}))
+	defer up.Close()
+
+	g, st := testStoreGateway(t, up.URL)
+	addPresetProvider(t, st, "kilo", "mykilo", up.URL, "kk1")
+	if err := g.rebuildPools(); err != nil {
+		t.Fatalf("rebuildPools: %v", err)
+	}
+	ref, _ := g.provider("mykilo")
+	models, err := g.fetchUpstreamModels(ref)
+	if err != nil {
+		t.Fatalf("fetchUpstreamModels: %v", err)
+	}
+	e := models[0].(map[string]any)
+	limits, ok := e["limits"].(map[string]any)
+	if !ok {
+		t.Fatalf("limits object missing: %v", e)
+	}
+	if limits["max_input_tokens"] != int64(262144) || limits["max_output_tokens"] != int64(32768) {
+		t.Errorf("limits = %v, want {262144, 32768}", limits)
+	}
+	// the context column that already worked must keep its own spelling:
+	// omp prefers context_length/max_model_len over the limits sum
+	if e["context_length"] != int64(262144) || e["context_window"] != int64(262144) {
+		t.Errorf("context spellings regressed: %v", e)
+	}
+
+	// a provider that advertises no output limit gets no limits object rather
+	// than a zero that would read as "cannot output anything"
+	g2, st2 := testStoreGateway(t, up.URL)
+	addGenericProvider(t, st2, "plain", up.URL, "pk1")
+	if err := g2.rebuildPools(); err != nil {
+		t.Fatalf("rebuildPools 2: %v", err)
+	}
+	ref2, _ := g2.provider("plain")
+	models2, err := g2.fetchUpstreamModels(ref2)
+	if err != nil {
+		t.Fatalf("fetchUpstreamModels 2: %v", err)
+	}
+	if _, has := models2[0].(map[string]any)["limits"]; has {
+		t.Errorf("limits invented for a model with no output limit: %v", models2[0])
+	}
+}
