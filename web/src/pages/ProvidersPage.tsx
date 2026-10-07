@@ -24,7 +24,14 @@ import {
 import { Activity, ChevronDown, ChevronUp, List, Pencil, Plus, Trash2 } from "lucide-react"
 import { api, del, patch, post, put, ApiError } from "../api/client"
 import ModelCard from "../components/ModelCard"
-import type { PresetSpecView, ProviderKeyView, ProviderView, ZaiUsage, ZaiUsageLimit } from "../api/types"
+import type {
+  PresetSpecView,
+  ProviderKeyView,
+  ProviderView,
+  ReasoningOptionView,
+  ZaiUsage,
+  ZaiUsageLimit,
+} from "../api/types"
 import ConfirmDialog from "../components/ConfirmDialog"
 import StatusBadge from "../components/StatusBadge"
 import { toaster } from "../components/ui/toaster"
@@ -360,6 +367,7 @@ interface ProviderCatalogEntry {
   max_output_tokens?: number
   input_modalities?: string[]
   reasoning?: boolean
+  reasoning_options?: ReasoningOptionView[]
   responses_api?: boolean
   free?: boolean
   description?: string
@@ -447,6 +455,7 @@ function ModelsListModal({
                     maxOutputTokens={m.max_output_tokens}
                     inputModalities={m.input_modalities}
                     reasoning={m.reasoning}
+                    reasoningOptions={m.reasoning_options}
                     responsesApi={m.responses_api}
                     free={m.free}
                     footer={

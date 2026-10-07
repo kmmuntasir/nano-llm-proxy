@@ -9,7 +9,19 @@ Release notes are generated from commit prefixes, so `feat:`, `fix:`,
 
 ## [Unreleased]
 
-Nothing yet.
+### Added
+
+- `/v1/models` entries now carry `context_length` alongside
+  `context_window` (same value — different agents read different spellings,
+  and a missing field is read as "unknown, assume 128K").
+- `/v1/models` reasoning models now carry `reasoning_options`, the
+  models.dev-shaped control list (`{"type":"effort","values":["low","medium","high"]}`,
+  `{"type":"toggle"}`, `{"type":"budget_tokens","min":…,"max":…}`). The
+  ladders are read from models.dev by the existing catalog sync and stored per
+  model in `zen.modelMeta` / `zai.modelMeta`; reasoning models the catalog
+  doesn't document yet fall back to `effort` with `low`/`medium`/`high`, and
+  non-reasoning models never get the field. This is what oh-my-pi needs
+  beyond the `reasoning` boolean.
 
 ## [0.1.1] — 2026-09-27
 

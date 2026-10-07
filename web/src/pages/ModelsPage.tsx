@@ -19,6 +19,7 @@ import { api } from "../api/client"
 import ModelCard from "../components/ModelCard"
 import CopyButton from "../components/CopyButton"
 import ClaudeCodeSetupDialog from "../components/ClaudeCodeSetupDialog"
+import type { ReasoningOptionView } from "../api/types"
 
 // Models page: every model the gateway currently serves, merged across
 // providers. Read-only browsing — search plus filters over provider,
@@ -31,6 +32,7 @@ interface CatalogEntry {
   max_output_tokens?: number
   input_modalities?: string[]
   reasoning?: boolean
+  reasoning_options?: ReasoningOptionView[]
   responses_api?: boolean
   free?: boolean
   description?: string
@@ -228,6 +230,7 @@ export default function ModelsPage() {
               maxOutputTokens={e.max_output_tokens}
               inputModalities={e.input_modalities}
               reasoning={e.reasoning}
+              reasoningOptions={e.reasoning_options}
               responsesApi={e.responses_api}
               free={e.free}
             />

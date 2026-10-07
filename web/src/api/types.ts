@@ -155,6 +155,16 @@ export interface UsageActivityRow {
 
 // --- runtime settings (GET/PUT /api/settings) ---
 
+// models.dev-shaped reasoning controls (mirrors settings.ReasoningOption).
+// Only "type" is always present: "effort" carries a "values" ladder,
+// "budget_tokens" a min/max range, "toggle" neither.
+export interface ReasoningOptionView {
+  type: string
+  values?: string[]
+  min?: number
+  max?: number
+}
+
 export interface ModelMetaView {
   contextWindow: number
   maxOutputTokens: number
@@ -162,6 +172,7 @@ export interface ModelMetaView {
   responsesApi: boolean
   inputModalities?: string[]
   description?: string
+  reasoningOptions?: ReasoningOptionView[]
 }
 
 export interface ModelMetaSyncStatusView {

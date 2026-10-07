@@ -7,16 +7,35 @@ import (
 	"strings"
 )
 
+// ReasoningOption is one entry of a model's reasoning_options list, mirroring
+// the models.dev shape an agent (oh-my-pi) expects:
+//
+//	{"type": "effort", "values": ["low", "medium", "high"]}
+//	{"type": "toggle"}
+//	{"type": "budget_tokens", "min": 1024, "max": 32768}
+//
+// Only "type" is always present; the rest depend on it. The effort ladder is
+// what lets an agent map its own reasoning-level control onto the values the
+// model actually accepts, so it is stored rather than flattened to the
+// "reasoning" boolean.
+type ReasoningOption struct {
+	Type   string   `json:"type"`
+	Values []string `json:"values,omitempty"`
+	Min    *int64   `json:"min,omitempty"`
+	Max    *int64   `json:"max,omitempty"`
+}
+
 // ModelMeta describes a model for agents reading /v1/models. Zen's own
 // /models payload is sparse (id only), so per-model facts live here; anything
 // missing falls back to the defaults.
 type ModelMeta struct {
-	ContextWindow   int64    `json:"contextWindow"`
-	MaxOutputTokens int64    `json:"maxOutputTokens"`
-	Reasoning       bool     `json:"reasoning"`
-	ResponsesAPI    bool     `json:"responsesApi"`
-	InputModalities []string `json:"inputModalities,omitempty"`
-	Description     string   `json:"description,omitempty"`
+	ContextWindow    int64             `json:"contextWindow"`
+	MaxOutputTokens  int64             `json:"maxOutputTokens"`
+	Reasoning        bool              `json:"reasoning"`
+	ResponsesAPI     bool              `json:"responsesApi"`
+	InputModalities  []string          `json:"inputModalities,omitempty"`
+	Description      string            `json:"description,omitempty"`
+	ReasoningOptions []ReasoningOption `json:"reasoningOptions,omitempty"`
 }
 
 // UAVersionOK validates "opencode/<semver>" against the server's 1.18.0

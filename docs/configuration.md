@@ -49,10 +49,10 @@ block is server-owned).
 | `zen.injectTools` | true | Append the client-shape tool stubs to every zen request |
 | `zen.responsesModels` | — | *Removed.* Responses support is a per-model flag on `modelMeta` entries; toggle it per model on the Providers page (zen models). Sync preserves the flag across catalog refreshes |
 | `zen.freeOnly` | false | Restrict the zen catalog in `/v1/models` to models flagged as free upstream |
-| `zen.modelMeta` | empty | Per-model metadata (context window, max output, modalities, reasoning, description) shown in `/v1/models`; unknown models get conservative defaults |
+| `zen.modelMeta` | empty | Per-model metadata (context window, max output, modalities, reasoning, reasoning options, description) shown in `/v1/models`; unknown models get conservative defaults |
 | `zen.modelMetaAutoSync` | false | Refresh `modelMeta` from models.dev once a day in the background |
 | `kilo.freeOnly` | false | Same catalog restriction as `zen.freeOnly`, applied to Kilo preset providers |
-| `zai.modelMeta` | empty | Per-model metadata for Z.ai preset providers (context window, max output, modalities, reasoning, description); filled by the models.dev sync. Unknown models advertise a 1M context window so coding agents don't downshift to 128K |
+| `zai.modelMeta` | empty | Per-model metadata for Z.ai preset providers (context window, max output, modalities, reasoning, reasoning options, description); filled by the models.dev sync. Unknown models advertise a 1M context window so coding agents don't downshift to 128K |
 | `webTools.enabled` | false | Serve the MCP web tools at `POST /mcp` to every client key. Off after upgrades — the SearXNG/obscura backends must be installed first (see `docs/deployment.md`) |
 | `webTools.searxngUrl` | `http://127.0.0.1:8888` | SearXNG base URL; the JSON API must be enabled there (`search.formats` includes `json`) |
 | `webTools.readerMode` | `fast` | `fast` = native fetch first, escalate to obscura; `render` = obscura first, fall back to native. Either way `web_read`'s `render: true` argument forces the browser leg |
@@ -80,8 +80,9 @@ hand-typed endpoints.
 ## Model catalog sync (models.dev)
 
 Zen's and Z.ai's `/models` endpoints advertise ids only, so the context
-windows, output limits, reasoning flags, and descriptions shown in
-`/v1/models` come from [`models.dev`](https://models.dev) — the model
+windows, output limits, reasoning flags, reasoning effort ladders, and
+descriptions shown in `/v1/models` come from
+[`models.dev`](https://models.dev) — the model
 directory the opencode ecosystem publishes. One sync refreshes both catalogs
 (Settings → Model catalog → *Sync now*, or daily when `modelMetaAutoSync` is
 on). It fetches `https://models.dev/api.json` and then:
@@ -98,6 +99,9 @@ on). It fetches `https://models.dev/api.json` and then:
   entries are pruned, and models the catalog doesn't know yet fall back to a
   1M context window in `/v1/models`,
 - never touches the per-model `responsesApi` flags,
+- carries each model's `reasoning_options` (the effort ladder agents such as
+  oh-my-pi read) through into `/v1/models`; like the limits it is catalog
+  data, so a refresh overwrites it,
 - on any fetch/parse/persist failure changes nothing and records the error in
   the sync status shown in the GUI.
 

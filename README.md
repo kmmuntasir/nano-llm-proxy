@@ -218,8 +218,11 @@ groq/llama-3.3-70b        → provider "groq",    model "llama-3.3-70b"
 ```
 
 `GET /v1/models` merges every enabled provider's catalog and enriches each
-entry with `context_window`, `max_output_tokens`, modalities, `reasoning`,
-and `responses_api`. The catalog is scoped per client key when a superadmin
+entry with `context_window` (mirrored as `context_length`, since agents read
+different spellings), `max_output_tokens`, modalities, `reasoning`,
+`reasoning_options` (the effort ladder a reasoning model accepts, as
+models.dev publishes it — what oh-my-pi needs beyond the boolean), and
+`responses_api`. The catalog is scoped per client key when a superadmin
 has revoked providers for the key's owner (Users → Provider access):
 revoked providers vanish from the list and route like unknown prefixes.
 Where metadata is available, IDs are advertised in a

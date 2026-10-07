@@ -32,7 +32,9 @@ import (
 //	     fallback; meta ids that vanished from every entry are pruned.
 //
 // The per-model responsesApi flag is never auto-touched — models.dev has no
-// such concept, so sync overwrites preserve whatever the admin toggled. Any
+// such concept, so sync overwrites preserve whatever the admin toggled.
+// reasoning_options DO come from the catalog (they are the effort ladders
+// models.dev publishes), so they refresh like the rest of the meta. Any
 // fetch/parse/persist failure leaves both metas exactly as they were.
 
 const defaultModelsDevURL = "https://models.dev/api.json"
@@ -50,11 +52,46 @@ type modelsDevModel struct {
 		Context int64 `json:"context"`
 		Output  int64 `json:"output"`
 	} `json:"limit"`
-	Reasoning  bool `json:"reasoning"`
-	Modalities struct {
+	Reasoning        bool                       `json:"reasoning"`
+	ReasoningOptions []settings.ReasoningOption `json:"reasoning_options"`
+	Modalities       struct {
 		Input []string `json:"input"`
 	} `json:"modalities"`
 	Description string `json:"description"`
+}
+
+// cleanReasoningOptions drops what an agent can't act on: options with no
+// type (a models.dev entry that never grew a "type" key), effort ladders with
+// no levels left, and null holes in a level list ("values": [null, "high"]
+// decodes to an empty string, which would render as a blank level). A model
+// flagged reasoning:false keeps none of its options — the two facts would
+// otherwise contradict each other in the catalog.
+func cleanReasoningOptions(dev modelsDevModel) []settings.ReasoningOption {
+	if !dev.Reasoning {
+		return nil
+	}
+	out := make([]settings.ReasoningOption, 0, len(dev.ReasoningOptions))
+	for _, opt := range dev.ReasoningOptions {
+		opt.Type = strings.TrimSpace(opt.Type)
+		if opt.Type == "" {
+			continue
+		}
+		levels := opt.Values[:0:0] // fresh backing array; never alias the input
+		for _, v := range opt.Values {
+			if v = strings.TrimSpace(v); v != "" {
+				levels = append(levels, v)
+			}
+		}
+		opt.Values = levels
+		if opt.Type == "effort" && len(levels) == 0 {
+			continue // an effort control with no ladder is no better than none
+		}
+		out = append(out, opt)
+	}
+	if len(out) == 0 {
+		return nil
+	}
+	return out
 }
 
 // decodeModelsDevSubtrees streams the models.dev document and materializes
@@ -227,12 +264,13 @@ func (g *gateway) mergeModelMeta(ctx context.Context, subtrees map[string]map[st
 			st.Added++
 		}
 		current.Zen.ModelMeta[id] = settings.ModelMeta{
-			ContextWindow:   dev.Limit.Context,
-			MaxOutputTokens: dev.Limit.Output,
-			Reasoning:       dev.Reasoning,
-			ResponsesAPI:    responses,
-			InputModalities: dev.Modalities.Input,
-			Description:     dev.Description,
+			ContextWindow:    dev.Limit.Context,
+			MaxOutputTokens:  dev.Limit.Output,
+			Reasoning:        dev.Reasoning,
+			ResponsesAPI:     responses,
+			InputModalities:  dev.Modalities.Input,
+			Description:      dev.Description,
+			ReasoningOptions: cleanReasoningOptions(dev),
 		}
 	}
 	for id := range current.Zen.ModelMeta {
@@ -298,12 +336,13 @@ func mergeZaiModelMeta(current *settings.RuntimeSettings, subtrees map[string]ma
 			st.Added++
 		}
 		current.Zai.ModelMeta[id] = settings.ModelMeta{
-			ContextWindow:   dev.Limit.Context,
-			MaxOutputTokens: dev.Limit.Output,
-			Reasoning:       dev.Reasoning,
-			ResponsesAPI:    responses,
-			InputModalities: dev.Modalities.Input,
-			Description:     dev.Description,
+			ContextWindow:    dev.Limit.Context,
+			MaxOutputTokens:  dev.Limit.Output,
+			Reasoning:        dev.Reasoning,
+			ResponsesAPI:     responses,
+			InputModalities:  dev.Modalities.Input,
+			Description:      dev.Description,
+			ReasoningOptions: cleanReasoningOptions(dev),
 		}
 	}
 	for id := range current.Zai.ModelMeta {

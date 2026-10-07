@@ -273,7 +273,7 @@ func (g *gateway) decodeModelList(ref providerRef, resp *http.Response) ([]any, 
 			}
 			entry["context_window"] = ctx
 			entry["max_output_tokens"] = mo
-			entry["reasoning"] = meta.Reasoning
+			applyReasoningFacts(entry, meta, known)
 			entry["responses_api"] = meta.ResponsesAPI
 			entry["free"] = hasFreeSuffix(id)
 			if len(meta.InputModalities) > 0 {
@@ -298,6 +298,7 @@ func (g *gateway) decodeModelList(ref providerRef, resp *http.Response) ([]any, 
 				entry["description"] = d
 			}
 		}
+		mirrorContextLength(entry)
 		out = append(out, entry)
 	}
 	return out, nil
@@ -361,6 +362,48 @@ func (g *gateway) handleAllModels(w http.ResponseWriter, r *http.Request) {
 // the cosmetic context/modality suffix is appended.
 func hasFreeSuffix(id string) bool {
 	return len(id) > 5 && id[len(id)-5:] == "-free"
+}
+
+// defaultReasoningOptions is the ladder advertised for a model the catalog
+// says reasons but has no effort data for (a zen/zai id models.dev doesn't
+// document yet). Agents such as oh-my-pi need the level list, not just the
+// boolean — an entry with reasoning:true and no options leaves them nothing
+// to map their reasoning control onto. low/medium/high is the spelling
+// essentially every current reasoning endpoint accepts, so the guess is
+// harmless where the levels are ignored and usable where they are not.
+var defaultReasoningOptions = []settings.ReasoningOption{
+	{Type: "effort", Values: []string{"low", "medium", "high"}},
+}
+
+// applyReasoningFacts writes the two reasoning fields an agent reads: the
+// boolean flag every client understands, and the models.dev-shaped options
+// list that carries the actual levels. known is false when the entry came
+// from a fallback rather than catalog metadata, which is the only case that
+// gets the default ladder.
+func applyReasoningFacts(entry map[string]any, meta settings.ModelMeta, known bool) {
+	entry["reasoning"] = meta.Reasoning
+	if !meta.Reasoning {
+		delete(entry, "reasoning_options") // never advertise levels for a non-reasoning model
+		return
+	}
+	opts := meta.ReasoningOptions
+	if len(opts) == 0 && !known {
+		opts = defaultReasoningOptions
+	}
+	if len(opts) > 0 {
+		entry["reasoning_options"] = opts
+	}
+}
+
+// mirrorContextLength republishes the context window under the second
+// spelling agents read. OpenAI-shaped catalogs say context_length; opencode
+// and oh-my-pi say context_window; different clients look for different ones
+// and a missing field is read as "unknown, assume 128K". The two are emitted
+// from the single enriched value so they can never disagree.
+func mirrorContextLength(entry map[string]any) {
+	if cw, ok := entry["context_window"].(int64); ok {
+		entry["context_length"] = cw
+	}
 }
 
 // ServeWeb hosts the embedded admin GUI with SPA fallback; untagged builds

@@ -1,6 +1,7 @@
 import type { ReactNode } from "react"
 import { Badge, Card, Code, HStack, Text } from "@chakra-ui/react"
 import CopyButton from "./CopyButton"
+import type { ReasoningOptionView } from "../api/types"
 
 export interface ModelCardData {
   name: string
@@ -11,6 +12,9 @@ export interface ModelCardData {
   maxOutputTokens?: number
   inputModalities?: string[]
   reasoning?: boolean
+  /** models.dev-shaped reasoning controls; the effort ladder is what an
+      agent (oh-my-pi) needs to offer reasoning levels */
+  reasoningOptions?: ReasoningOptionView[]
   responsesApi?: boolean
   free?: boolean
   provider?: string
@@ -45,11 +49,15 @@ export default function ModelCard({
   maxOutputTokens,
   inputModalities,
   reasoning,
+  reasoningOptions,
   responsesApi,
   free,
   provider,
   footer,
 }: ModelCardData) {
+  // the effort ladder, when the catalog publishes one; a toggle-only model
+  // has no levels to show and the "reasoning" badge already says it reasons
+  const effort = (reasoningOptions ?? []).find((o) => (o.values ?? []).length > 0)?.values ?? []
   return (
     <Card.Root size="sm" height="100%">
       <Card.Body gap={2} px={4} py={3}>
@@ -76,6 +84,11 @@ export default function ModelCard({
             {reasoning && (
               <Badge colorPalette="purple" variant="subtle">
                 reasoning
+              </Badge>
+            )}
+            {effort.length > 0 && (
+              <Badge colorPalette="purple" variant="outline" title="reasoning levels accepted by this model">
+                {effort.join(" · ")}
               </Badge>
             )}
           </HStack>

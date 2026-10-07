@@ -105,6 +105,7 @@ are left out, so clients only ever see routable models:
   "id": "myprovider/my-model-128K-txt-img",
   "object": "model",
   "context_window": 131072,
+  "context_length": 131072,
   "max_output_tokens": 32768,
   "input_modalities": ["text", "image"],
   "reasoning": false,
@@ -112,6 +113,38 @@ are left out, so clients only ever see routable models:
   "supported_parameters": ["tools", "temperature"]
 }
 ```
+
+`context_length` mirrors `context_window` — different agents read different
+spellings, and a missing field reads as "unknown, assume 128K".
+
+A reasoning model also carries `reasoning_options`, the models.dev-shaped
+control list an agent (oh-my-pi) needs to offer actual levels — `reasoning:
+true` alone says nothing about which values the model accepts:
+
+```json
+{
+  "id": "zen/ling-3.1-flash-free-262K-txt",
+  "object": "model",
+  "owned_by": "zen",
+  "context_window": 262144,
+  "context_length": 262144,
+  "max_output_tokens": 32768,
+  "input_modalities": ["text"],
+  "reasoning": true,
+  "reasoning_options": [
+    {"type": "effort", "values": ["low", "medium", "high"]}
+  ],
+  "responses_api": false,
+  "free": true,
+  "description": "Efficient model for low-latency assistance"
+}
+```
+
+Option types mirror models.dev: `effort` carries a `values` ladder, `toggle`
+nothing (reasoning on or off), `budget_tokens` a `min`/`max` range. Options
+come from the models.dev catalog; a reasoning model the catalog doesn't
+document yet falls back to `effort` with `low`/`medium`/`high`, and a model
+flagged non-reasoning never gets the field at all.
 
 The ID suffix is cosmetic (context + input modalities); bare IDs are
 accepted on every endpoint. Z.ai entries are enriched from a models.dev-synced
