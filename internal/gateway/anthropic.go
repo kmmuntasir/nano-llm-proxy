@@ -85,8 +85,8 @@ func anthropicToChatBody(req map[string]any) map[string]any {
 }
 
 // convertAnthropicMessage flattens one anthropic message into 0..n chat
-// messages: tool_use blocks become assistant tool_calls, tool_result blocks
-// become role:"tool" messages.
+// messages: image blocks become image_url content parts, tool_use blocks
+// become assistant tool_calls, tool_result blocks become role:"tool" messages.
 func convertAnthropicMessage(am map[string]any) []any {
 	role, _ := am["role"].(string)
 	switch c := am["content"].(type) {
@@ -97,7 +97,7 @@ func convertAnthropicMessage(am map[string]any) []any {
 		return []any{map[string]any{"role": role, "content": c}}
 	case []any:
 		var out []any
-		var textParts []any
+		var contentParts []any
 		var toolCalls []any
 		for _, blk := range c {
 			bm, ok := blk.(map[string]any)
@@ -106,7 +106,11 @@ func convertAnthropicMessage(am map[string]any) []any {
 			}
 			switch bt, _ := bm["type"].(string); bt {
 			case "text":
-				textParts = append(textParts, map[string]any{"type": "text", "text": bm["text"]})
+				contentParts = append(contentParts, map[string]any{"type": "text", "text": bm["text"]})
+			case "image":
+				if part := anthropicImagePart(bm["source"]); part != nil {
+					contentParts = append(contentParts, part)
+				}
 			case "tool_use":
 				input := bm["input"]
 				args, err := json.Marshal(input)
@@ -128,24 +132,58 @@ func convertAnthropicMessage(am map[string]any) []any {
 					"tool_call_id": tid,
 					"content":      toolResultText(bm["content"]),
 				})
-			case "image", "thinking", "redacted_thinking":
+			case "thinking", "redacted_thinking":
 				// dropped: not representable on the chat path
 			}
 		}
 		if len(toolCalls) > 0 {
 			am2 := map[string]any{"role": "assistant", "tool_calls": toolCalls}
-			if len(textParts) > 0 {
-				am2["content"] = concatTextBlocks(textParts)
+			if len(contentParts) > 0 {
+				am2["content"] = concatTextBlocks(contentParts)
 			} else {
 				am2["content"] = ""
 			}
 			out = append([]any{am2}, out...)
-		} else if len(textParts) > 0 {
-			out = append(out, map[string]any{"role": role, "content": textParts})
+		} else if len(contentParts) > 0 {
+			out = append(out, map[string]any{"role": role, "content": contentParts})
 		}
 		return out
 	}
 	return nil
+}
+
+// anthropicImagePart converts an Anthropic image block into the chat
+// image_url part: base64 sources become a data URI, url sources pass through.
+// Claude Code sends images this way, and the chat surface represents them
+// natively — dropping the block (as this used to) meant the model answered a
+// question about a picture it had never been shown, with no error anywhere.
+// An unusable source yields nil so the block is dropped rather than forwarded
+// in a shape upstream cannot parse.
+func anthropicImagePart(source any) map[string]any {
+	sm, ok := source.(map[string]any)
+	if !ok {
+		return nil
+	}
+	var url string
+	switch st, _ := sm["type"].(string); st {
+	case "base64":
+		media, _ := sm["media_type"].(string)
+		data, _ := sm["data"].(string)
+		if media == "" || data == "" {
+			return nil
+		}
+		url = "data:" + media + ";base64," + data
+	case "url":
+		if u, _ := sm["url"].(string); u != "" {
+			url = u
+		}
+	default:
+		return nil
+	}
+	if url == "" {
+		return nil
+	}
+	return map[string]any{"type": "image_url", "image_url": map[string]any{"url": url}}
 }
 
 // concatTextBlocks joins text blocks into one string.

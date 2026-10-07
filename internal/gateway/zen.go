@@ -84,6 +84,13 @@ func stubToolFlat(name string) map[string]any {
 
 // convertContentParts maps chat content parts to Responses content types.
 // textType is "input_text" for user/system messages, "output_text" for assistant.
+// convertContentParts retypes OpenAI chat content parts for the Responses
+// surface. The image case is not a rename: chat nests the image in an object
+// ({"image_url":{"url":"data:…"}}) while Responses wants a plain string
+// ({"input_image","image_url":"data:…"}). Passing the object through verbatim
+// gets the whole message rejected with "input[n].content did not match any
+// supported type", so every image sent to a Responses-surface model (the
+// muse-spark family) failed at the upstream.
 func convertContentParts(parts []any, textType string) []any {
 	out := make([]any, 0, len(parts))
 	for _, p := range parts {
@@ -95,7 +102,22 @@ func convertContentParts(parts []any, textType string) []any {
 		case "text":
 			out = append(out, map[string]any{"type": textType, "text": pm["text"]})
 		case "image_url":
-			out = append(out, map[string]any{"type": "input_image", "image_url": pm["image_url"]})
+			img := map[string]any{"type": "input_image"}
+			switch v := pm["image_url"].(type) {
+			case string:
+				img["image_url"] = v
+			case map[string]any:
+				if u, _ := v["url"].(string); u != "" {
+					img["image_url"] = u
+					if d, ok := v["detail"].(string); ok {
+						img["detail"] = d // low/high — same spelling on both sides
+					}
+				}
+			}
+			if _, ok := img["image_url"]; !ok {
+				continue // unusable source: drop the part, keep the rest
+			}
+			out = append(out, img)
 		default:
 			out = append(out, p)
 		}
