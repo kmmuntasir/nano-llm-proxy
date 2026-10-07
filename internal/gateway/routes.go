@@ -297,8 +297,17 @@ func (g *gateway) decodeModelList(ref providerRef, resp *http.Response) ([]any, 
 			if d, ok := m["description"].(string); ok {
 				entry["description"] = d
 			}
+			// modalities are still mapped: a custom OpenAI-compatible
+			// provider (OpenRouter and friends) usually advertises them, and
+			// without them an image-capable model reads as text-only to every
+			// agent. Both spellings are accepted; the mirror publishes the
+			// rest.
+			if mods := rawModalities(m); len(mods) > 0 {
+				entry["input_modalities"] = mods
+			}
 		}
 		mirrorContextLength(entry)
+		mirrorInputModalities(entry)
 		out = append(out, entry)
 	}
 	return out, nil
@@ -395,6 +404,37 @@ func applyReasoningFacts(entry map[string]any, meta settings.ModelMeta, known bo
 	}
 }
 
+// rawModalities reads a raw upstream catalog entry's input modalities from
+// either spelling it may use: Kilo's nested architecture.input_modalities and
+// the flat input_modalities / input arrays other OpenAI-compatible providers
+// emit. Unknown entries in the list are kept as-is (the suffix builder maps
+// what it knows and ignores the rest) so the advertised fact stays faithful.
+func rawModalities(raw map[string]any) []string {
+	var out []string
+	add := func(v any) {
+		list, ok := v.([]any)
+		if !ok {
+			if ss, ok := v.([]string); ok {
+				out = append(out, ss...)
+			}
+			return
+		}
+		for _, e := range list {
+			if s, ok := e.(string); ok {
+				out = append(out, s)
+			}
+		}
+	}
+	if arch, ok := raw["architecture"].(map[string]any); ok {
+		add(arch["input_modalities"])
+	}
+	add(raw["input_modalities"])
+	if len(out) == 0 {
+		add(raw["input"])
+	}
+	return out
+}
+
 // mirrorContextLength republishes the context window under the second
 // spelling agents read. OpenAI-shaped catalogs say context_length; opencode
 // and oh-my-pi say context_window; different clients look for different ones
@@ -404,6 +444,44 @@ func mirrorContextLength(entry map[string]any) {
 	if cw, ok := entry["context_window"].(int64); ok {
 		entry["context_length"] = cw
 	}
+}
+
+// mirrorInputModalities republishes the entry's input modalities under every
+// spelling clients read them, from the one enriched value:
+//
+//	input                          pi-openai-compat (pi, oh-my-pi): the model
+//	                               is treated as text-only unless this lists
+//	                               "image", so a missing field means the agent
+//	                               silently drops images instead of sending them
+//	input_modalities               opencode / models.dev shape
+//	architecture.input_modalities  Kilo's nested shape, which pi's built-in
+//	                               opencode provider loader reads
+//
+// Without the mirrors an image-capable model looks text-only to pi and the
+// client omits the picture without a word — the failure looks like a gateway
+// that "doesn't do images" rather than a field-name mismatch.
+func mirrorInputModalities(entry map[string]any) {
+	var mods []string
+	switch m := entry["input_modalities"].(type) {
+	case []string:
+		mods = m
+	case []any: // a hook that copied upstream's raw JSON array
+		for _, v := range m {
+			if s, ok := v.(string); ok {
+				mods = append(mods, s)
+			}
+		}
+	}
+	if len(mods) == 0 {
+		return
+	}
+	entry["input"] = mods
+	arch, _ := entry["architecture"].(map[string]any)
+	if arch == nil {
+		arch = map[string]any{}
+		entry["architecture"] = arch
+	}
+	arch["input_modalities"] = mods
 }
 
 // ServeWeb hosts the embedded admin GUI with SPA fallback; untagged builds

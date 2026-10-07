@@ -153,6 +153,14 @@ Kilo's upstream numbers (context/output limits, modalities,
 catalog. A kilo model models.dev doesn't document keeps both fields absent
 rather than advertising an unverified `false`.
 
+Image input is passed through on every path: chat `image_url` parts, and
+Anthropic `image` blocks from `/v1/messages` (Claude Code), reach the upstream
+as valid content parts on both the chat and Responses surfaces. The entry's
+modalities are also published in every spelling clients read — `input_modalities`
+(opencode), `input` (pi / oh-my-pi) and `architecture.input_modalities`
+(pi's opencode provider loader) — so an agent knows a model takes images
+instead of assuming text-only and dropping the picture.
+
 The ID suffix is cosmetic (context + input modalities); bare IDs are
 accepted on every endpoint. Z.ai entries are enriched from a models.dev-synced
 catalog; a model the catalog doesn't know yet still advertises a 1M context

@@ -118,7 +118,12 @@ func kiloCatalog(g *gateway, ref providerRef, id string, entry, raw map[string]a
 					mods = append(mods, s)
 				}
 			}
-			entry["input_modalities"] = in
+			// []string, not the raw []any: every other enrichment path emits
+			// []string, and the shared modality mirrors in decodeModelList
+			// assert on it
+			if len(mods) > 0 {
+				entry["input_modalities"] = mods
+			}
 		}
 		if sp, ok := raw["output_modalities"]; ok {
 			entry["output_modalities"] = sp

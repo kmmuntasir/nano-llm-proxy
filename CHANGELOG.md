@@ -41,6 +41,20 @@ Release notes are generated from commit prefixes, so `feat:`, `fix:`,
   Upstream's context/output limits, modalities and `supported_parameters`
   still win — only the reasoning facts are resolved. Models models.dev
   doesn't document keep both fields absent instead of an unverified `false`.
+- Image input works on every path: the chat → Responses retyping now unwraps
+  chat's nested `{"image_url":{"url":…}}` into the string the Responses API
+  wants (muse-spark and friends used to reject the message with
+  `input[0].content did not match any supported type`), and Anthropic image
+  blocks on `/v1/messages` (how Claude Code sends pictures) become chat
+  `image_url` parts instead of being dropped silently — the model used to
+  answer about a picture it had never seen.
+- Catalog entries now also publish their input modalities as `input` (what
+  pi-openai-compat, i.e. pi/oh-my-pi, reads) and
+  `architecture.input_modalities` (what pi's opencode provider loader reads)
+  alongside the existing `input_modalities`. Without the pi spelling an
+  image-capable model read as text-only and the agent dropped pictures
+  silently. Custom providers' modalities are mapped too, so a model behind
+  one no longer looks text-only.
 
 ## [0.1.1] — 2026-09-27
 

@@ -2,6 +2,7 @@ package gateway
 
 import (
 	"encoding/json"
+	"fmt"
 	"net/http"
 	"net/http/httptest"
 	"strings"
@@ -181,5 +182,61 @@ func TestChatImageReachesResponsesSurfaceIntact(t *testing.T) {
 		}
 	default:
 		t.Fatal("upstream never received a request")
+	}
+}
+
+// Modalities must reach clients under every spelling they read, from one
+// enriched value: pi-openai-compat reads `input`, opencode reads
+// `input_modalities`, pi's opencode loader reads `architecture.input_modalities`.
+// Missing the pi spelling is why a multimodal model looked text-only to pi and
+// the agent dropped images without a word.
+func TestCatalogMirrorsInputModalities(t *testing.T) {
+	up := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Write([]byte(`{"data":[{"id":"m1","context_length":4096,
+			"architecture":{"input_modalities":["text","image"],"output_modalities":["text"]}},
+			{"id":"text-only","context_length":2048}]}`))
+	}))
+	defer up.Close()
+
+	g, st := testStoreGateway(t, up.URL)
+	// a custom (non-preset) provider: the generic passthrough must map
+	// modalities too, or every custom provider reads as text-only
+	addGenericProvider(t, st, "router", up.URL, "kk1")
+	if err := g.rebuildPools(); err != nil {
+		t.Fatalf("rebuildPools: %v", err)
+	}
+	ref, _ := g.provider("router")
+	models, err := g.fetchUpstreamModels(ref)
+	if err != nil {
+		t.Fatalf("fetchUpstreamModels: %v", err)
+	}
+	e := models[0].(map[string]any)
+	want := []string{"text", "image"}
+	if fmt.Sprint(e["input"]) != fmt.Sprint(want) {
+		t.Errorf("input = %v, want %v", e["input"], want)
+	}
+	arch, _ := e["architecture"].(map[string]any)
+	if fmt.Sprint(arch["input_modalities"]) != fmt.Sprint(want) {
+		t.Errorf("architecture.input_modalities = %v, want %v", arch["input_modalities"], want)
+	}
+	// the mirror merges into an architecture object that is already there
+	// rather than replacing it
+	merged := map[string]any{"input_modalities": []string{"text"}, "output_modalities": []string{"image"}}
+	mirrorInputModalities(map[string]any{"input_modalities": []string{"text", "image"}, "architecture": merged})
+	if fmt.Sprint(merged["output_modalities"]) != "[image]" {
+		t.Errorf("existing architecture keys clobbered: %v", merged)
+	}
+	if fmt.Sprint(merged["input_modalities"]) != "[text image]" {
+		t.Errorf("architecture.input_modalities not refreshed: %v", merged)
+	}
+	// a model with no modality data gets no invented field
+	if len(models) > 1 {
+		e2 := models[1].(map[string]any)
+		if _, has := e2["input"]; has {
+			t.Errorf("text-only entry must not claim modalities: %v", e2)
+		}
+		if _, has := e2["architecture"]; has {
+			t.Errorf("text-only entry must not gain an architecture block: %v", e2)
+		}
 	}
 }
