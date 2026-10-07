@@ -222,7 +222,9 @@ entry with `context_window` (mirrored as `context_length`, since agents read
 different spellings), `max_output_tokens`, modalities, `reasoning`,
 `reasoning_options` (the effort ladder a reasoning model accepts, as
 models.dev publishes it — what oh-my-pi needs beyond the boolean), and
-`responses_api`. The catalog is scoped per client key when a superadmin
+`responses_api`. Zen and Z.ai get their limits from models.dev; Kilo's own
+rich catalog stays the authority for its limits and modalities, with only the
+reasoning facts resolved from the catalog. The catalog is scoped per client key when a superadmin
 has revoked providers for the key's owner (Users → Provider access):
 revoked providers vanish from the list and route like unknown prefixes.
 Where metadata is available, IDs are advertised in a

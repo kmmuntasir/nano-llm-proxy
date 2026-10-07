@@ -142,9 +142,16 @@ true` alone says nothing about which values the model accepts:
 
 Option types mirror models.dev: `effort` carries a `values` ladder, `toggle`
 nothing (reasoning on or off), `budget_tokens` a `min`/`max` range. Options
-come from the models.dev catalog; a reasoning model the catalog doesn't
-document yet falls back to `effort` with `low`/`medium`/`high`, and a model
-flagged non-reasoning never gets the field at all.
+come from the models.dev catalog; a zen/zai reasoning model the catalog
+doesn't document yet falls back to `effort` with `low`/`medium`/`high`, and a
+model flagged non-reasoning never gets the field at all.
+
+Kilo entries resolve their reasoning fields from the catalog too
+(`kilo.modelMeta`), keyed by Kilo's own ids — `:free` suffix included.
+Kilo's upstream numbers (context/output limits, modalities,
+`supported_parameters`) always win; only the reasoning facts come from the
+catalog. A kilo model models.dev doesn't document keeps both fields absent
+rather than advertising an unverified `false`.
 
 The ID suffix is cosmetic (context + input modalities); bare IDs are
 accepted on every endpoint. Z.ai entries are enriched from a models.dev-synced

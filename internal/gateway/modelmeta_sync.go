@@ -30,6 +30,10 @@ import (
 //	     what the coding endpoint serves; the platform catalogs fill in older
 //	     models). Catalog-unknown ids are left to the zai catalog hook's
 //	     fallback; meta ids that vanished from every entry are pruned.
+//	kilo: merged from the kilo entry. Kilo's own catalog already carries
+//	     limits/modalities/supported_parameters, so only the reasoning facts
+//	     (reasoning, reasoning_options) are read back out of the meta —
+//	     upstream's own numbers always win in the catalog hook.
 //
 // The per-model responsesApi flag is never auto-touched — models.dev has no
 // such concept, so sync overwrites preserve whatever the admin toggled.
@@ -42,6 +46,12 @@ const defaultModelsDevURL = "https://models.dev/api.json"
 // zaiModelsDevEntries are the models.dev provider entries merged into
 // Zai.ModelMeta, in first-hit-wins order.
 var zaiModelsDevEntries = []string{"zai-coding-plan", "zhipuai-coding-plan", "zai", "zhipuai"}
+
+// kiloModelsDevEntries are the models.dev provider entries merged into
+// Kilo.ModelMeta, in first-hit-wins order. models.dev's "kilo" entry keys
+// models by the very ids Kilo's own /models advertises (":free" suffix
+// included), so the join is exact — no id fuzzing needed.
+var kiloModelsDevEntries = []string{"kilo"}
 
 // metaSyncInFlight guards the background trigger so overlapping maintenance
 // ticks never run two syncs at once (manual syncs bypass it by design).
@@ -213,7 +223,7 @@ func (g *gateway) syncModelMeta(devURL string) settings.ModelMetaSyncStatus {
 			} else {
 				var subtrees map[string]map[string]modelsDevModel
 				subtrees, err = decodeModelsDevSubtrees(io.LimitReader(resp.Body, 20<<20),
-					append([]string{"opencode"}, zaiModelsDevEntries...))
+					append(append([]string{"opencode"}, zaiModelsDevEntries...), kiloModelsDevEntries...))
 				if err == nil {
 					err = g.mergeModelMeta(ctx, subtrees, &st)
 				}
@@ -280,6 +290,7 @@ func (g *gateway) mergeModelMeta(ctx context.Context, subtrees map[string]map[st
 		}
 	}
 	mergeZaiModelMeta(current, subtrees, st)
+	mergeKiloModelMeta(current, subtrees, st)
 
 	// mark success BEFORE the status snapshot is persisted — syncModelMeta
 	// only flips it on the returned copy after we return, and the DB must
@@ -289,6 +300,7 @@ func (g *gateway) mergeModelMeta(ctx context.Context, subtrees map[string]map[st
 	if err := g.store.UpdateSettings(func(rs *settings.RuntimeSettings) *settings.RuntimeSettings {
 		rs.Zen.ModelMeta = current.Zen.ModelMeta
 		rs.Zai.ModelMeta = current.Zai.ModelMeta
+		rs.Kilo.ModelMeta = current.Kilo.ModelMeta
 		rs.Zen.ModelMetaSyncStatus = &status
 		return rs
 	}); err != nil {
@@ -348,6 +360,56 @@ func mergeZaiModelMeta(current *settings.RuntimeSettings, subtrees map[string]ma
 	for id := range current.Zai.ModelMeta {
 		if _, ok := devs[id]; !ok {
 			delete(current.Zai.ModelMeta, id)
+			st.Pruned++
+		}
+	}
+}
+
+// mergeKiloModelMeta folds models.dev's kilo entry into Kilo.ModelMeta. Only
+// the reasoning facts are stored: Kilo's own catalog is the authority for
+// context/output limits, modalities and supported_parameters, and the hook
+// keeps preferring those — the meta exists solely to answer "does this model
+// reason, and at which levels", which Kilo's payload never says. Every entry
+// models.dev documents is kept (the catalog has no live-fetch step to prune
+// against, same as zai), an empty union leaves curated meta alone.
+func mergeKiloModelMeta(current *settings.RuntimeSettings, subtrees map[string]map[string]modelsDevModel, st *settings.ModelMetaSyncStatus) {
+	devs := map[string]modelsDevModel{}
+	for _, name := range kiloModelsDevEntries {
+		for id, dev := range subtrees[name] {
+			if _, dup := devs[id]; !dup {
+				devs[id] = dev
+			}
+		}
+	}
+	if len(devs) == 0 {
+		return
+	}
+	if current.Kilo.ModelMeta == nil {
+		current.Kilo.ModelMeta = map[string]settings.ModelMeta{}
+	}
+	for id, dev := range devs {
+		if !dev.Reasoning {
+			continue // nothing to add: no reasoning means no options
+		}
+		opts := cleanReasoningOptions(dev)
+		if len(opts) == 0 {
+			continue // reasoning with no published control — the hook omits the field
+		}
+		if _, exists := current.Kilo.ModelMeta[id]; exists {
+			st.Updated++
+		} else {
+			st.Added++
+		}
+		current.Kilo.ModelMeta[id] = settings.ModelMeta{
+			Reasoning:        true,
+			InputModalities:  dev.Modalities.Input,
+			Description:      dev.Description,
+			ReasoningOptions: opts,
+		}
+	}
+	for id := range current.Kilo.ModelMeta {
+		if _, ok := devs[id]; !ok {
+			delete(current.Kilo.ModelMeta, id)
 			st.Pruned++
 		}
 	}

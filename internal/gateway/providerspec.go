@@ -91,7 +91,11 @@ func zaiRateLimitReset(body []byte, now time.Time) (time.Time, bool) {
 
 // kiloCatalog is kilo's per-entry hook: Kilo's catalog is rich — map the
 // fields agents read. Relocated verbatim from the former builtin branch of
-// decodeModelList.
+// decodeModelList. Reasoning is the one thing Kilo's payload never states, so
+// it is resolved from the models.dev-synced Kilo.ModelMeta: a model the
+// catalog documents gets the boolean plus its effort ladder, and one it
+// doesn't keeps both fields absent rather than asserting a "false" the
+// gateway never verified.
 func kiloCatalog(g *gateway, ref providerRef, id string, entry, raw map[string]any) bool {
 	if g.rs().Kilo.FreeOnly {
 		if free, _ := raw["isFree"].(bool); !free {
@@ -128,6 +132,9 @@ func kiloCatalog(g *gateway, ref providerRef, id string, entry, raw map[string]a
 	}
 	if free, ok := raw["isFree"].(bool); ok {
 		entry["free"] = free
+	}
+	if meta, known := g.rs().Kilo.ModelMeta[id]; known {
+		applyReasoningFacts(entry, meta, true)
 	}
 	cw, _ := entry["context_window"].(int64)
 	entry["id"] = ref.name + "/" + buildSuffixedID(id, cw, mods)

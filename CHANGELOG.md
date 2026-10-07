@@ -22,6 +22,12 @@ Release notes are generated from commit prefixes, so `feat:`, `fix:`,
   doesn't document yet fall back to `effort` with `low`/`medium`/`high`, and
   non-reasoning models never get the field. This is what oh-my-pi needs
   beyond the `reasoning` boolean.
+- Kilo preset providers get `reasoning` + `reasoning_options` from the same
+  sync, stored in the new `kilo.modelMeta` and keyed by Kilo's own ids
+  (`:free` suffix included, which models.dev's kilo entry carries too).
+  Upstream's context/output limits, modalities and `supported_parameters`
+  still win — only the reasoning facts are resolved. Models models.dev
+  doesn't document keep both fields absent instead of an unverified `false`.
 
 ## [0.1.1] — 2026-09-27
 

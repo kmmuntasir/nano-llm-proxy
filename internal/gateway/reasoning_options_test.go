@@ -282,6 +282,162 @@ func TestZaiCatalogAdvertisesReasoningOptions(t *testing.T) {
 	}
 }
 
+// The kilo catalog hook resolves reasoning from the models.dev kilo entry.
+// Upstream's own limits/modalities must still win, and a model the catalog
+// doesn't document must keep BOTH reasoning fields absent rather than have
+// the gateway assert an unverified "false".
+func TestKiloCatalogResolvesReasoningFromMeta(t *testing.T) {
+	up := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if strings.HasSuffix(r.URL.Path, "/models") {
+			w.Write([]byte(`{"data":[
+				{"id":"stepfun/step-3.7-flash:free","context_length":262144,
+				 "isFree":true,"description":"Step 3.7 Flash",
+				 "architecture":{"input_modalities":["text","image"]},
+				 "top_provider":{"max_completion_tokens":262144},
+				 "supported_parameters":["reasoning","tools"]},
+				{"id":"kilo-auto/free","context_length":256000,"isFree":true}
+			]}`))
+			return
+		}
+		w.Write([]byte(`{}`))
+	}))
+	defer up.Close()
+
+	g, st := testStoreGateway(t, up.URL)
+	addPresetProvider(t, st, "kilo", "mykilo", up.URL, "kk1")
+	adminCookie := loginAs(t, g, "admin@example.com", "super-secret-pass")
+	rec := httptest.NewRecorder()
+	req := httptest.NewRequest("PUT", "/api/settings", strings.NewReader(
+		`{"kilo":{"modelMeta":{"stepfun/step-3.7-flash:free":{"reasoning":true,
+		 "reasoningOptions":[{"type":"effort","values":["low","medium","high"]}]}}}}`))
+	req.AddCookie(adminCookie)
+	req.Header.Set("Origin", "https://gateway.example.com")
+	req.RemoteAddr = "10.9.9.9:5555"
+	g.requireSession(g.requireSuperadmin(g.handlePutSettings))(rec, req)
+	if rec.Code != 200 {
+		t.Fatalf("PUT settings: got %d: %s", rec.Code, rec.Body.String())
+	}
+	if err := g.rebuildPools(); err != nil {
+		t.Fatalf("rebuildPools: %v", err)
+	}
+	ref, ok := g.provider("mykilo")
+	if !ok {
+		t.Fatal("kilo preset provider not in registry")
+	}
+	models, err := g.fetchUpstreamModels(ref)
+	if err != nil {
+		t.Fatalf("fetchUpstreamModels: %v", err)
+	}
+	byID := map[string]map[string]any{}
+	for _, m := range models {
+		e := m.(map[string]any)
+		byID[e["id"].(string)] = e
+	}
+
+	known, ok := byID["mykilo/stepfun/step-3.7-flash:free-262K-txt-img"]
+	if !ok {
+		t.Fatalf("suffixed kilo entry missing: %v", byID)
+	}
+	if known["reasoning"] != true {
+		t.Errorf("catalog-known kilo model must read as reasoning: %v", known)
+	}
+	opts, _ := known["reasoning_options"].([]settings.ReasoningOption)
+	if len(opts) != 1 || strings.Join(opts[0].Values, ",") != "low,medium,high" {
+		t.Errorf("kilo ladder not advertised: %v", known["reasoning_options"])
+	}
+	// upstream's own numbers still win over anything in the meta
+	if known["context_window"] != int64(262144) || known["max_output_tokens"] != int64(262144) {
+		t.Errorf("upstream limits must survive the meta merge: %v", known)
+	}
+	if known["description"] != "Step 3.7 Flash" {
+		t.Errorf("upstream description must survive: %v", known)
+	}
+
+	unknown, ok := byID["mykilo/kilo-auto/free-256K"]
+	if !ok {
+		t.Fatalf("kilo entry without meta missing: %v", byID)
+	}
+	if _, has := unknown["reasoning"]; has {
+		t.Errorf("unverified kilo model must not claim reasoning:false: %v", unknown)
+	}
+	if _, has := unknown["reasoning_options"]; has {
+		t.Errorf("unverified kilo model must not advertise a ladder: %v", unknown)
+	}
+}
+
+// The sync stores kilo reasoning facts keyed by Kilo's own ids — including
+// the ":free" suffix, which models.dev's kilo entry carries too.
+func TestSyncModelMetaStoresKiloReasoning(t *testing.T) {
+	zen := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Write([]byte(`{"data":[]}`))
+	}))
+	defer zen.Close()
+	dev := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Write([]byte(`{
+			"opencode": {"models": {}},
+			"kilo": {"models": {
+				"stepfun/step-3.7-flash:free": {"reasoning": true,
+				 "reasoning_options": [{"type":"effort","values":["low","medium","high"]}],
+				 "limit":{"context":262144,"output":262144}, "description":"Step 3.7 Flash"},
+				"openrouter/free": {"reasoning": true, "reasoning_options": [],
+				 "limit":{"context":200000,"output":16384}},
+				"some-chat-model": {"reasoning": false, "limit":{"context":8000,"output":2000}}
+			}}
+		}`))
+	}))
+	defer dev.Close()
+
+	g, _ := testStoreGateway(t, zen.URL)
+	if st := g.syncModelMeta(dev.URL); !st.OK {
+		t.Fatalf("sync failed: %+v", st)
+	}
+	kilo := g.rs().Kilo.ModelMeta
+	opts := kilo["stepfun/step-3.7-flash:free"].ReasoningOptions
+	if len(opts) != 1 || strings.Join(opts[0].Values, ",") != "low,medium,high" {
+		t.Fatalf("kilo ladder not stored: %+v", kilo)
+	}
+	// reasoning with no published control: nothing for the hook to advertise
+	if _, ok := kilo["openrouter/free"]; ok {
+		t.Errorf("kilo model without a published control should not be stored: %+v", kilo)
+	}
+	if _, ok := kilo["some-chat-model"]; ok {
+		t.Errorf("non-reasoning kilo model should not be stored: %+v", kilo)
+	}
+
+	// PUT /api/settings replaces the whole document (it decodes onto
+	// defaults), so a save that omits kilo.modelMeta drops it — which is why
+	// the Settings page round-trips the synced map like zen/zai do. Pin both
+	// halves: echoed back it survives, omitted it goes, and a re-sync rebuilds
+	// it from the catalog either way.
+	save := func(body string) {
+		t.Helper()
+		rec := httptest.NewRecorder()
+		req := httptest.NewRequest("PUT", "/api/settings", strings.NewReader(body))
+		req.AddCookie(loginAs(t, g, "admin@example.com", "super-secret-pass"))
+		req.Header.Set("Origin", "https://gateway.example.com")
+		req.RemoteAddr = "10.9.9.9:5555"
+		g.requireSession(g.requireSuperadmin(g.handlePutSettings))(rec, req)
+		if rec.Code != 200 {
+			t.Fatalf("PUT settings: got %d: %s", rec.Code, rec.Body.String())
+		}
+	}
+	save(`{"kilo":{"freeOnly":true,"modelMeta":{"stepfun/step-3.7-flash:free":
+		{"reasoning":true,"reasoningOptions":[{"type":"effort","values":["low","medium","high"]}]}}}}`)
+	if len(g.rs().Kilo.ModelMeta) != 1 {
+		t.Fatal("settings save dropped the round-tripped kilo meta")
+	}
+	save(`{"kilo":{"freeOnly":true}}`)
+	if len(g.rs().Kilo.ModelMeta) != 0 {
+		t.Fatal("omitted kilo meta should be dropped by a full-document PUT")
+	}
+	if st := g.syncModelMeta(dev.URL); !st.OK {
+		t.Fatalf("re-sync failed: %+v", st)
+	}
+	if len(g.rs().Kilo.ModelMeta) != 1 {
+		t.Fatalf("re-sync did not rebuild the kilo meta: %+v", g.rs().Kilo.ModelMeta)
+	}
+}
+
 // Generic passthrough providers keep upstream's own numbers; the mirror must
 // still hold so an agent reading context_length sees the same window.
 func TestGenericCatalogMirrorsContextLength(t *testing.T) {

@@ -202,6 +202,9 @@ export interface ZenSettingsView {
 
 export interface KiloSettingsView {
   freeOnly: boolean
+  // Sync-managed (models.dev) — only the reasoning facts: Kilo's own catalog
+  // carries the limits/modalities, it never states reasoning levels.
+  modelMeta?: Record<string, ModelMetaView>
 }
 
 // Sync-managed (models.dev, same sync as zen's) — Z.ai's /models only lists

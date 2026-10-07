@@ -102,6 +102,12 @@ type ZenSettings struct {
 
 type KiloSettings struct {
 	FreeOnly bool `json:"freeOnly"`
+	// ModelMeta carries the per-model reasoning facts the models.dev sync
+	// resolves for Kilo's catalog. Kilo's own /models is rich (limits,
+	// modalities, supported_parameters come from upstream and win), but it
+	// says nothing about reasoning levels, so those come from the catalog —
+	// same sync, same shape as zen/zai.
+	ModelMeta map[string]ModelMeta `json:"modelMeta,omitempty"`
 }
 
 // ZaiSettings carries the model metadata for Z.ai preset providers. Z.ai's

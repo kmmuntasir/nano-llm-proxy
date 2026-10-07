@@ -52,6 +52,7 @@ block is server-owned).
 | `zen.modelMeta` | empty | Per-model metadata (context window, max output, modalities, reasoning, reasoning options, description) shown in `/v1/models`; unknown models get conservative defaults |
 | `zen.modelMetaAutoSync` | false | Refresh `modelMeta` from models.dev once a day in the background |
 | `kilo.freeOnly` | false | Same catalog restriction as `zen.freeOnly`, applied to Kilo preset providers |
+| `kilo.modelMeta` | empty | Per-model *reasoning* metadata (reasoning flag + reasoning options) for Kilo preset providers, filled by the models.dev sync. Kilo's own catalog already carries context/output limits, modalities and `supported_parameters`, and those always win — only the reasoning facts are taken from here. A model models.dev doesn't document keeps both fields absent rather than an unverified `false` |
 | `zai.modelMeta` | empty | Per-model metadata for Z.ai preset providers (context window, max output, modalities, reasoning, reasoning options, description); filled by the models.dev sync. Unknown models advertise a 1M context window so coding agents don't downshift to 128K |
 | `webTools.enabled` | false | Serve the MCP web tools at `POST /mcp` to every client key. Off after upgrades — the SearXNG/obscura backends must be installed first (see `docs/deployment.md`) |
 | `webTools.searxngUrl` | `http://127.0.0.1:8888` | SearXNG base URL; the JSON API must be enabled there (`search.formats` includes `json`) |
@@ -98,12 +99,20 @@ on). It fetches `https://models.dev/api.json` and then:
   the platform entries fill in older models; ids that vanish from all four
   entries are pruned, and models the catalog doesn't know yet fall back to a
   1M context window in `/v1/models`,
+- merges the `kilo` entry into `kilo.modelMeta` (only the reasoning facts —
+  Kilo's own limits/modalities win in the catalog hook), keyed by Kilo's own
+  ids including the `:free` suffix, which models.dev's kilo entry carries too,
 - never touches the per-model `responsesApi` flags,
 - carries each model's `reasoning_options` (the effort ladder agents such as
   oh-my-pi read) through into `/v1/models`; like the limits it is catalog
   data, so a refresh overwrites it,
 - on any fetch/parse/persist failure changes nothing and records the error in
   the sync status shown in the GUI.
+
+All three catalogs are sync-managed: `PUT /api/settings` replaces the whole
+document, so any client that saves settings must send `zen.modelMeta`,
+`zai.modelMeta` and `kilo.modelMeta` back (the admin GUI does). A save that
+omits one empties it; the next sync repopulates it.
 
 ## CLI
 

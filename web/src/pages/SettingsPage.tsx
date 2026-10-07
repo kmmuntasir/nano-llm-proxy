@@ -83,6 +83,8 @@ interface SettingsForm {
   modelMeta: Record<string, ModelMetaView>
   /** sync-managed (models.dev, same sync as zen's) — saved back untouched */
   zaiModelMeta: Record<string, ModelMetaView>
+  /** sync-managed (models.dev, same sync as zen's) — saved back untouched */
+  kiloModelMeta: Record<string, ModelMetaView>
   kiloFreeOnly: boolean
   webTools: WebToolsSettingsView
 }
@@ -98,6 +100,7 @@ function hydrate(s: RuntimeSettingsView): SettingsForm {
     modelMetaAutoSync: s.zen.modelMetaAutoSync,
     modelMeta: { ...(s.zen.modelMeta ?? {}) },
     zaiModelMeta: { ...(s.zai.modelMeta ?? {}) },
+    kiloModelMeta: { ...(s.kilo.modelMeta ?? {}) },
     kiloFreeOnly: s.kilo.freeOnly,
     // The PUT replaces the whole document — webTools must always ride
     // along or a save from this page would revert it to defaults.
@@ -121,7 +124,7 @@ function buildPayload(
         modelMeta: f.modelMeta,
         modelMetaAutoSync: f.modelMetaAutoSync,
       },
-      kilo: { freeOnly: f.kiloFreeOnly },
+      kilo: { freeOnly: f.kiloFreeOnly, modelMeta: f.kiloModelMeta },
       zai: { modelMeta: f.zaiModelMeta },
       webTools: f.webTools,
     },
@@ -153,11 +156,11 @@ function SyncCard({ status }: { status?: ModelMetaSyncStatusView }) {
       <Card.Header>
         <Heading size="sm">Model catalog (models.dev)</Heading>
         <Text fontSize="xs" color="fg.muted">
-          Zen and Z.ai list bare model ids — context windows, output limits and
-          reasoning flags come from models.dev. Auto-sync refreshes both catalogs
-          daily; entries for models models.dev doesn't know are left as you wrote
-          them, and dead ids are pruned. Manual edits to catalog-known models are
-          overwritten on the next sync.
+          Zen, Kilo and Z.ai list bare model ids — context windows, output
+          limits and reasoning flags come from models.dev. Auto-sync refreshes
+          all three catalogs daily; entries for models models.dev doesn't know
+          are left as you wrote them, and dead ids are pruned. Manual edits to
+          catalog-known models are overwritten on the next sync.
         </Text>
       </Card.Header>
       <Card.Body>
