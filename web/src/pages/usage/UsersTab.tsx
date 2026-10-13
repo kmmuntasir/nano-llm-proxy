@@ -6,7 +6,7 @@ import { filterSearch, useUsageFilters } from "./urlState"
 
 // Superadmin only (route-gated): usage per user, row → user detail.
 export default function UsersTab() {
-  const { filters, isSuperadmin, searchParams } = useUsageFilters()
+  const { filters, isAdmin, searchParams } = useUsageFilters()
   const navigate = useNavigate()
 
   return (
@@ -21,7 +21,7 @@ export default function UsersTab() {
             filters={filters}
             groupBy="user"
             showRangeNotice
-            isSuperadmin={isSuperadmin}
+            isAdmin={isAdmin}
             onRowClick={(r) =>
               navigate(`/usage/users/${r.userId}${filterSearch(searchParams, { userId: "" })}`)
             }

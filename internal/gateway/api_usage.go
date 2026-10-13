@@ -52,7 +52,7 @@ func usageRange(r *http.Request) (from, to int64, ok bool) {
 // scopedUser returns nil (all users) for superadmins and their own id for
 // everyone else.
 func scopedUser(u *store.User) *int64 {
-	if u != nil && u.Role == "superadmin" {
+	if u != nil && isAdminRole(u.Role) {
 		return nil
 	}
 	if u == nil {

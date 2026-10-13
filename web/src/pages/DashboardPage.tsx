@@ -10,6 +10,7 @@ import {
   VStack,
 } from "@chakra-ui/react"
 import { api } from "../api/client"
+import { isAdminRole } from "../api/roles"
 import { DataTable } from "../components/DataTable"
 import { useSession } from "../App"
 import type { DashboardData, UsageActivityRow, UsageTotals } from "../api/types"
@@ -48,7 +49,7 @@ export default function DashboardPage() {
   })
   // 24h usage totals for the stat row, scoped to the signed-in user
   const { data: me } = useSession()
-  const isSuperadmin = me?.user.role === "superadmin"
+  const isAdmin = isAdminRole(me?.user.role)
   const usage = useQuery({
     queryKey: ["dashboard", "usage"],
     queryFn: () => {
@@ -133,7 +134,7 @@ export default function DashboardPage() {
               rowKey={(_, i) => String(i)}
               empty="No requests recorded yet"
               columns={[
-                ...(isSuperadmin
+                ...(isAdmin
                   ? [{ header: "User", render: (e: UsageActivityRow) => e.email }]
                   : []),
                 { header: "Time", render: (e: UsageActivityRow) => fmtTs(e.ts) },

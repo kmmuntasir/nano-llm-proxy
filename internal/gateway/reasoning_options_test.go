@@ -175,7 +175,7 @@ func TestZenCatalogAdvertisesContextLengthAndReasoningOptions(t *testing.T) {
 	req.AddCookie(adminCookie)
 	req.Header.Set("Origin", "https://gateway.example.com")
 	req.RemoteAddr = "10.9.9.9:5555"
-	g.requireSession(g.requireSuperadmin(g.handlePutSettings))(rec, req)
+	g.requireSession(g.requireAdmin(g.handlePutSettings))(rec, req)
 	if rec.Code != 200 {
 		t.Fatalf("PUT settings: got %d: %s", rec.Code, rec.Body.String())
 	}
@@ -245,7 +245,7 @@ func TestZaiCatalogAdvertisesReasoningOptions(t *testing.T) {
 	req.AddCookie(adminCookie)
 	req.Header.Set("Origin", "https://gateway.example.com")
 	req.RemoteAddr = "10.9.9.9:5555"
-	g.requireSession(g.requireSuperadmin(g.handlePutSettings))(rec, req)
+	g.requireSession(g.requireAdmin(g.handlePutSettings))(rec, req)
 	if rec.Code != 200 {
 		t.Fatalf("PUT settings: got %d: %s", rec.Code, rec.Body.String())
 	}
@@ -313,7 +313,7 @@ func TestKiloCatalogResolvesReasoningFromMeta(t *testing.T) {
 	req.AddCookie(adminCookie)
 	req.Header.Set("Origin", "https://gateway.example.com")
 	req.RemoteAddr = "10.9.9.9:5555"
-	g.requireSession(g.requireSuperadmin(g.handlePutSettings))(rec, req)
+	g.requireSession(g.requireAdmin(g.handlePutSettings))(rec, req)
 	if rec.Code != 200 {
 		t.Fatalf("PUT settings: got %d: %s", rec.Code, rec.Body.String())
 	}
@@ -416,7 +416,7 @@ func TestSyncModelMetaStoresKiloReasoning(t *testing.T) {
 		req.AddCookie(loginAs(t, g, "admin@example.com", "super-secret-pass"))
 		req.Header.Set("Origin", "https://gateway.example.com")
 		req.RemoteAddr = "10.9.9.9:5555"
-		g.requireSession(g.requireSuperadmin(g.handlePutSettings))(rec, req)
+		g.requireSession(g.requireAdmin(g.handlePutSettings))(rec, req)
 		if rec.Code != 200 {
 			t.Fatalf("PUT settings: got %d: %s", rec.Code, rec.Body.String())
 		}

@@ -6,6 +6,7 @@
 import { useMemo } from "react"
 import { useSearchParams } from "react-router-dom"
 import { useSession } from "../../App"
+import { isAdminRole } from "../../api/roles"
 import { browserTz } from "../../api/usage"
 import type { UsageFilters } from "../../api/usage"
 import type { SortOrder, UsageStatusFilter, UsageSurface } from "../../api/types"
@@ -109,12 +110,12 @@ export interface ParsedFilters {
 /**
  * Reads filters from the URL. Explicit from/to (unix seconds) win over a
  * preset; anything malformed falls back to the default (last 24h). userId is
- * dropped for non-superadmins — the server forces self-scope anyway and
+ * dropped for non-admins — the server forces self-scope anyway and
  * would 403 on someone else's id.
  */
 export function parseFilters(
   sp: URLSearchParams,
-  opts: { isSuperadmin: boolean; now: number; tz: number },
+  opts: { isAdmin: boolean; now: number; tz: number },
 ): ParsedFilters {
   const from = positiveInt(sp.get("from"))
   const to = positiveInt(sp.get("to"))
@@ -133,7 +134,7 @@ export function parseFilters(
     filters: {
       ...range,
       tz: opts.tz,
-      userId: opts.isSuperadmin ? positiveInt(sp.get("userId")) : undefined,
+      userId: opts.isAdmin ? positiveInt(sp.get("userId")) : undefined,
       keyId: positiveInt(sp.get("keyId")),
       provider: sp.get("provider") || undefined,
       model: sp.get("model") || undefined,
@@ -232,24 +233,24 @@ export function writeTableParams<S extends string>(
 
 // --- hooks ---
 
-export function useIsSuperadmin(): boolean {
+export function useIsAdmin(): boolean {
   const { data } = useSession()
-  return data?.user.role === "superadmin"
+  return isAdminRole(data?.user.role)
 }
 
 export function useUsageFilters() {
   const [sp, setSp] = useSearchParams()
-  const isSuperadmin = useIsSuperadmin()
+  const isAdmin = useIsAdmin()
   const now = nowMinute()
   const tz = browserTz()
   const key = sp.toString()
   const parsed = useMemo(
-    () => parseFilters(new URLSearchParams(key), { isSuperadmin, now, tz }),
-    [key, isSuperadmin, now, tz],
+    () => parseFilters(new URLSearchParams(key), { isAdmin, now, tz }),
+    [key, isAdmin, now, tz],
   )
   return {
     ...parsed,
-    isSuperadmin,
+    isAdmin,
     searchParams: sp,
     setFilters: (patch: FilterPatch) => setSp((prev) => applyFilterPatch(prev, patch)),
   }

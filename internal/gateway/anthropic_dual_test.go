@@ -619,7 +619,7 @@ func TestProviderAPIAnthropicEndpointValidation(t *testing.T) {
 		req := httptest.NewRequest("POST", "/api/providers", strings.NewReader(body))
 		req.AddCookie(adminCookie)
 		rec := httptest.NewRecorder()
-		g.requireSession(g.requireSuperadmin(g.handleCreateProvider))(rec, req)
+		g.requireSession(g.requireAdmin(g.handleCreateProvider))(rec, req)
 		return rec
 	}
 
@@ -649,7 +649,7 @@ func TestProviderAPIAnthropicEndpointValidation(t *testing.T) {
 	rec = httptest.NewRecorder()
 	list := httptest.NewRequest("GET", "/api/providers", nil)
 	list.AddCookie(adminCookie)
-	g.requireSession(g.requireSuperadmin(g.handleListProviders))(rec, list)
+	g.requireSession(g.requireAdmin(g.handleListProviders))(rec, list)
 	if rec.Code != 200 {
 		t.Fatalf("list: got %d", rec.Code)
 	}
@@ -681,7 +681,7 @@ func TestProviderAPIAnthropicEndpointValidation(t *testing.T) {
 		req.AddCookie(adminCookie)
 		req.SetPathValue("id", fmt.Sprintf("%d", id))
 		rec := httptest.NewRecorder()
-		g.requireSession(g.requireSuperadmin(g.handlePatchProvider))(rec, req)
+		g.requireSession(g.requireAdmin(g.handlePatchProvider))(rec, req)
 		return rec
 	}
 	rec = patch(created.ID, `{"baseUrl":"","anthropicBaseUrl":""}`)

@@ -56,7 +56,7 @@ func TestUserProviderAccess(t *testing.T) {
 		req.SetPathValue("id", strconv.FormatInt(restricted.ID, 10))
 		req.SetPathValue("providerId", strconv.FormatInt(prov.ID, 10))
 		rec := httptest.NewRecorder()
-		g.requireSession(g.requireSuperadmin(g.handleSetUserProviderAccess))(rec, req)
+		g.requireSession(g.requireAdmin(g.handleSetUserProviderAccess))(rec, req)
 		return rec
 	}
 
@@ -148,7 +148,7 @@ func TestUserProviderAccess(t *testing.T) {
 	req.SetPathValue("id", strconv.FormatInt(restricted.ID, 10))
 	req.SetPathValue("providerId", "99999")
 	rec = httptest.NewRecorder()
-	g.requireSession(g.requireSuperadmin(g.handleSetUserProviderAccess))(rec, req)
+	g.requireSession(g.requireAdmin(g.handleSetUserProviderAccess))(rec, req)
 	if rec.Code != 404 {
 		t.Fatalf("unknown provider: got %d, want 404", rec.Code)
 	}
@@ -159,7 +159,7 @@ func TestUserProviderAccess(t *testing.T) {
 	req = httptest.NewRequest("GET", "/api/users/x/providers", nil)
 	req.AddCookie(userCookie)
 	req.SetPathValue("id", strconv.FormatInt(restricted.ID, 10))
-	g.requireSession(g.requireSuperadmin(g.handleListUserProviders))(rec, req)
+	g.requireSession(g.requireAdmin(g.handleListUserProviders))(rec, req)
 	if rec.Code != 403 {
 		t.Fatalf("plain user list: got %d, want 403", rec.Code)
 	}
@@ -169,7 +169,7 @@ func TestUserProviderAccess(t *testing.T) {
 	req = httptest.NewRequest("GET", "/api/users/x/providers", nil)
 	req.AddCookie(adminCookie)
 	req.SetPathValue("id", strconv.FormatInt(restricted.ID, 10))
-	g.requireSession(g.requireSuperadmin(g.handleListUserProviders))(rec, req)
+	g.requireSession(g.requireAdmin(g.handleListUserProviders))(rec, req)
 	if rec.Code != 200 {
 		t.Fatalf("list: got %d: %s", rec.Code, rec.Body.String())
 	}
@@ -236,7 +236,7 @@ func TestSuperadminsAlwaysHaveEveryProvider(t *testing.T) {
 		req.SetPathValue("id", strconv.FormatInt(userID, 10))
 		req.SetPathValue("providerId", strconv.FormatInt(prov.ID, 10))
 		rec := httptest.NewRecorder()
-		g.requireSession(g.requireSuperadmin(g.handleSetUserProviderAccess))(rec, req)
+		g.requireSession(g.requireAdmin(g.handleSetUserProviderAccess))(rec, req)
 		return rec.Code
 	}
 	setRole := func(userID int64, role string) {
@@ -245,7 +245,7 @@ func TestSuperadminsAlwaysHaveEveryProvider(t *testing.T) {
 		req.Header.Set("Origin", "https://gateway.example.com")
 		req.SetPathValue("id", strconv.FormatInt(userID, 10))
 		rec := httptest.NewRecorder()
-		g.requireSession(g.requireSuperadmin(g.handlePatchUser))(rec, req)
+		g.requireSession(g.requireAdmin(g.handlePatchUser))(rec, req)
 		if rec.Code != 200 {
 			t.Fatalf("set role %s: %d %s", role, rec.Code, rec.Body.String())
 		}

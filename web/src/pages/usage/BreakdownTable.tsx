@@ -56,7 +56,7 @@ function modelCell(r: UsageBreakdownRow) {
   )
 }
 
-function labelColumns(groupBy: UsageBreakdownGroupBy, isSuperadmin: boolean): Col[] {
+function labelColumns(groupBy: UsageBreakdownGroupBy, isAdmin: boolean): Col[] {
   const label = { sortKey: "label" as const, defaultOrder: "asc" as const }
   switch (groupBy) {
     case "user":
@@ -81,7 +81,7 @@ function labelColumns(groupBy: UsageBreakdownGroupBy, isSuperadmin: boolean): Co
       const cols: Col[] = [
         { id: "key", header: "Key", render: (r) => r.alias || `#${r.keyId}`, ...label },
       ]
-      if (isSuperadmin) {
+      if (isAdmin) {
         cols.push({ id: "owner", header: "Owner", render: (r) => userLabel(r) })
       }
       return cols
@@ -197,7 +197,7 @@ export function BreakdownTable({
   filters,
   groupBy,
   prefix = "",
-  isSuperadmin,
+  isAdmin,
   q,
   onRowClick,
   defaultPageSize = 25,
@@ -207,7 +207,7 @@ export function BreakdownTable({
   filters: UsageFilters
   groupBy: UsageBreakdownGroupBy
   prefix?: string
-  isSuperadmin: boolean
+  isAdmin: boolean
   q?: string
   onRowClick?: (row: UsageBreakdownRow) => void
   defaultPageSize?: number
@@ -243,7 +243,7 @@ export function BreakdownTable({
         </Text>
       )}
       <PaginatedTable
-        columns={[...labelColumns(groupBy, isSuperadmin), ...METRIC_COLUMNS]}
+        columns={[...labelColumns(groupBy, isAdmin), ...METRIC_COLUMNS]}
         rows={data?.rows ?? []}
         rowKey={(r) => rowKey(groupBy, r)}
         total={data?.total ?? 0}

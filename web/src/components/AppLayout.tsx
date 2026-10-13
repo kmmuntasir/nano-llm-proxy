@@ -31,6 +31,7 @@ import {
 import { useColorMode } from "./ui/color-mode"
 import { useTheme } from "next-themes"
 import { post } from "../api/client"
+import { isAdminRole } from "../api/roles"
 import { toaster } from "./ui/toaster"
 import UserAvatar from "./UserAvatar"
 import { useSession } from "../App"
@@ -40,7 +41,7 @@ interface NavItem {
   to: string
   label: string
   icon: ComponentType
-  superadminOnly?: boolean
+  adminOnly?: boolean
 }
 
 const navItems: NavItem[] = [
@@ -49,9 +50,9 @@ const navItems: NavItem[] = [
   { to: "/docs", label: "Guide", icon: BookOpen },
   { to: "/usage", label: "Usage", icon: BarChart3 },
   { to: "/profile", label: "Profile", icon: User },
-  { to: "/users", label: "Users", icon: Users, superadminOnly: true },
-  { to: "/providers", label: "Providers", icon: Server, superadminOnly: true },
-  { to: "/settings", label: "Settings", icon: Settings, superadminOnly: true },
+  { to: "/users", label: "Users", icon: Users, adminOnly: true },
+  { to: "/providers", label: "Providers", icon: Server, adminOnly: true },
+  { to: "/settings", label: "Settings", icon: Settings, adminOnly: true },
 ]
 
 function ColorModeMenu() {
@@ -269,8 +270,8 @@ export default function AppLayout({ children }: { children: ReactNode }) {
   const { data } = useSession()
   const [mobileOpen, setMobileOpen] = useState(false)
 
-  const isSuperadmin = data?.user.role === "superadmin"
-  const items = navItems.filter((i) => !i.superadminOnly || isSuperadmin)
+  const isAdmin = isAdminRole(data?.user.role)
+  const items = navItems.filter((i) => !i.adminOnly || isAdmin)
 
   return (
     <Flex minH="100vh">

@@ -58,11 +58,14 @@ func (g *gateway) requireSession(next http.HandlerFunc) http.HandlerFunc {
 	}
 }
 
-func (g *gateway) requireSuperadmin(next http.HandlerFunc) http.HandlerFunc {
+// requireAdmin admits superadmins and admins — they share every admin
+// route; the one admin restriction (no changes to superadmin accounts) is
+// enforced per handler (roles.go).
+func (g *gateway) requireAdmin(next http.HandlerFunc) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		user, ok := r.Context().Value(ctxUserKey).(*store.User)
-		if !ok || user.Role != "superadmin" {
-			writeJSON(w, http.StatusForbidden, map[string]any{"error": map[string]string{"message": "superadmin required"}})
+		if !ok || !isAdminRole(user.Role) {
+			writeJSON(w, http.StatusForbidden, map[string]any{"error": map[string]string{"message": "admin required"}})
 			return
 		}
 		next(w, r)

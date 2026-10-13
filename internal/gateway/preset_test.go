@@ -130,7 +130,7 @@ func TestKiloPresetCatalogEnrichment(t *testing.T) {
 	req.AddCookie(adminCookie)
 	req.Header.Set("Origin", "https://gateway.example.com")
 	req.RemoteAddr = "10.9.9.9:5555"
-	g.requireSession(g.requireSuperadmin(g.handlePutSettings))(rec, req)
+	g.requireSession(g.requireAdmin(g.handlePutSettings))(rec, req)
 	if rec.Code != 200 {
 		t.Fatalf("PUT settings: got %d: %s", rec.Code, rec.Body.String())
 	}
@@ -171,7 +171,7 @@ func TestZaiPresetCatalogEnrichment(t *testing.T) {
 	req.AddCookie(adminCookie)
 	req.Header.Set("Origin", "https://gateway.example.com")
 	req.RemoteAddr = "10.9.9.9:5555"
-	g.requireSession(g.requireSuperadmin(g.handlePutSettings))(rec, req)
+	g.requireSession(g.requireAdmin(g.handlePutSettings))(rec, req)
 	if rec.Code != 200 {
 		t.Fatalf("PUT settings: got %d: %s", rec.Code, rec.Body.String())
 	}
@@ -299,7 +299,7 @@ func TestKiloPresetSuffixStrippedOnRouting(t *testing.T) {
 func TestProviderPresetsEndpoint(t *testing.T) {
 	g, st := testStoreGateway(t, "http://127.0.0.1:1") // upstream never reached
 	insertPlainUser(t, st, "pi@example.com", "pi-password-123", "user")
-	handler := g.requireSession(g.requireSuperadmin(g.handleListPresets))
+	handler := g.requireSession(g.requireAdmin(g.handleListPresets))
 
 	// no cookie -> 401
 	rec := httptest.NewRecorder()
@@ -374,7 +374,7 @@ func TestPresetProviderCreate(t *testing.T) {
 		req := httptest.NewRequest("POST", "/api/providers", strings.NewReader(body))
 		req.AddCookie(adminCookie)
 		rec := httptest.NewRecorder()
-		g.requireSession(g.requireSuperadmin(g.handleCreateProvider))(rec, req)
+		g.requireSession(g.requireAdmin(g.handleCreateProvider))(rec, req)
 		return rec
 	}
 
@@ -429,7 +429,7 @@ func TestPresetProviderCreate(t *testing.T) {
 	patchReq := httptest.NewRequest("PATCH", "/api/providers/2", strings.NewReader(`{"preset":"openai"}`))
 	patchReq.AddCookie(adminCookie)
 	patchReq.SetPathValue("id", "2")
-	g.requireSession(g.requireSuperadmin(g.handlePatchProvider))(rec, patchReq)
+	g.requireSession(g.requireAdmin(g.handlePatchProvider))(rec, patchReq)
 	if rec.Code != 200 {
 		t.Fatalf("patch: got %d: %s", rec.Code, rec.Body.String())
 	}
@@ -442,7 +442,7 @@ func TestPresetProviderCreate(t *testing.T) {
 	rec = httptest.NewRecorder()
 	listReq := httptest.NewRequest("GET", "/api/providers", nil)
 	listReq.AddCookie(adminCookie)
-	g.requireSession(g.requireSuperadmin(g.handleListProviders))(rec, listReq)
+	g.requireSession(g.requireAdmin(g.handleListProviders))(rec, listReq)
 	var listed struct {
 		Providers []struct {
 			Name   string `json:"name"`
@@ -479,7 +479,7 @@ func TestProviderKeyLabelRequired(t *testing.T) {
 		req := httptest.NewRequest("POST", "/api/providers", strings.NewReader(body))
 		req.AddCookie(adminCookie)
 		rec := httptest.NewRecorder()
-		g.requireSession(g.requireSuperadmin(g.handleCreateProvider))(rec, req)
+		g.requireSession(g.requireAdmin(g.handleCreateProvider))(rec, req)
 		return rec
 	}
 
@@ -506,7 +506,7 @@ func TestProviderKeyLabelRequired(t *testing.T) {
 		req.AddCookie(adminCookie)
 		req.SetPathValue("id", fmt.Sprintf("%d", provID))
 		rec := httptest.NewRecorder()
-		g.requireSession(g.requireSuperadmin(g.handleAddProviderKey))(rec, req)
+		g.requireSession(g.requireAdmin(g.handleAddProviderKey))(rec, req)
 		return rec
 	}
 	rec = addKey(`{"key":"k2"}`)
@@ -531,7 +531,7 @@ func TestProviderKeyLabelRequired(t *testing.T) {
 		req.SetPathValue("id", fmt.Sprintf("%d", provID))
 		req.SetPathValue("keyId", fmt.Sprintf("%d", added.Entry.ID))
 		rec := httptest.NewRecorder()
-		g.requireSession(g.requireSuperadmin(g.handlePatchProviderKey))(rec, req)
+		g.requireSession(g.requireAdmin(g.handlePatchProviderKey))(rec, req)
 		return rec
 	}
 	rec = patchKey(`{"label":"   "}`)
@@ -651,7 +651,7 @@ func TestProviderKeyUsageEndpoint(t *testing.T) {
 		req.SetPathValue("id", fmt.Sprintf("%d", provID))
 		req.SetPathValue("keyId", fmt.Sprintf("%d", keyID))
 		rec := httptest.NewRecorder()
-		g.requireSession(g.requireSuperadmin(g.handleProviderKeyUsage))(rec, req)
+		g.requireSession(g.requireAdmin(g.handleProviderKeyUsage))(rec, req)
 		return rec
 	}
 

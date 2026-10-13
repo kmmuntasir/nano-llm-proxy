@@ -373,7 +373,7 @@ func TestLoginSessionRoleGating(t *testing.T) {
 	lu := httptest.NewRequest("GET", "/api/users", nil)
 	lu.AddCookie(piCookie)
 	lu.RemoteAddr = "10.9.9.9:5555"
-	g.requireSession(g.requireSuperadmin(g.handleListUsers))(rec, lu)
+	g.requireSession(g.requireAdmin(g.handleListUsers))(rec, lu)
 	if rec.Code != 403 {
 		t.Fatalf("user calling superadmin API: got %d, want 403", rec.Code)
 	}
@@ -424,7 +424,7 @@ func TestPasswordChangeKillsSessions(t *testing.T) {
 	req.SetPathValue("id", strconv.FormatInt(admin.ID, 10))
 	req.AddCookie(adminCookie)
 	req.RemoteAddr = "10.9.9.9:5555"
-	g.requireSession(g.requireSuperadmin(g.handlePatchUser))(rec, req)
+	g.requireSession(g.requireAdmin(g.handlePatchUser))(rec, req)
 	if rec.Code != 200 {
 		t.Fatalf("patch password: got %d: %s", rec.Code, rec.Body.String())
 	}
@@ -495,7 +495,7 @@ func TestSettingsAPIAuth(t *testing.T) {
 
 	// no cookie -> 401
 	rec := httptest.NewRecorder()
-	g.requireSession(g.requireSuperadmin(g.handleGetSettings))(rec, httptest.NewRequest("GET", "/api/settings", nil))
+	g.requireSession(g.requireAdmin(g.handleGetSettings))(rec, httptest.NewRequest("GET", "/api/settings", nil))
 	if rec.Code != 401 {
 		t.Fatalf("settings without cookie: got %d, want 401", rec.Code)
 	}
@@ -505,7 +505,7 @@ func TestSettingsAPIAuth(t *testing.T) {
 	rec = httptest.NewRecorder()
 	get := httptest.NewRequest("GET", "/api/settings", nil)
 	get.AddCookie(piCookie)
-	g.requireSession(g.requireSuperadmin(g.handleGetSettings))(rec, get)
+	g.requireSession(g.requireAdmin(g.handleGetSettings))(rec, get)
 	if rec.Code != 403 {
 		t.Fatalf("plain user GET settings: got %d, want 403", rec.Code)
 	}
@@ -514,7 +514,7 @@ func TestSettingsAPIAuth(t *testing.T) {
 	put.AddCookie(piCookie)
 	put.Header.Set("Origin", "https://gateway.example.com")
 	put.RemoteAddr = "10.9.9.9:5555"
-	g.requireSession(g.requireSuperadmin(g.handlePutSettings))(rec, put)
+	g.requireSession(g.requireAdmin(g.handlePutSettings))(rec, put)
 	if rec.Code != 403 {
 		t.Fatalf("plain user PUT settings: got %d, want 403", rec.Code)
 	}
@@ -524,7 +524,7 @@ func TestSettingsAPIAuth(t *testing.T) {
 	rec = httptest.NewRecorder()
 	get = httptest.NewRequest("GET", "/api/settings", nil)
 	get.AddCookie(adminCookie)
-	g.requireSession(g.requireSuperadmin(g.handleGetSettings))(rec, get)
+	g.requireSession(g.requireAdmin(g.handleGetSettings))(rec, get)
 	if rec.Code != 200 {
 		t.Fatalf("admin GET settings: got %d: %s", rec.Code, rec.Body.String())
 	}
@@ -555,7 +555,7 @@ func TestSettingsPutValidation(t *testing.T) {
 		req.AddCookie(adminCookie)
 		req.Header.Set("Origin", "https://gateway.example.com")
 		req.RemoteAddr = "10.9.9.9:5555"
-		g.requireSession(g.requireSuperadmin(g.handlePutSettings))(rec, req)
+		g.requireSession(g.requireAdmin(g.handlePutSettings))(rec, req)
 		if rec.Code != 400 {
 			t.Fatalf("PUT %s: got %d, want 400", bad, rec.Code)
 		}
@@ -596,7 +596,7 @@ func TestSettingsPutHotReload(t *testing.T) {
 		req.AddCookie(adminCookie)
 		req.Header.Set("Origin", "https://gateway.example.com")
 		req.RemoteAddr = "10.9.9.9:5555"
-		g.requireSession(g.requireSuperadmin(g.handlePutSettings))(rec, req)
+		g.requireSession(g.requireAdmin(g.handlePutSettings))(rec, req)
 		return rec
 	}
 
@@ -655,7 +655,7 @@ func TestSettingsPutCooldownTakesEffect(t *testing.T) {
 	req.AddCookie(adminCookie)
 	req.Header.Set("Origin", "https://gateway.example.com")
 	req.RemoteAddr = "10.9.9.9:5555"
-	g.requireSession(g.requireSuperadmin(g.handlePutSettings))(rec, req)
+	g.requireSession(g.requireAdmin(g.handlePutSettings))(rec, req)
 	if rec.Code != 200 {
 		t.Fatalf("PUT cooldown: got %d: %s", rec.Code, rec.Body.String())
 	}
@@ -696,7 +696,7 @@ func TestSettingsPutPreservesSyncStatus(t *testing.T) {
 	req.AddCookie(adminCookie)
 	req.Header.Set("Origin", "https://gateway.example.com")
 	req.RemoteAddr = "10.9.9.9:5555"
-	g.requireSession(g.requireSuperadmin(g.handlePutSettings))(rec, req)
+	g.requireSession(g.requireAdmin(g.handlePutSettings))(rec, req)
 	if rec.Code != 200 {
 		t.Fatalf("PUT: got %d: %s", rec.Code, rec.Body.String())
 	}
@@ -972,7 +972,7 @@ func TestAnthropicFallbackModel(t *testing.T) {
 	req.AddCookie(adminCookie)
 	req.Header.Set("Origin", "https://gateway.example.com")
 	req.RemoteAddr = "10.9.9.9:5555"
-	g.requireSession(g.requireSuperadmin(g.handlePutSettings))(rec, req)
+	g.requireSession(g.requireAdmin(g.handlePutSettings))(rec, req)
 	if rec.Code != 200 {
 		t.Fatalf("PUT: got %d: %s", rec.Code, rec.Body.String())
 	}
@@ -1106,7 +1106,7 @@ func TestUsageAPIScoping(t *testing.T) {
 	rec := httptest.NewRecorder()
 	req := httptest.NewRequest("GET", "/api/usage/users", nil)
 	req.AddCookie(piCookie)
-	g.requireSession(g.requireSuperadmin(g.handleUsageUsers))(rec, req)
+	g.requireSession(g.requireAdmin(g.handleUsageUsers))(rec, req)
 	if rec.Code != 403 {
 		t.Fatalf("plain user /usage/users: got %d, want 403", rec.Code)
 	}

@@ -4,7 +4,7 @@ export interface UserView {
   id: number
   name: string
   email: string
-  role: "superadmin" | "user"
+  role: "superadmin" | "admin" | "user"
   disabled: boolean
   createdAt: number
   keyCount?: number
@@ -313,7 +313,7 @@ export interface UsageRequestRow {
   status: number
   upstreamStatus: number
   failReason: string
-  upstreamKey: string // blanked for non-superadmins
+  upstreamKey: string // blanked for non-admins
   inputTokens: number
   cachedTokens: number
   outputTokens: number
@@ -331,7 +331,7 @@ export interface UsageRequests {
 }
 
 export interface UsageFacets {
-  users: { id: number; email: string }[] // empty for non-superadmins
+  users: { id: number; email: string }[] // empty for non-admins
   providers: string[]
   models: { provider: string; model: string }[]
   keys: { id: number; alias: string; userId: number }[]
@@ -485,7 +485,7 @@ export interface RuntimeSettingsView {
   webTools: WebToolsSettingsView
 }
 
-// POST /api/webtools/test response (superadmin diagnostics).
+// POST /api/webtools/test response (admin diagnostics).
 export interface WebToolsTestResult {
   ok: boolean
   latencyMs?: number

@@ -18,7 +18,7 @@ const dashboardActivityLimit = activityRingSize
 
 func (g *gateway) handleDashboard(w http.ResponseWriter, r *http.Request) {
 	user := contextUser(r)
-	admin := user != nil && user.Role == "superadmin"
+	admin := user != nil && isAdminRole(user.Role)
 	type provHealth struct {
 		Name    string    `json:"name"`
 		Type    string    `json:"type"`

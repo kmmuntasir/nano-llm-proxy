@@ -329,7 +329,7 @@ func TestCredentialLoginSwitch(t *testing.T) {
 		req.AddCookie(cookie)
 		req.Header.Set("Origin", "https://gateway.example.com")
 		rec := httptest.NewRecorder()
-		g.requireSession(g.requireSuperadmin(g.handlePutSettings))(rec, req)
+		g.requireSession(g.requireAdmin(g.handlePutSettings))(rec, req)
 		return rec
 	}
 
@@ -438,7 +438,7 @@ func TestProfileNameOwnership(t *testing.T) {
 		req.AddCookie(cookie)
 		req.Header.Set("Origin", "https://gateway.example.com")
 		rec := httptest.NewRecorder()
-		g.requireSession(g.requireSuperadmin(g.handlePatchUser))(rec, req)
+		g.requireSession(g.requireAdmin(g.handlePatchUser))(rec, req)
 		return rec.Code
 	}
 	if code := patch(`{"name":"Admin Override"}`); code != http.StatusBadRequest {
@@ -494,7 +494,7 @@ func TestCreateUserPasswordOptionalWhenCredentialLoginOff(t *testing.T) {
 		req.AddCookie(cookie)
 		req.Header.Set("Origin", "https://gateway.example.com")
 		rec := httptest.NewRecorder()
-		g.requireSession(g.requireSuperadmin(g.handleCreateUser))(rec, req)
+		g.requireSession(g.requireAdmin(g.handleCreateUser))(rec, req)
 		return rec
 	}
 	if rec := create(`{"name":"A","email":"a@example.com"}`); rec.Code != http.StatusBadRequest {
@@ -536,7 +536,7 @@ func TestDeactivatedUserLosesAPIAccess(t *testing.T) {
 		req.AddCookie(cookie)
 		req.Header.Set("Origin", "https://gateway.example.com")
 		rec := httptest.NewRecorder()
-		g.requireSession(g.requireSuperadmin(g.handlePatchUser))(rec, req)
+		g.requireSession(g.requireAdmin(g.handlePatchUser))(rec, req)
 		if rec.Code != 200 {
 			t.Fatalf("patch disabled=%v: %d %s", d, rec.Code, rec.Body.String())
 		}

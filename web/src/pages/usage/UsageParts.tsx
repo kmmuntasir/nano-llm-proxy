@@ -58,7 +58,7 @@ function StatCard({ item, loading }: { item: StatItem; loading: boolean }) {
   )
 }
 
-/** The overview stat row; `showUsers` adds the distinct-users count (superadmin views). */
+/** The overview stat row; `showUsers` adds the distinct-users count (admin views). */
 export function OverviewStats({
   totals,
   loading,

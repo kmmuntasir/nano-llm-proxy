@@ -64,6 +64,10 @@ func (g *gateway) handleCreateUser(w http.ResponseWriter, r *http.Request) {
 	if !ok {
 		return
 	}
+	if msg := roleGrantDenied(actor, req.Role); msg != "" {
+		apiErr(w, http.StatusForbidden, msg)
+		return
+	}
 	u := &store.User{Name: req.Name, Email: req.Email, PasswordHash: hash, Role: req.Role}
 	if !g.applyMutation(w, actor, "user.create", "An account with this email already exists", func() error { return g.store.InsertUser(u) }) {
 		return
@@ -83,10 +87,10 @@ func validateNewUser(w http.ResponseWriter, name, email, password, role *string,
 		return "", false
 	}
 	if role == nil || *role == "" {
-		*role = "user"
+		*role = roleUser
 	}
-	if *role != "user" && *role != "superadmin" {
-		apiErr(w, http.StatusBadRequest, `Role must be "user" or "superadmin"`)
+	if !validRole(*role) {
+		apiErr(w, http.StatusBadRequest, roleErr)
 		return "", false
 	}
 	if !requirePassword {
@@ -129,8 +133,22 @@ func (g *gateway) handlePatchUser(w http.ResponseWriter, r *http.Request) {
 		apiErr(w, http.StatusNotFound, "That user no longer exists (it may have been deleted)")
 		return
 	}
-	if req.Role != nil && *req.Role != "user" && *req.Role != "superadmin" {
-		apiErr(w, http.StatusBadRequest, `Role must be "user" or "superadmin"`)
+	if msg := accountChangeDenied(actor, target); msg != "" {
+		apiErr(w, http.StatusForbidden, msg)
+		return
+	}
+	if req.Role != nil && !validRole(*req.Role) {
+		apiErr(w, http.StatusBadRequest, roleErr)
+		return
+	}
+	if req.Role != nil && *req.Role != target.Role {
+		if msg := roleGrantDenied(actor, *req.Role); msg != "" {
+			apiErr(w, http.StatusForbidden, msg)
+			return
+		}
+	}
+	if req.Disabled != nil && *req.Disabled && actor.ID == target.ID {
+		apiErr(w, http.StatusConflict, "You cannot deactivate your own account")
 		return
 	}
 	if req.Role != nil && target.Role == "superadmin" && *req.Role != "superadmin" {
@@ -181,7 +199,7 @@ func (g *gateway) handlePatchUser(w http.ResponseWriter, r *http.Request) {
 		if err := g.store.UpdateUser(id, name, email, passHash, req.Role, req.Disabled); err != nil {
 			return err
 		}
-		if req.Role != nil && *req.Role == "superadmin" && target.Role != "superadmin" {
+		if req.Role != nil && isAdminRole(*req.Role) && !isAdminRole(target.Role) {
 			if err := g.store.ClearUserProviderAccess(id); err != nil {
 				return err
 			}
@@ -216,7 +234,11 @@ func (g *gateway) handleDeleteUser(w http.ResponseWriter, r *http.Request) {
 		apiErr(w, http.StatusNotFound, "That user no longer exists (it may have been deleted)")
 		return
 	}
-	if target.Role == "superadmin" {
+	if msg := accountChangeDenied(actor, target); msg != "" {
+		apiErr(w, http.StatusForbidden, msg)
+		return
+	}
+	if target.Role == roleSuperadmin {
 		if n, _ := g.store.CountSuperadmins(); n <= 1 {
 			apiErr(w, http.StatusConflict, "Cannot delete the last remaining superadmin")
 			return

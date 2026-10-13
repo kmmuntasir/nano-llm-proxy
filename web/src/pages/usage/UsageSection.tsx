@@ -14,14 +14,14 @@ import type { FilterKey } from "./urlState"
 interface Tab {
   to: string
   label: string
-  superadminOnly?: boolean
+  adminOnly?: boolean
 }
 
 const TABS: Tab[] = [
   { to: "/usage", label: "Overview" },
-  { to: "/usage/users", label: "Users", superadminOnly: true },
+  { to: "/usage/users", label: "Users", adminOnly: true },
   { to: "/usage/models", label: "Models" },
-  { to: "/usage/user-models", label: "Users × Models", superadminOnly: true },
+  { to: "/usage/user-models", label: "Users × Models", adminOnly: true },
   { to: "/usage/requests", label: "Requests" },
 ]
 
@@ -69,11 +69,11 @@ function TabBar({ tabs, search }: { tabs: Tab[]; search: string }) {
 // UsageSection: the /usage/* subtree (lazy-loaded from App). Shared filter
 // bar + tab bar on top, then the tab or drill-down page.
 export default function UsageSection() {
-  const { isSuperadmin, searchParams } = useUsageFilters()
+  const { isAdmin, searchParams } = useUsageFilters()
   const onUserDetail = useMatch("/usage/users/:userId") !== null
   const onModelDetail = useMatch("/usage/model") !== null
   const locked: FilterKey[] = onUserDetail ? ["userId"] : onModelDetail ? ["provider", "model"] : []
-  const tabs = TABS.filter((t) => !t.superadminOnly || isSuperadmin)
+  const tabs = TABS.filter((t) => !t.adminOnly || isAdmin)
   const search = filterSearch(searchParams)
 
   return (
@@ -86,7 +86,7 @@ export default function UsageSection() {
         <Route path="models" element={<ModelsTab />} />
         <Route path="model" element={<ModelDetailPage />} />
         <Route path="requests" element={<RequestsTab />} />
-        {isSuperadmin && (
+        {isAdmin && (
           <>
             <Route path="users" element={<UsersTab />} />
             <Route path="users/:userId" element={<UserDetailPage />} />

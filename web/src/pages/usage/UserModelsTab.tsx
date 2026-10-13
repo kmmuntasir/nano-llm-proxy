@@ -14,7 +14,7 @@ const SEARCH_DEBOUNCE_MS = 300
 // Superadmin only (route-gated): who uses which model. The search box
 // filters the table server-side (?q=, substring on the group label).
 export default function UserModelsTab() {
-  const { filters, isSuperadmin, searchParams } = useUsageFilters()
+  const { filters, isAdmin, searchParams } = useUsageFilters()
   const [, setSp] = useSearchParams()
   const navigate = useNavigate()
   const q = searchParams.get("q") ?? ""
@@ -85,7 +85,7 @@ export default function UserModelsTab() {
           <BreakdownTable
             filters={filters}
             groupBy="user_model"
-            isSuperadmin={isSuperadmin}
+            isAdmin={isAdmin}
             q={q}
             showRangeNotice
             onRowClick={(r) =>

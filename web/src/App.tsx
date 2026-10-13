@@ -3,6 +3,7 @@ import { Navigate, Route, Routes, useNavigate } from "react-router-dom"
 import { useQuery } from "@tanstack/react-query"
 import { Box, Spinner } from "@chakra-ui/react"
 import { api, setUnauthorizedHandler } from "./api/client"
+import { isAdminRole } from "./api/roles"
 import type { UserView } from "./api/types"
 import AppLayout from "./components/AppLayout"
 import LoginPage from "./pages/LoginPage"
@@ -55,7 +56,7 @@ export default function App() {
     )
   }
 
-  const isSuperadmin = me.data.user.role === "superadmin"
+  const isAdmin = isAdminRole(me.data.user.role)
 
   return (
     <AppLayout>
@@ -79,7 +80,7 @@ export default function App() {
         />
         <Route path="/profile" element={<ProfilePage />} />
         <Route path="/keys" element={<Navigate to="/profile" replace />} />
-        {isSuperadmin && (
+        {isAdmin && (
           <>
             <Route path="/users" element={<UsersPage />} />
             <Route path="/providers" element={<ProvidersPage />} />

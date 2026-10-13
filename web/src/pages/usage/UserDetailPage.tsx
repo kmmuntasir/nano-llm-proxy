@@ -16,7 +16,7 @@ import { filterSearch, useUsageFilters } from "./urlState"
 export default function UserDetailPage() {
   const { userId } = useParams()
   const id = userId && /^\d+$/.test(userId) ? Number(userId) : 0
-  const { filters: base, isSuperadmin, searchParams } = useUsageFilters()
+  const { filters: base, isAdmin, searchParams } = useUsageFilters()
   const navigate = useNavigate()
   const filters: UsageFilters = useMemo(() => ({ ...base, userId: id }), [base, id])
   const facets = useUsageFacets(base.from, base.to, base.tz)
@@ -53,7 +53,7 @@ export default function UserDetailPage() {
             groupBy="model"
             prefix="m."
             defaultPageSize={10}
-            isSuperadmin={isSuperadmin}
+            isAdmin={isAdmin}
             onRowClick={(r) =>
               navigate(
                 `/usage/model${filterSearch(searchParams, {
@@ -76,7 +76,7 @@ export default function UserDetailPage() {
             groupBy="key"
             prefix="k."
             defaultPageSize={10}
-            isSuperadmin={false}
+            isAdmin={false}
           />
         </Card.Body>
       </Card.Root>
@@ -85,7 +85,7 @@ export default function UserDetailPage() {
           <Heading size="sm">Recent requests</Heading>
         </Card.Header>
         <Card.Body pt={3}>
-          <RequestsTable filters={filters} prefix="r." defaultPageSize={25} isSuperadmin={isSuperadmin} />
+          <RequestsTable filters={filters} prefix="r." defaultPageSize={25} isAdmin={isAdmin} />
         </Card.Body>
       </Card.Root>
     </VStack>

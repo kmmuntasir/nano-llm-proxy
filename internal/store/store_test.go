@@ -169,8 +169,8 @@ func TestMigrateV4ConvertsBuiltinKiloToPreset(t *testing.T) {
 	}
 
 	var version int64
-	if err := s.db.QueryRow(`SELECT MAX(version) FROM schema_migrations`).Scan(&version); err != nil || version != 8 {
-		t.Fatalf("schema version = %d, %v; want 8", version, err)
+	if err := s.db.QueryRow(`SELECT MAX(version) FROM schema_migrations`).Scan(&version); err != nil || version != 9 {
+		t.Fatalf("schema version = %d, %v; want 9", version, err)
 	}
 }
 
@@ -381,8 +381,8 @@ func TestMigrateV6EnrichesExistingUsageRows(t *testing.T) {
 		t.Fatalf("Migrate: %v", err)
 	}
 	var version int64
-	if err := s.db.QueryRow(`SELECT MAX(version) FROM schema_migrations`).Scan(&version); err != nil || version != 8 {
-		t.Fatalf("schema version = %d, %v; want 8", version, err)
+	if err := s.db.QueryRow(`SELECT MAX(version) FROM schema_migrations`).Scan(&version); err != nil || version != 9 {
+		t.Fatalf("schema version = %d, %v; want 9", version, err)
 	}
 	for idx, want := range map[string]int{
 		"idx_usage_model_ts":      1,
@@ -540,8 +540,8 @@ func TestMigrateV7AddsCachedTokens(t *testing.T) {
 		t.Fatalf("Migrate: %v", err)
 	}
 	var version int64
-	if err := s.db.QueryRow(`SELECT MAX(version) FROM schema_migrations`).Scan(&version); err != nil || version != 8 {
-		t.Fatalf("schema version = %d, %v; want 8", version, err)
+	if err := s.db.QueryRow(`SELECT MAX(version) FROM schema_migrations`).Scan(&version); err != nil || version != 9 {
+		t.Fatalf("schema version = %d, %v; want 9", version, err)
 	}
 	// idempotent: a second Migrate on V7 is a no-op
 	if err := s.Migrate(); err != nil {
@@ -592,5 +592,74 @@ func TestMigrateV8GoogleLinked(t *testing.T) {
 	list, _ := st.ListUsers()
 	if len(list) != 1 || !list[0].GoogleLinked {
 		t.Fatalf("ListUsers lost the flag: %+v", list)
+	}
+}
+
+// TestMigrateV9RebuildsUsersSafely re-runs the V9 rebuild over populated
+// data: every column survives, dependent rows (client keys, sessions) are
+// not cascade-deleted, deleted ids are never reused, the admin role is
+// accepted while unknown roles are still refused, and foreign keys are back
+// on afterwards.
+func TestMigrateV9RebuildsUsersSafely(t *testing.T) {
+	st := openTestStore(t)
+	a := &User{Name: "A", Email: "a@example.com", PasswordHash: "h", Role: "superadmin"}
+	b := &User{Name: "B", Email: "b@example.com", PasswordHash: "h", Role: "user"}
+	c := &User{Name: "C", Email: "c@example.com", PasswordHash: "h", Role: "user"}
+	for _, u := range []*User{a, b, c} {
+		if err := st.InsertUser(u); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if _, err := st.LinkGoogleUser(b.ID, "B Google", "https://lh3.googleusercontent.com/a/b"); err != nil {
+		t.Fatal(err)
+	}
+	if _, _, err := st.CreateClientKey(a.ID, "k"); err != nil {
+		t.Fatal(err)
+	}
+	if _, _, err := st.CreateSession(a.ID, time.Hour); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := st.db.Exec(`DELETE FROM users WHERE id=?`, c.ID); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := st.db.Exec(`DELETE FROM schema_migrations WHERE version=9`); err != nil {
+		t.Fatal(err)
+	}
+	if err := st.migrateV9(); err != nil {
+		t.Fatalf("migrateV9: %v", err)
+	}
+
+	gotB, _ := st.User(b.ID)
+	if gotB == nil || gotB.Name != "B Google" || !gotB.GoogleLinked || gotB.AvatarURL == "" || gotB.Role != "user" {
+		t.Fatalf("user b after rebuild = %+v", gotB)
+	}
+	var keys, sessions int
+	st.db.QueryRow(`SELECT COUNT(*) FROM api_keys WHERE user_id=?`, a.ID).Scan(&keys)
+	st.db.QueryRow(`SELECT COUNT(*) FROM sessions WHERE user_id=?`, a.ID).Scan(&sessions)
+	if keys != 1 || sessions != 1 {
+		t.Fatalf("dependent rows lost: keys=%d sessions=%d", keys, sessions)
+	}
+	d := &User{Name: "D", Email: "d@example.com", PasswordHash: "h", Role: "admin"}
+	if err := st.InsertUser(d); err != nil {
+		t.Fatalf("admin role refused: %v", err)
+	}
+	if d.ID <= c.ID {
+		t.Fatalf("deleted id reused: new id %d, deleted id %d", d.ID, c.ID)
+	}
+	if err := st.InsertUser(&User{Name: "E", Email: "e@example.com", PasswordHash: "h", Role: "owner"}); err == nil {
+		t.Fatal("unknown role accepted")
+	}
+	var fk int
+	st.db.QueryRow(`PRAGMA foreign_keys`).Scan(&fk)
+	if fk != 1 {
+		t.Fatal("foreign keys left off after the migration")
+	}
+	// cascade still works after the rebuild
+	if _, err := st.db.Exec(`DELETE FROM users WHERE id=?`, a.ID); err != nil {
+		t.Fatal(err)
+	}
+	st.db.QueryRow(`SELECT COUNT(*) FROM api_keys WHERE user_id=?`, a.ID).Scan(&keys)
+	if keys != 0 {
+		t.Fatal("ON DELETE CASCADE lost in the rebuild")
 	}
 }

@@ -55,7 +55,7 @@ export function LatencyCard({ filters }: { filters: UsageFilters }) {
 }
 
 export default function OverviewTab() {
-  const { filters, isSuperadmin } = useUsageFilters()
+  const { filters, isAdmin } = useUsageFilters()
   const theme = useChartTheme()
   const overview = useUsageOverview(filters)
   const providers = useUsageBreakdown(filters, {
@@ -92,7 +92,7 @@ export default function OverviewTab() {
   return (
     <VStack align="stretch" gap={4}>
       <RangeNotice filters={filters} range={data?.range} />
-      <OverviewStats totals={data?.totals} loading={loading} showUsers={isSuperadmin} />
+      <OverviewStats totals={data?.totals} loading={loading} showUsers={isAdmin} />
       <SimpleGrid columns={{ base: 1, xl: 2 }} gap={4}>
         <ChartCard
           title="Requests & errors"

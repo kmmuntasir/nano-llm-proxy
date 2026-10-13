@@ -27,7 +27,7 @@ function Detail({ label, children }: { label: string; children: ReactNode }) {
   )
 }
 
-function RequestDetails({ row, isSuperadmin }: { row: UsageRequestRow; isSuperadmin: boolean }) {
+function RequestDetails({ row, isAdmin }: { row: UsageRequestRow; isAdmin: boolean }) {
   return (
     <SimpleGrid columns={{ base: 2, lg: 4 }} gap={3} textAlign="start">
       <Detail label="Upstream status">{row.upstreamStatus || "none"}</Detail>
@@ -37,7 +37,7 @@ function RequestDetails({ row, isSuperadmin }: { row: UsageRequestRow; isSuperad
         {fmtInt(row.cachedTokens)} of {fmtInt(row.inputTokens)} ({fmtCacheHit(row.cachedTokens, row.inputTokens)})
       </Detail>
       <Detail label="Stream">{row.stream ? "yes" : "no"}</Detail>
-      {isSuperadmin && (
+      {isAdmin && (
         <Detail label="Upstream key">
           <Text as="span" fontFamily="mono" fontSize="xs">
             {row.upstreamKey || "—"}
@@ -60,11 +60,11 @@ function RequestDetails({ row, isSuperadmin }: { row: UsageRequestRow; isSuperad
   )
 }
 
-function columns(isSuperadmin: boolean): Col[] {
+function columns(isAdmin: boolean): Col[] {
   const cols: Col[] = [
     { id: "ts", header: "Time", sortKey: "ts", nowrap: true, render: (r) => fmtShortDateTime(r.ts) },
   ]
-  if (isSuperadmin) {
+  if (isAdmin) {
     cols.push({ id: "user", header: "User", render: (r) => userLabel(r) })
   }
   cols.push(
@@ -119,13 +119,13 @@ function columns(isSuperadmin: boolean): Col[] {
 export function RequestsTable({
   filters,
   prefix = "",
-  isSuperadmin,
+  isAdmin,
   defaultPageSize = 50,
   showRangeNotice = false,
 }: {
   filters: UsageFilters
   prefix?: string
-  isSuperadmin: boolean
+  isAdmin: boolean
   defaultPageSize?: number
   /** surface the server's capped-range echo above the table */
   showRangeNotice?: boolean
@@ -143,7 +143,7 @@ export function RequestsTable({
     <VStack align="stretch" gap={2}>
       {showRangeNotice && <RangeNotice filters={filters} range={data?.range} />}
       <PaginatedTable
-        columns={columns(isSuperadmin)}
+        columns={columns(isAdmin)}
         rows={data?.rows ?? []}
         rowKey={(r) => String(r.id)}
         total={data?.total ?? 0}
@@ -158,7 +158,7 @@ export function RequestsTable({
         fetching={query.isFetching && !query.isPending}
         error={query.error?.message}
         empty="No requests in this range"
-        renderExpanded={(r) => <RequestDetails row={r} isSuperadmin={isSuperadmin} />}
+        renderExpanded={(r) => <RequestDetails row={r} isAdmin={isAdmin} />}
       />
     </VStack>
   )

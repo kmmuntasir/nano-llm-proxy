@@ -43,7 +43,8 @@ func (g *gateway) handleDeleteMyKey(w http.ResponseWriter, r *http.Request) {
 	g.deleteKeyFor(w, r, contextUser(r).ID)
 }
 
-// --- superadmin variants (target = path user id) ---
+// --- admin variants (target = path user id; mutations go through
+// managedUserID, so admins can't touch a superadmin's keys) ---
 
 func (g *gateway) handleListUserKeys(w http.ResponseWriter, r *http.Request) {
 	id, ok := pathID(w, r, "id")
@@ -54,7 +55,7 @@ func (g *gateway) handleListUserKeys(w http.ResponseWriter, r *http.Request) {
 }
 
 func (g *gateway) handleCreateUserKey(w http.ResponseWriter, r *http.Request) {
-	id, ok := pathID(w, r, "id")
+	id, ok := g.managedUserID(w, r)
 	if !ok {
 		return
 	}
@@ -62,7 +63,7 @@ func (g *gateway) handleCreateUserKey(w http.ResponseWriter, r *http.Request) {
 }
 
 func (g *gateway) handlePatchUserKey(w http.ResponseWriter, r *http.Request) {
-	id, ok := pathID(w, r, "id")
+	id, ok := g.managedUserID(w, r)
 	if !ok {
 		return
 	}
@@ -70,7 +71,7 @@ func (g *gateway) handlePatchUserKey(w http.ResponseWriter, r *http.Request) {
 }
 
 func (g *gateway) handleDeleteUserKey(w http.ResponseWriter, r *http.Request) {
-	id, ok := pathID(w, r, "id")
+	id, ok := g.managedUserID(w, r)
 	if !ok {
 		return
 	}

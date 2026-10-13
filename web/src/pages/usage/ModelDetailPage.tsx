@@ -11,9 +11,9 @@ import { filterSearch, useUsageFilters } from "./urlState"
 
 // One model's usage. The model rides in ?provider=&model= (ids may contain
 // "/"), i.e. it is just the regular filter pair pinned by this page. The
-// by-user parts are superadmin only.
+// by-user parts are admin only.
 export default function ModelDetailPage() {
-  const { filters, isSuperadmin, searchParams } = useUsageFilters()
+  const { filters, isAdmin, searchParams } = useUsageFilters()
   const navigate = useNavigate()
   const hasModel = !!filters.model
   const overview = useUsageOverview(filters, undefined, { enabled: hasModel })
@@ -40,12 +40,12 @@ export default function ModelDetailPage() {
         </Heading>
       </HStack>
       <RangeNotice filters={filters} range={overview.data?.range} />
-      <OverviewStats totals={overview.data?.totals} loading={overview.isPending} showUsers={isSuperadmin} />
-      <SimpleGrid columns={{ base: 1, xl: isSuperadmin ? 2 : 1 }} gap={4}>
-        {isSuperadmin && <SeriesCard filters={filters} groupBy="user" />}
+      <OverviewStats totals={overview.data?.totals} loading={overview.isPending} showUsers={isAdmin} />
+      <SimpleGrid columns={{ base: 1, xl: isAdmin ? 2 : 1 }} gap={4}>
+        {isAdmin && <SeriesCard filters={filters} groupBy="user" />}
         <LatencyCard filters={filters} />
       </SimpleGrid>
-      {isSuperadmin && (
+      {isAdmin && (
         <Card.Root>
           <Card.Header>
             <Heading size="sm">By user</Heading>
@@ -56,7 +56,7 @@ export default function ModelDetailPage() {
               groupBy="user"
               prefix="u."
               defaultPageSize={10}
-              isSuperadmin={isSuperadmin}
+              isAdmin={isAdmin}
               onRowClick={(r) =>
                 navigate(`/usage/users/${r.userId}${filterSearch(searchParams, { userId: "" })}`)
               }
@@ -69,7 +69,7 @@ export default function ModelDetailPage() {
           <Heading size="sm">Recent requests</Heading>
         </Card.Header>
         <Card.Body pt={3}>
-          <RequestsTable filters={filters} prefix="r." defaultPageSize={25} isSuperadmin={isSuperadmin} />
+          <RequestsTable filters={filters} prefix="r." defaultPageSize={25} isAdmin={isAdmin} />
         </Card.Body>
       </Card.Root>
     </VStack>

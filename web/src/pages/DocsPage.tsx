@@ -28,7 +28,7 @@ interface TroubleshootingRow {
 const TROUBLESHOOTING: TroubleshootingRow[] = [
   { symptom: "401 from /v1 or /mcp", meaning: "Missing/revoked key — create a new one in Profile → My API Keys" },
   { symptom: "502 no healthy keys", meaning: "The provider's upstream keys are exhausted or cooling — an admin adds/fixes keys on the Providers page" },
-  { symptom: "404 from /mcp", meaning: "Web tools are disabled in Settings → Web tools (superadmin)" },
+  { symptom: "404 from /mcp", meaning: "Web tools are disabled in Settings → Web tools (admin)" },
   { symptom: "web_search returns no results", meaning: "Search engines may be CAPTCHA-blocked from this deployment's IP — an admin can trim engines in /etc/searxng/settings.yml (see docs/deployment.md)" },
   { symptom: "web_read returns empty/JS-shell text", meaning: "Re-run with render: true — the page needs a real browser" },
   { symptom: "Empty reply that stops after a long pause (Pi)", meaning: "The model burned Pi's 4096-token output cap on hidden reasoning — switch models or just say continue; the gateway relays upstream finish reasons verbatim" },

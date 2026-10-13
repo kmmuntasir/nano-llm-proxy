@@ -1,7 +1,6 @@
 import { useState } from "react"
 import { useMutation, useQueryClient } from "@tanstack/react-query"
 import {
-  Badge,
   Button,
   Card,
   Dialog,
@@ -19,6 +18,7 @@ import { useCredentialLogin } from "../api/useAuthConfig"
 import type { UserView } from "../api/types"
 import { PasswordInput } from "../components/ui/password-input"
 import { toaster } from "../components/ui/toaster"
+import RoleBadge from "../components/RoleBadge"
 import UserAvatar from "../components/UserAvatar"
 import { useSession } from "../App"
 import type { Session } from "../App"
@@ -253,9 +253,7 @@ export default function ProfilePage() {
               <Text fontSize="xs" color="fg.muted">
                 Role
               </Text>
-              <Badge variant={data?.user.role === "superadmin" ? "solid" : "subtle"}>
-                {data?.user.role === "superadmin" ? "Superadmin" : "User"}
-              </Badge>
+              {data && <RoleBadge role={data.user.role} />}
             </VStack>
           </HStack>
         </Card.Body>

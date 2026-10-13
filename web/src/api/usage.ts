@@ -170,7 +170,7 @@ export function useUsageRequests(f: UsageFilters, p: RequestsParams, opts: Query
   })
 }
 
-/** Facets take the range only — the server forces self-scope for non-superadmins. */
+/** Facets take the range only — the server forces self-scope for non-admins. */
 export function useUsageFacets(from: number, to: number, tz: number) {
   return useQuery({
     queryKey: usageKeys.facets(from, to, tz),

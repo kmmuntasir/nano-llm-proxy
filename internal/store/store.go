@@ -1,6 +1,7 @@
 package store
 
 import (
+	"context"
 	"crypto/rand"
 	"crypto/sha256"
 	"crypto/subtle"
@@ -43,7 +44,7 @@ type User struct {
 	Name         string
 	Email        string
 	PasswordHash string
-	Role         string // "superadmin" | "user"
+	Role         string // "superadmin" | "admin" | "user"
 	Disabled     bool
 	GoogleLinked bool   // has signed in with Google at least once; name is Google-owned
 	AvatarURL    string // Google profile picture; "" for password-only users
@@ -178,6 +179,11 @@ func (s *Store) Migrate() error {
 	}
 	if !version.Valid || version.Int64 < 8 {
 		if err := s.migrateV8(); err != nil {
+			return err
+		}
+	}
+	if !version.Valid || version.Int64 < 9 {
+		if err := s.migrateV9(); err != nil {
 			return err
 		}
 	}
@@ -428,6 +434,84 @@ func (s *Store) migrateV8() error {
 	return tx.Commit()
 }
 
+// migrateV9 adds the "admin" role. The role column carries a CHECK
+// constraint from V1 and SQLite can't alter a constraint, so the users table
+// is rebuilt with SQLite's documented procedure: foreign keys off (on one
+// pinned connection — the pragma is per-connection and a no-op inside a
+// transaction), copy into a new table, drop, rename, verify with
+// foreign_key_check, all in one transaction with the schema_migrations row.
+// The AUTOINCREMENT high-water mark is carried over so ids of deleted users
+// are never reused (usage_events keeps their user_id).
+func (s *Store) migrateV9() error {
+	ctx := context.Background()
+	conn, err := s.db.Conn(ctx)
+	if err != nil {
+		return err
+	}
+	defer conn.Close()
+	if _, err := conn.ExecContext(ctx, `PRAGMA foreign_keys=OFF`); err != nil {
+		return err
+	}
+	defer conn.ExecContext(ctx, `PRAGMA foreign_keys=ON`) //nolint:errcheck
+	tx, err := conn.BeginTx(ctx, nil)
+	if err != nil {
+		return err
+	}
+	defer tx.Rollback()
+	var seq sql.NullInt64
+	if err := tx.QueryRow(`SELECT seq FROM sqlite_sequence WHERE name='users'`).Scan(&seq); err != nil && !errors.Is(err, sql.ErrNoRows) {
+		return fmt.Errorf("migrate v9: read sequence: %w", err)
+	}
+	const cols = `id, name, email, password_hash, role, disabled, created_at, updated_at, google_linked, avatar_url`
+	for _, stmt := range []string{
+		`CREATE TABLE users_v9 (
+			id INTEGER PRIMARY KEY AUTOINCREMENT,
+			name TEXT NOT NULL,
+			email TEXT NOT NULL UNIQUE,
+			password_hash TEXT NOT NULL,
+			role TEXT NOT NULL CHECK (role IN ('superadmin','admin','user')),
+			disabled INTEGER NOT NULL DEFAULT 0,
+			created_at INTEGER NOT NULL,
+			updated_at INTEGER NOT NULL,
+			google_linked INTEGER NOT NULL DEFAULT 0,
+			avatar_url TEXT NOT NULL DEFAULT '')`,
+		`INSERT INTO users_v9 (` + cols + `) SELECT ` + cols + ` FROM users`,
+		`DROP TABLE users`,
+		`ALTER TABLE users_v9 RENAME TO users`,
+	} {
+		if _, err := tx.Exec(stmt); err != nil {
+			return fmt.Errorf("migrate v9: %w", err)
+		}
+	}
+	if seq.Valid {
+		if _, err := tx.Exec(`UPDATE sqlite_sequence SET seq=MAX(seq, ?) WHERE name='users'`, seq.Int64); err != nil {
+			return fmt.Errorf("migrate v9: restore sequence: %w", err)
+		}
+		var n int
+		if err := tx.QueryRow(`SELECT COUNT(*) FROM sqlite_sequence WHERE name='users'`).Scan(&n); err != nil {
+			return err
+		}
+		if n == 0 {
+			if _, err := tx.Exec(`INSERT INTO sqlite_sequence (name, seq) VALUES ('users', ?)`, seq.Int64); err != nil {
+				return fmt.Errorf("migrate v9: restore sequence: %w", err)
+			}
+		}
+	}
+	rows, err := tx.Query(`PRAGMA foreign_key_check`)
+	if err != nil {
+		return err
+	}
+	broken := rows.Next()
+	rows.Close()
+	if broken {
+		return fmt.Errorf("migrate v9: foreign key check failed after rebuilding users")
+	}
+	if _, err := tx.Exec(`INSERT INTO schema_migrations (version, applied_at) VALUES (9, ?)`, time.Now().Unix()); err != nil {
+		return err
+	}
+	return tx.Commit()
+}
+
 // SetUserProviderAccess grants (disabled=false, row removed) or revokes
 // (disabled=true, row ensured) one provider for one user.
 func (s *Store) SetUserProviderAccess(userID, providerID int64, disabled bool) error {
@@ -449,10 +533,11 @@ func (s *Store) ClearUserProviderAccess(userID int64) error {
 }
 
 // DisabledProviderIDs lists the provider ids one user may not use.
-// Superadmins always have every provider, so their rows (if any) are ignored.
+// Superadmins and admins always have every provider, so their rows (if any)
+// are ignored.
 func (s *Store) DisabledProviderIDs(userID int64) (map[int64]bool, error) {
 	rows, err := s.db.Query(`SELECT a.provider_id FROM user_provider_access a
-		JOIN users u ON u.id = a.user_id WHERE a.user_id=? AND u.role <> 'superadmin'`, userID)
+		JOIN users u ON u.id = a.user_id WHERE a.user_id=? AND u.role = 'user'`, userID)
 	if err != nil {
 		return nil, err
 	}
@@ -469,11 +554,11 @@ func (s *Store) DisabledProviderIDs(userID int64) (map[int64]bool, error) {
 }
 
 // AllProviderAccess loads every restricted pair for the gateway's hot-path
-// cache: userID -> set of disabled provider ids. Superadmins are never
-// restricted, whatever rows exist for them.
+// cache: userID -> set of disabled provider ids. Superadmins and admins are
+// never restricted, whatever rows exist for them.
 func (s *Store) AllProviderAccess() (map[int64]map[int64]bool, error) {
 	rows, err := s.db.Query(`SELECT a.user_id, a.provider_id FROM user_provider_access a
-		JOIN users u ON u.id = a.user_id WHERE u.role <> 'superadmin'`)
+		JOIN users u ON u.id = a.user_id WHERE u.role = 'user'`)
 	if err != nil {
 		return nil, err
 	}

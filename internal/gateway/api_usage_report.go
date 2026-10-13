@@ -61,7 +61,7 @@ func parseUsageQuery(w http.ResponseWriter, r *http.Request) (usageQuery, bool) 
 	}
 	q.filter.From, q.filter.To = from, to
 	user := contextUser(r)
-	q.admin = user != nil && user.Role == "superadmin"
+	q.admin = user != nil && isAdminRole(user.Role)
 	vals := r.URL.Query()
 
 	if v := vals.Get("userId"); v != "" {
@@ -208,7 +208,7 @@ func (g *gateway) handleUsageBreakdown(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	if usageBreakdownAdminOnly[groupBy] && !q.admin {
-		apiErr(w, http.StatusForbidden, fmt.Sprintf("groupBy=%s is only available to superadmins", groupBy))
+		apiErr(w, http.StatusForbidden, fmt.Sprintf("groupBy=%s is only available to admins", groupBy))
 		return
 	}
 	sort, ok := enumParam(w, r, "sort", "requests", usageBreakdownSortNames)
@@ -257,7 +257,7 @@ func (g *gateway) handleUsageSeries(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	if usageSeriesAdminOnly[groupBy] && !q.admin {
-		apiErr(w, http.StatusForbidden, fmt.Sprintf("groupBy=%s is only available to superadmins", groupBy))
+		apiErr(w, http.StatusForbidden, fmt.Sprintf("groupBy=%s is only available to admins", groupBy))
 		return
 	}
 	metric, ok := enumParam(w, r, "metric", "requests", usageSeriesMetricKeys)
@@ -334,7 +334,7 @@ func (g *gateway) handleUsageFacets(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	user := contextUser(r)
-	admin := user != nil && user.Role == "superadmin"
+	admin := user != nil && isAdminRole(user.Role)
 	fc, err := g.store.UsageFacets(from, to, scopedUser(user), admin)
 	if err != nil {
 		usageStoreErr(w, err)

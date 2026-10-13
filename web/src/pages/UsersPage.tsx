@@ -16,12 +16,15 @@ import {
   Text,
   VStack,
 } from "@chakra-ui/react"
-import { KeyRound, Plus, Trash2 } from "lucide-react"
+import { KeyRound, Pencil, Plus, Trash2 } from "lucide-react"
 import { api, del, patch, post, put, ApiError } from "../api/client"
+import { assignableRoles, canManageAccount, roleLabel } from "../api/roles"
+import type { Role } from "../api/roles"
 import { useCredentialLogin } from "../api/useAuthConfig"
 import type { ClientKeyView, UserProviderView, UserView } from "../api/types"
 import ConfirmDialog from "../components/ConfirmDialog"
 import KeyRevealDialog from "../components/KeyRevealDialog"
+import RoleBadge from "../components/RoleBadge"
 import UserAvatar from "../components/UserAvatar"
 import { PasswordInput } from "../components/ui/password-input"
 import { Dialog } from "@chakra-ui/react"
@@ -32,16 +35,35 @@ function fmtTs(ts: number) {
   return ts ? new Date(ts * 1000).toLocaleDateString() : "—"
 }
 
+type Actor = Pick<UserView, "role">
+
 // RoleField keeps the wire values lowercase (the API's vocabulary) while
-// showing titlecase options.
-function RoleField({ value, onChange }: { value: string; onChange: (v: string) => void }) {
+// showing titlecase options. options comes from assignableRoles(actor).
+function RoleField({
+  value,
+  options,
+  onChange,
+}: {
+  value: Role
+  options: Role[]
+  onChange: (v: Role) => void
+}) {
   return (
     <Field.Root>
       <Field.Label>Role</Field.Label>
       <NativeSelect.Root size="sm">
-        <NativeSelect.Field value={value} onChange={(e) => onChange(e.target.value)}>
-          <option value="user">User</option>
-          <option value="superadmin">Superadmin</option>
+        <NativeSelect.Field
+          value={value}
+          onChange={(e) => {
+            const next = options.find((r) => r === e.target.value)
+            if (next) onChange(next)
+          }}
+        >
+          {options.map((r) => (
+            <option key={r} value={r}>
+              {roleLabel(r)}
+            </option>
+          ))}
         </NativeSelect.Field>
         <NativeSelect.Indicator />
       </NativeSelect.Root>
@@ -50,13 +72,21 @@ function RoleField({ value, onChange }: { value: string; onChange: (v: string) =
 }
 
 // AddUserModal creates a user from a modal, invoked by the page-header button.
-function AddUserModal({ open, onOpenChange }: { open: boolean; onOpenChange: (o: boolean) => void }) {
+function AddUserModal({
+  actor,
+  open,
+  onOpenChange,
+}: {
+  actor: Actor
+  open: boolean
+  onOpenChange: (o: boolean) => void
+}) {
   const qc = useQueryClient()
   const [name, setName] = useState("")
   const [email, setEmail] = useState("")
   const [password, setPassword] = useState("")
   const [confirm, setConfirm] = useState("")
-  const [role, setRole] = useState("user")
+  const [role, setRole] = useState<Role>("user")
   const [error, setError] = useState("")
   // with password sign-in off, new users sign in with Google — no password
   const credentialLogin = useCredentialLogin()
@@ -144,7 +174,7 @@ function AddUserModal({ open, onOpenChange }: { open: boolean; onOpenChange: (o:
                   Password sign-in is off — this user signs in with Google using this email.
                 </Text>
               )}
-              <RoleField value={role} onChange={setRole} />
+              <RoleField value={role} options={assignableRoles(actor)} onChange={setRole} />
               {error && (
                 <Text color="red.fg" fontSize="sm">
                   {error}
@@ -169,7 +199,7 @@ function AddUserModal({ open, onOpenChange }: { open: boolean; onOpenChange: (o:
   )
 }
 
-// ResetPasswordModal lets a superadmin set any user a new password.
+// ResetPasswordModal lets an admin set a user a new password.
 function ResetPasswordModal({
   user,
   open,
@@ -273,13 +303,16 @@ function ResetPasswordModal({
   )
 }
 
-// UserKeysModal manages one user's client keys.
+// UserKeysModal manages one user's client keys; readOnly when the actor
+// can't change the account (an admin viewing a superadmin's keys).
 function UserKeysModal({
   userID,
+  readOnly,
   open,
   onOpenChange,
 }: {
   userID: number
+  readOnly: boolean
   open: boolean
   onOpenChange: (o: boolean) => void
 }) {
@@ -332,9 +365,15 @@ function UserKeysModal({
             <Dialog.Title>Client keys</Dialog.Title>
           </Dialog.Header>
           <Dialog.Body>
-            <Button size="xs" colorPalette="blue" mb={3} onClick={() => create.mutate()}>
-              <Plus /> New key
-            </Button>
+            {readOnly ? (
+              <Text fontSize="xs" color="fg.muted" mb={3}>
+                View only — admins can't change a superadmin's keys.
+              </Text>
+            ) : (
+              <Button size="xs" colorPalette="blue" mb={3} onClick={() => create.mutate()}>
+                <Plus /> New key
+              </Button>
+            )}
             <VStack align="stretch" gap={1}>
               {(data?.keys ?? []).map((k) => (
                 <HStack key={k.id} gap={3} fontSize="sm">
@@ -344,6 +383,7 @@ function UserKeysModal({
                   <Switch.Root
                     size="sm"
                     checked={!k.disabled}
+                    disabled={readOnly}
                     onCheckedChange={(e) => toggle.mutate({ id: k.id, disabled: !e.checked })}
                   >
                     <Switch.HiddenInput />
@@ -351,15 +391,17 @@ function UserKeysModal({
                       <Switch.Thumb />
                     </Switch.Control>
                   </Switch.Root>
-                  <IconButton
-                    variant="ghost"
-                    size="xs"
-                    aria-label="delete key"
-                    colorPalette="red"
-                    onClick={() => remove.mutate(k.id)}
-                  >
-                    <Trash2 />
-                  </IconButton>
+                  {!readOnly && (
+                    <IconButton
+                      variant="ghost"
+                      size="xs"
+                      aria-label="delete key"
+                      colorPalette="red"
+                      onClick={() => remove.mutate(k.id)}
+                    >
+                      <Trash2 />
+                    </IconButton>
+                  )}
                 </HStack>
               ))}
               {(data?.keys ?? []).length === 0 && (
@@ -377,7 +419,7 @@ function UserKeysModal({
   )
 }
 
-// UserProviderAccessModal lets a superadmin grant or revoke each provider for
+// UserProviderAccessModal lets an admin grant or revoke each provider for
 // one user. Everything is allowed by default — a revoked provider behaves as
 // if it does not exist for them (absent from their /v1/models, unknown prefix
 // when routed).
@@ -474,13 +516,124 @@ function UserProviderAccessModal({
   )
 }
 
-function UserCard({ u, isSelf }: { u: UserView; isSelf: boolean }) {
+// EditUserDialog changes a user's name and role, sending only the fields that
+// changed. A Google-linked user's name belongs to Google and is never sent.
+function EditUserDialog({
+  user,
+  actor,
+  open,
+  onOpenChange,
+}: {
+  user: UserView
+  actor: Actor
+  open: boolean
+  onOpenChange: (o: boolean) => void
+}) {
+  const qc = useQueryClient()
+  const [name, setName] = useState(user.name)
+  const [role, setRole] = useState<Role>(user.role)
+  const [error, setError] = useState("")
+
+  // start from the user's current values on every open
+  const [wasOpen, setWasOpen] = useState(open)
+  if (open !== wasOpen) {
+    setWasOpen(open)
+    if (open) {
+      setName(user.name)
+      setRole(user.role)
+      setError("")
+    }
+  }
+
+  const trimmed = name.trim()
+  const changes: { name?: string; role?: Role } = {}
+  if (!user.googleLinked && trimmed !== user.name) changes.name = trimmed
+  if (role !== user.role) changes.role = role
+  const changed = Object.keys(changes).length > 0
+  const nameMissing = !user.googleLinked && trimmed === ""
+
+  const save = useMutation({
+    mutationFn: (body: { name?: string; role?: Role }) => patch(`/api/users/${user.id}`, body),
+    onSuccess: async () => {
+      onOpenChange(false)
+      await qc.invalidateQueries({ queryKey: ["users"] })
+      await qc.invalidateQueries({ queryKey: ["me"] })
+      toaster.create({ title: "User updated", type: "success" })
+    },
+    onError: (e) => {
+      const msg = e instanceof ApiError ? e.message : "update failed"
+      setError(msg)
+      toaster.create({ title: msg, type: "error" })
+    },
+  })
+
+  return (
+    <Dialog.Root open={open} onOpenChange={(e) => onOpenChange(e.open)}>
+      <Dialog.Backdrop />
+      <Dialog.Positioner>
+        <Dialog.Content
+          as="form"
+          maxW="440px"
+          onSubmit={(e) => {
+            e.preventDefault()
+            if (!changed || nameMissing) return
+            setError("")
+            save.mutate(changes)
+          }}
+        >
+          <Dialog.Header>
+            <Dialog.Title wordBreak="break-word">Edit user — {user.email}</Dialog.Title>
+          </Dialog.Header>
+          <Dialog.Body>
+            <VStack align="stretch" gap={3}>
+              <Field.Root required={!user.googleLinked} disabled={user.googleLinked}>
+                <Field.Label>
+                  Name {!user.googleLinked && <Field.RequiredIndicator />}
+                </Field.Label>
+                <Input autoComplete="off" value={name} onChange={(e) => setName(e.target.value)} />
+                {user.googleLinked && <Field.HelperText>Comes from Google</Field.HelperText>}
+              </Field.Root>
+              <RoleField value={role} options={assignableRoles(actor)} onChange={setRole} />
+              {error && (
+                <Text color="red.fg" fontSize="sm">
+                  {error}
+                </Text>
+              )}
+            </VStack>
+          </Dialog.Body>
+          <Dialog.Footer>
+            <Dialog.ActionTrigger asChild>
+              <Button type="button" variant="outline">
+                Cancel
+              </Button>
+            </Dialog.ActionTrigger>
+            <Button
+              type="submit"
+              colorPalette="blue"
+              disabled={!changed || nameMissing}
+              loading={save.isPending}
+            >
+              Save
+            </Button>
+          </Dialog.Footer>
+          <Dialog.CloseTrigger />
+        </Dialog.Content>
+      </Dialog.Positioner>
+    </Dialog.Root>
+  )
+}
+
+function UserCard({ u, actor, isSelf }: { u: UserView; actor: Actor; isSelf: boolean }) {
   const qc = useQueryClient()
   const [toDelete, setToDelete] = useState(false)
   const [managingKeys, setManagingKeys] = useState(false)
   const [managingAccess, setManagingAccess] = useState(false)
   const [resetting, setResetting] = useState(false)
+  const [editing, setEditing] = useState(false)
   const credentialLogin = useCredentialLogin()
+  // admins can view a superadmin's card and keys but change nothing
+  const canManage = canManageAccount(actor, u)
+  const canChange = !isSelf && canManage
 
   // the activation switch only proposes a change; it applies after the
   // confirmation dialog (null = no pending change)
@@ -518,9 +671,7 @@ function UserCard({ u, isSelf }: { u: UserView; isSelf: boolean }) {
             <VStack align="start" gap={0} minW={0}>
               <HStack gap={2} flexWrap="wrap">
                 <Text fontWeight="medium" wordBreak="break-word">{u.name}</Text>
-                <Badge variant={u.role === "superadmin" ? "solid" : "subtle"}>
-                  {u.role === "superadmin" ? "Superadmin" : "User"}
-                </Badge>
+                <RoleBadge role={u.role} />
                 {u.googleLinked && (
                   <Badge variant="outline" colorPalette="gray" title="Name comes from Google">
                     Google
@@ -538,11 +689,12 @@ function UserCard({ u, isSelf }: { u: UserView; isSelf: boolean }) {
             </VStack>
           </HStack>
           <HStack gap={2} flexWrap="wrap">
-            {isSelf ? (
+            {isSelf && (
               <Text fontSize="xs" color="fg.muted">
                 you
               </Text>
-            ) : (
+            )}
+            {canChange && (
               <Switch.Root
                 size="sm"
                 checked={!u.disabled}
@@ -565,18 +717,23 @@ function UserCard({ u, isSelf }: { u: UserView; isSelf: boolean }) {
           <Button variant="ghost" size="2xs" onClick={() => setManagingKeys(true)}>
             Keys
           </Button>
-          {/* superadmins always have every provider */}
-          {!isSelf && u.role !== "superadmin" && (
+          {canChange && (
+            <Button variant="ghost" size="2xs" onClick={() => setEditing(true)}>
+              <Pencil /> Edit
+            </Button>
+          )}
+          {/* superadmins and admins always have every provider */}
+          {u.role === "user" && (
             <Button variant="ghost" size="2xs" onClick={() => setManagingAccess(true)}>
               Provider access
             </Button>
           )}
-          {!isSelf && credentialLogin && (
+          {canChange && credentialLogin && (
             <Button variant="ghost" size="2xs" onClick={() => setResetting(true)}>
               <KeyRound /> Reset password
             </Button>
           )}
-          {!isSelf && (
+          {canChange && (
             <IconButton
               variant="ghost"
               size="2xs"
@@ -589,7 +746,13 @@ function UserCard({ u, isSelf }: { u: UserView; isSelf: boolean }) {
           )}
         </HStack>
       </Card.Body>
-      <UserKeysModal userID={u.id} open={managingKeys} onOpenChange={setManagingKeys} />
+      <UserKeysModal
+        userID={u.id}
+        readOnly={!canManage}
+        open={managingKeys}
+        onOpenChange={setManagingKeys}
+      />
+      <EditUserDialog user={u} actor={actor} open={editing} onOpenChange={setEditing} />
       <UserProviderAccessModal user={u} open={managingAccess} onOpenChange={setManagingAccess} />
       <ResetPasswordModal user={u} open={resetting} onOpenChange={setResetting} />
       <ConfirmDialog
@@ -628,6 +791,8 @@ function UserCard({ u, isSelf }: { u: UserView; isSelf: boolean }) {
 export default function UsersPage() {
   const { data: me } = useSession()
   const [adding, setAdding] = useState(false)
+  // App only renders this page for admins; "user" is the conservative fallback
+  const actor: Actor = { role: me?.user.role ?? "user" }
   const { data, isLoading, error } = useQuery({
     queryKey: ["users"],
     queryFn: () => api<{ users: UserView[] }>("/api/users"),
@@ -646,11 +811,11 @@ export default function UsersPage() {
       {!isLoading && !error && (
         <SimpleGrid columns={{ base: 1, md: 2, xl: 3 }} gap={4}>
           {(data?.users ?? []).map((u) => (
-            <UserCard key={u.id} u={u} isSelf={u.id === me?.user.id} />
+            <UserCard key={u.id} u={u} actor={actor} isSelf={u.id === me?.user.id} />
           ))}
         </SimpleGrid>
       )}
-      <AddUserModal open={adding} onOpenChange={setAdding} />
+      <AddUserModal actor={actor} open={adding} onOpenChange={setAdding} />
     </VStack>
   )
 }

@@ -6,7 +6,7 @@ import { filterSearch, useUsageFilters } from "./urlState"
 
 // Usage per (provider, model), row → model detail.
 export default function ModelsTab() {
-  const { filters, isSuperadmin, searchParams } = useUsageFilters()
+  const { filters, isAdmin, searchParams } = useUsageFilters()
   const navigate = useNavigate()
 
   return (
@@ -21,7 +21,7 @@ export default function ModelsTab() {
             filters={filters}
             groupBy="model"
             showRangeNotice
-            isSuperadmin={isSuperadmin}
+            isAdmin={isAdmin}
             onRowClick={(r) =>
               navigate(
                 `/usage/model${filterSearch(searchParams, { provider: r.provider, model: r.model })}`,
