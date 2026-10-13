@@ -38,6 +38,13 @@ export function cleanModelId(id: string): string {
   return rest.length > 0 ? `${prov}/${rest.join("/").replace(SUFFIX_RE, "")}` : id
 }
 
+// splitModelId splits a catalog id into its provider prefix and the model
+// name after it ("glm/glm-5.3-1M-txt" → glm, glm-5.3-1M-txt).
+export function splitModelId(id: string): { provider: string; name: string } {
+  const [provider, ...rest] = id.split("/")
+  return { provider, name: rest.join("/") || id }
+}
+
 // ModelCard is the shared rendering for one model: name, capability badges,
 // token limits, and modalities. Used by the Providers page model list and the
 // Models page.

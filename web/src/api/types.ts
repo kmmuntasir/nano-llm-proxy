@@ -330,6 +330,59 @@ export interface ReasoningOptionView {
   max?: number
 }
 
+// --- model catalog (GET /api/models) ---
+
+// One Design Arena result for a model (Elo per arena/category).
+export interface DesignArenaScoreView {
+  arena: string
+  category: string
+  elo: number
+  win_rate: number
+  rank: number
+}
+
+// Benchmark scores matched to a catalog entry (OpenRouter benchmark data).
+// Artificial Analysis indexes are 0–100, higher is better; each is omitted
+// when not published.
+export interface ModelBenchmarksView {
+  source_id: string // OpenRouter model id the scores belong to
+  source_name?: string
+  intelligence_index?: number
+  coding_index?: number
+  agentic_index?: number
+  design_arena?: DesignArenaScoreView[]
+}
+
+// fetched_at: unix seconds of the last successful fetch (0 = never);
+// error: set when the last attempt failed.
+export interface BenchmarksStatusView {
+  fetched_at: number
+  count: number
+  error?: string
+}
+
+// One merged catalog entry; id is "provider/model" (with cosmetic suffixes).
+// benchmarks is present only when the model matched benchmark data.
+export interface CatalogModelView {
+  id: string
+  owned_by?: string
+  context_window?: number
+  max_output_tokens?: number
+  input_modalities?: string[]
+  reasoning?: boolean
+  reasoning_options?: ReasoningOptionView[]
+  responses_api?: boolean
+  free?: boolean
+  description?: string
+  benchmarks?: ModelBenchmarksView
+}
+
+export interface CatalogModelsView {
+  object: string
+  data: CatalogModelView[]
+  benchmarks_status?: BenchmarksStatusView
+}
+
 export interface ModelMetaView {
   contextWindow: number
   maxOutputTokens: number

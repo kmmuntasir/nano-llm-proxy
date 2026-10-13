@@ -16,6 +16,8 @@ import {
 import { RefreshCw } from "lucide-react"
 import { api, post, put, ApiError } from "../api/client"
 import type {
+  BenchmarksStatusView,
+  CatalogModelsView,
   ModelMetaSyncStatusView,
   ModelMetaView,
   RuntimeSettingsView,
@@ -61,10 +63,6 @@ function ModelPicker({
 
 // cosmetic context/modality suffix the gateway strips anyway
 const SUFFIX_RE = /-\d+(?:\.\d+)?[KMG](?:-txt|-img|-vid|-aud|-pdf)*$/
-
-interface CatalogEntry {
-  id: string
-}
 
 function cleanModelId(id: string): string {
   const [prov, ...rest] = id.split("/")
@@ -135,16 +133,28 @@ function SyncCard({ status }: { status?: ModelMetaSyncStatusView }) {
   const qc = useQueryClient()
   const sync = useMutation({
     mutationFn: () =>
-      post<{ status: ModelMetaSyncStatusView }>("/api/settings/model-meta/sync"),
-    onSuccess: async ({ status }) => {
-      await qc.invalidateQueries({ queryKey: ["settings"] })
+      post<{ status: ModelMetaSyncStatusView; benchmarks_status?: BenchmarksStatusView }>(
+        "/api/settings/model-meta/sync",
+      ),
+    onSuccess: async ({ status, benchmarks_status: bench }) => {
+      // the catalog (and its benchmark scores) changed too — refresh the Models page
+      await Promise.all([
+        qc.invalidateQueries({ queryKey: ["settings"] }),
+        qc.invalidateQueries({ queryKey: ["models"] }),
+      ])
+      const benchOk = bench !== undefined && !bench.error
       if (status.ok) {
         toaster.create({
-          title: `Catalog synced: +${status.added} ~${status.updated} −${status.pruned}`,
+          title:
+            `Catalog synced: +${status.added} ~${status.updated} −${status.pruned}` +
+            (benchOk ? ` · benchmarks: ${bench.count} models` : ""),
           type: "success",
         })
       } else {
         toaster.create({ title: `Sync failed: ${status.error ?? "unknown error"}`, type: "error" })
+      }
+      if (bench?.error) {
+        toaster.create({ title: `Benchmark fetch failed: ${bench.error}`, type: "error" })
       }
     },
     onError: (e) =>
@@ -160,7 +170,9 @@ function SyncCard({ status }: { status?: ModelMetaSyncStatusView }) {
           limits and reasoning flags come from models.dev. Auto-sync refreshes
           all three catalogs daily; entries for models models.dev doesn't know
           are left as you wrote them, and dead ids are pruned. Manual edits to
-          catalog-known models are overwritten on the next sync.
+          catalog-known models are overwritten on the next sync. Benchmark
+          scores (Artificial Analysis indexes, Design Arena) come from
+          OpenRouter and refresh with the same sync.
         </Text>
       </Card.Header>
       <Card.Body>
@@ -354,7 +366,7 @@ export default function SettingsPage() {
   })
   const catalog = useQuery({
     queryKey: ["models"],
-    queryFn: () => api<{ data: CatalogEntry[] }>("/api/models"),
+    queryFn: () => api<CatalogModelsView>("/api/models"),
     staleTime: 5 * 60_000,
   })
   const [form, setForm] = useState<SettingsForm | null>(null)

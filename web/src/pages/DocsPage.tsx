@@ -218,6 +218,11 @@ wire_api = "chat"          # the gateway also speaks "responses"`,
           reasoning flags. Use that full id as the{" "}
           <Code fontFamily="mono">model</Code> value in any client.
         </Text>
+        <Text fontSize="sm">
+          Benchmark scores (Artificial Analysis indexes, Design Arena) come from
+          OpenRouter and refresh with the catalog sync (daily when auto-sync is
+          on); free and stealth models often have none.
+        </Text>
         <List.Root fontSize="sm" pl={4}>
           <List.Item>
             Models with ≥ 1M context take a <Code fontFamily="mono">[1m]</Code>{" "}
