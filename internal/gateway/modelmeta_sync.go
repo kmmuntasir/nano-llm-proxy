@@ -464,10 +464,14 @@ func (g *gateway) maybeSyncModelMeta() {
 
 // handleSyncModelMeta is the GUI "Sync now" button: synchronous, so the
 // response can carry the outcome. 200 even on ok:false — the GUI renders the
-// error from the status block.
+// error from the status block. The benchmark fetch runs alongside; its
+// outcome is reported separately and neither sync depends on the other.
 func (g *gateway) handleSyncModelMeta(w http.ResponseWriter, r *http.Request) {
+	benchDone := make(chan benchmarksStatus, 1)
+	go func() { benchDone <- g.syncBenchmarks(defaultBenchmarksURL) }()
 	st := g.syncModelMeta(defaultModelsDevURL)
-	log.Printf("admin user=%s action=settings.modelmeta.sync ok=%v added=%d updated=%d pruned=%d",
-		actorEmail(contextUser(r)), st.OK, st.Added, st.Updated, st.Pruned)
-	writeJSON(w, http.StatusOK, map[string]any{"status": st, "settings": g.rs()})
+	bst := <-benchDone
+	log.Printf("admin user=%s action=settings.modelmeta.sync ok=%v added=%d updated=%d pruned=%d benchmarks=%d",
+		actorEmail(contextUser(r)), st.OK, st.Added, st.Updated, st.Pruned, bst.Count)
+	writeJSON(w, http.StatusOK, map[string]any{"status": st, "settings": g.rs(), "benchmarks_status": bst})
 }

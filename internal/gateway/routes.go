@@ -101,6 +101,7 @@ func (g *gateway) MaintenanceLoop() {
 			}
 		}
 		g.maybeSyncModelMeta() // 24h-gated, async, at most one in flight
+		g.maybeSyncBenchmarks()
 		// prune piggybacks on the flush tick, roughly hourly
 		if time.Since(startTime)%time.Hour < 30*time.Second {
 			g.store.DeleteExpiredSessions() //nolint:errcheck
@@ -363,7 +364,8 @@ func (g *gateway) handleModels(w http.ResponseWriter, r *http.Request) {
 }
 
 // handleAllModels serves the same scoped catalog to the admin GUI's Models
-// page (session auth instead of a client key).
+// page (session auth instead of a client key), decorated with benchmark
+// scores where the benchmark source knows the model.
 func (g *gateway) handleAllModels(w http.ResponseWriter, r *http.Request) {
 	models, ok := g.catalogFor(r)
 	if !ok {
@@ -371,7 +373,11 @@ func (g *gateway) handleAllModels(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	w.Header().Set("Content-Type", "application/json")
-	json.NewEncoder(w).Encode(map[string]any{"object": "list", "data": models})
+	json.NewEncoder(w).Encode(map[string]any{
+		"object":            "list",
+		"data":              g.withBenchmarks(models),
+		"benchmarks_status": g.bench.Load().status(),
+	})
 }
 
 // hasFreeSuffix reports whether a raw upstream model id carries Zen's

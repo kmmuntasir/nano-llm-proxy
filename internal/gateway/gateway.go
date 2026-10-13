@@ -73,6 +73,8 @@ type gateway struct {
 	catalog   []any // cached merged /v1/models entries (scoped per caller on serve)
 	catalogAt time.Time
 
+	bench atomic.Pointer[benchIndex] // model benchmarks for /api/models (benchmarks.go)
+
 	usageBuf usageBuffer // per-request usage events, drained to the DB by the maintenance loop
 }
 
@@ -109,6 +111,7 @@ func NewGatewayFromStore(cfg *config.Config, rs *settings.RuntimeSettings, st *s
 	if err := g.rebuildPools(); err != nil {
 		return nil, err
 	}
+	g.loadBenchmarks()
 	return g, nil
 }
 

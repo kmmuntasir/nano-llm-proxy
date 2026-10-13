@@ -622,6 +622,73 @@ func (s *Store) UpdateSettings(mutate func(*settings.RuntimeSettings) *settings.
 	return tx.Commit()
 }
 
+// --- model benchmarks ---
+
+// ModelBenchmarksKey is the settings-table row holding the benchmark
+// snapshot. It is a cache of third-party data, not a tunable, so it lives
+// beside the runtime document rather than inside it (and never travels with
+// GET/PUT /api/settings).
+const ModelBenchmarksKey = "model_benchmarks"
+
+// DesignArenaScore is one Design Arena category result for a model.
+type DesignArenaScore struct {
+	Arena    string  `json:"arena"`
+	Category string  `json:"category"`
+	Elo      float64 `json:"elo"`
+	WinRate  float64 `json:"win_rate"`
+	Rank     float64 `json:"rank"`
+}
+
+// ModelBenchmark is one model's published scores, keyed by the OpenRouter id
+// they were published under. Each index is nil when not published.
+type ModelBenchmark struct {
+	ID            string             `json:"source_id"`
+	CanonicalSlug string             `json:"canonical_slug,omitempty"`
+	Name          string             `json:"source_name,omitempty"`
+	Intelligence  *float64           `json:"intelligence_index,omitempty"`
+	Coding        *float64           `json:"coding_index,omitempty"`
+	Agentic       *float64           `json:"agentic_index,omitempty"`
+	DesignArena   []DesignArenaScore `json:"design_arena,omitempty"`
+}
+
+// BenchmarkSnapshot is the last good benchmark fetch plus the outcome of the
+// most recent attempt. A failed attempt keeps Models/FetchedAt from the last
+// success and records Error/AttemptAt.
+type BenchmarkSnapshot struct {
+	FetchedAt int64            `json:"fetched_at"`
+	AttemptAt int64            `json:"attempt_at"`
+	Error     string           `json:"error,omitempty"`
+	Models    []ModelBenchmark `json:"models"`
+}
+
+// LoadModelBenchmarks returns the stored snapshot; a store that never synced
+// returns an empty snapshot.
+func (s *Store) LoadModelBenchmarks() (*BenchmarkSnapshot, error) {
+	raw, err := s.getSetting(ModelBenchmarksKey)
+	if err != nil {
+		return nil, err
+	}
+	snap := &BenchmarkSnapshot{}
+	if raw == "" {
+		return snap, nil
+	}
+	if err := json.Unmarshal([]byte(raw), snap); err != nil {
+		return nil, fmt.Errorf("parse model benchmarks: %w", err)
+	}
+	return snap, nil
+}
+
+// SaveModelBenchmarks replaces the stored snapshot wholesale.
+func (s *Store) SaveModelBenchmarks(snap *BenchmarkSnapshot) error {
+	raw, err := json.Marshal(snap)
+	if err != nil {
+		return err
+	}
+	_, err = s.db.Exec(`INSERT INTO settings (key, value) VALUES (?, ?)
+		ON CONFLICT(key) DO UPDATE SET value=excluded.value`, ModelBenchmarksKey, string(raw))
+	return err
+}
+
 // --- users ---
 
 func (s *Store) InsertUser(u *User) error {

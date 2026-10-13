@@ -50,7 +50,7 @@ block is server-owned).
 | `zen.responsesModels` | — | *Removed.* Responses support is a per-model flag on `modelMeta` entries; toggle it per model on the Providers page (zen models). Sync preserves the flag across catalog refreshes |
 | `zen.freeOnly` | false | Restrict the zen catalog in `/v1/models` to models flagged as free upstream |
 | `zen.modelMeta` | empty | Per-model metadata (context window, max output, modalities, reasoning, reasoning options, description) shown in `/v1/models`; unknown models get conservative defaults |
-| `zen.modelMetaAutoSync` | false | Refresh `modelMeta` from models.dev once a day in the background |
+| `zen.modelMetaAutoSync` | false | Refresh `modelMeta` from models.dev and model benchmarks from OpenRouter once a day in the background |
 | `kilo.freeOnly` | false | Same catalog restriction as `zen.freeOnly`, applied to Kilo preset providers |
 | `kilo.modelMeta` | empty | Per-model *reasoning* metadata (reasoning flag + reasoning options) for Kilo preset providers, filled by the models.dev sync. Kilo's own catalog already carries context/output limits, modalities and `supported_parameters`, and those always win — only the reasoning facts are taken from here. A model models.dev doesn't document keeps both fields absent rather than an unverified `false` |
 | `zai.modelMeta` | empty | Per-model metadata for Z.ai preset providers (context window, max output, modalities, reasoning, reasoning options, description); filled by the models.dev sync. Unknown models advertise a 1M context window so coding agents don't downshift to 128K |
@@ -113,6 +113,25 @@ All three catalogs are sync-managed: `PUT /api/settings` replaces the whole
 document, so any client that saves settings must send `zen.modelMeta`,
 `zai.modelMeta` and `kilo.modelMeta` back (the admin GUI does). A save that
 omits one empties it; the next sync repopulates it.
+
+### Model benchmarks (OpenRouter)
+
+models.dev publishes no benchmark scores. The Models page's Intelligence,
+Coding and Agentic scores (Artificial Analysis indexes) and Design Arena
+results come from OpenRouter's public, keyless
+`https://openrouter.ai/api/v1/models`, fetched by the same *Sync now* button
+and the same daily `modelMetaAutoSync` (retried hourly after a failure).
+
+- Only models with at least one published score are kept; the snapshot is
+  stored in `gateway.db` (settings row `model_benchmarks`) and survives
+  restarts.
+- Catalog models are matched by a normalized slug: vendor prefix, `:free` /
+  `:batch` variants, zen's `-free` marker and date suffixes are ignored, and
+  `.` matches `-` (`zen/glm-5.3-flash` ↔ `z-ai/glm-5.3-flash`).
+- Free, stealth and very new models often have no published scores — they
+  simply show none.
+- A failed or empty fetch keeps the previous snapshot and reports the error.
+- Scores appear on `/api/models` (the GUI) only; `/v1/models` is unchanged.
 
 ## CLI
 
