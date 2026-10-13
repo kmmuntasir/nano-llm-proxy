@@ -46,7 +46,7 @@ func (g *gateway) learnSurface(model, surface string) {
 }
 
 // injectChatFingerprint mutates a chat-completions body to pass the gate:
-// stream:true + tools named bash/read/edit present.
+// stream:true + the zenGateTools present.
 func injectChatFingerprint(body map[string]any, injectTools bool) {
 	body["stream"] = true
 	if !injectTools {
@@ -54,7 +54,7 @@ func injectChatFingerprint(body map[string]any, injectTools bool) {
 	}
 	tools, _ := body["tools"].([]any)
 	have := toolNamesChat(tools)
-	for _, name := range []string{"bash", "read", "edit"} {
+	for _, name := range zenGateTools {
 		if !slices.Contains(have, name) {
 			tools = append(tools, stubToolChat(name))
 		}

@@ -57,7 +57,7 @@ func (g *gateway) handleResponses(w http.ResponseWriter, r *http.Request) {
 
 // ensureFlatStubs guarantees the gate tools in flat Responses shape.
 func ensureFlatStubs(tools []any) []any {
-	for _, name := range []string{"bash", "read", "edit"} {
+	for _, name := range zenGateTools {
 		if !containsFlatTool(tools, name) {
 			tools = append(tools, stubToolFlat(name))
 		}

@@ -75,7 +75,10 @@ func (g *gateway) RegisterRoutes(mux *http.ServeMux, webFS fs.FS) {
 	mux.HandleFunc("GET /api/usage/keys", g.requireSession(g.handleUsageKeys))
 	mux.HandleFunc("GET /api/usage/activity", g.requireSession(g.handleUsageActivity))
 
-	mux.Handle("/", g.ServeWeb(webFS))
+	// untagged builds pass a nil FS; the caller mounts its own "/" stub
+	if webFS != nil {
+		mux.Handle("/", g.ServeWeb(webFS))
+	}
 }
 
 // MaintenanceLoop flushes in-memory usage counters and usage events to the

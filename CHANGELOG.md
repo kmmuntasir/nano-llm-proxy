@@ -19,12 +19,16 @@ Release notes are generated from commit prefixes, so `feat:`, `fix:`,
   under all four session headers, `traceparent`/`b3`).
 - Key cooldown logs show the upstream status (`HTTP 429`) instead of
   `HTTP 0`.
+- Untagged builds (`go build` without `-tags prod`) no longer panic at
+  startup on a duplicate `/` route; they serve the GUI-not-built stub.
 
 ### Changed
 
 - Default `zen.userAgent` is now `opencode/latest/2.0.27/cli`; the 1.18.0
   floor check accepts both the 1.x `opencode/X.Y.Z` and the 2.x
   `opencode/<channel>/X.Y.Z/<client>` shapes.
+- The zen gate tool stubs are now `shell`/`read`/`edit`, matching the
+  opencode 2.x tool set (1.x called the shell tool `bash`).
 
 - zen models fronted by a strict role validator (e.g. `fledge-alpha-free`)
   no longer 502 for pi / oh-my-pi. Those clients send the instruction message

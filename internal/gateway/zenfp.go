@@ -9,6 +9,11 @@ import (
 	"time"
 )
 
+// zenGateTools are the tool names the free-tier gate expects to see in a
+// request: a body with no tools 403s FreeTierError. Matches the opencode 2.x
+// tool set (1.x called the shell tool "bash"); zen accepts either today.
+var zenGateTools = []string{"shell", "read", "edit"}
+
 // The opencode client fingerprint zen's free tier checks. Captured from
 // opencode 2.0.27 (`opencode run --standalone` against a capture server):
 //
@@ -18,6 +23,7 @@ import (
 //	x-opencode-session:    ses_ecc15552affe0cq3QbEJCOKyVy
 //	x-opencode-session-id, x-session-affinity, x-session-id: same session id
 //	traceparent, b3:       per-request trace context
+//	tools:                 shell, read, edit, glob, grep, ... (2.x renamed bash → shell)
 //
 // Since 2026-10-12 zen validates the session id's structure: a random
 // "ses_" + 12 hex no longer passes and every request 403s FreeTierError.

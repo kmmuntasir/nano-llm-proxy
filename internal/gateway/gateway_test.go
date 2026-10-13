@@ -8,6 +8,7 @@ import (
 	"github.com/kmmuntasir/nano-llm-proxy/internal/store"
 	"net/http"
 	"net/http/httptest"
+	"slices"
 	"strings"
 	"testing"
 	"time"
@@ -204,8 +205,24 @@ func TestZenFingerprintInjection(t *testing.T) {
 		t.Fatalf("stream must be forced true upstream")
 	}
 	tools, _ := gotBody["tools"].([]any)
-	if len(tools) < 3 {
-		t.Fatalf("expected >=3 injected tools, got %d", len(tools))
+	if names := toolNamesChat(tools); !slices.Equal(names, zenGateTools) {
+		t.Fatalf("injected tools = %v, want %v", names, zenGateTools)
+	}
+}
+
+// Untagged builds pass a nil web FS; RegisterRoutes must leave "/" to the
+// caller's stub instead of claiming it (a duplicate pattern panics the mux).
+func TestRegisterRoutesNilWebFSLeavesRoot(t *testing.T) {
+	g := newGateway(&config.Config{}, testRuntime(), &config.KeyFile{})
+	mux := http.NewServeMux()
+	g.RegisterRoutes(mux, nil)
+	mux.Handle("/", http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Write([]byte("stub"))
+	}))
+	rec := httptest.NewRecorder()
+	mux.ServeHTTP(rec, httptest.NewRequest("GET", "/", nil))
+	if rec.Body.String() != "stub" {
+		t.Fatalf("root not served by caller stub: %q", rec.Body.String())
 	}
 }
 
