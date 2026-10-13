@@ -25,8 +25,8 @@ environment (so `systemd EnvironmentFile=` and `docker -e` work unchanged).
 | `NANO_DB_PATH` | `gateway.db` | SQLite database (created and migrated at boot, 0600) |
 | `NANO_COOKIE_SECURE` | true | `Secure` flag on GUI session cookies. Set false only for plain-HTTP local use |
 | `NANO_TRUSTED_ORIGINS` | empty | Comma-separated extra Origin hosts accepted on state-changing `/api` requests. Same-host is always allowed. Set your public host here when serving the GUI behind a reverse proxy |
-| `GOOGLE_CLIENT_ID` | empty | Enables Google sign-in on the GUI login page (OAuth 2.0 *Web* client id). The GUI's public origin must be listed under the client's *Authorized JavaScript origins*. No client secret is used — the gateway verifies Google's signed ID token itself |
-| `GOOGLE_WORKSPACE_DOMAIN` | empty | Restricts Google sign-in to one Workspace domain (bare domain, e.g. `example.com`; requires `GOOGLE_CLIENT_ID`). Set: members of the domain self-provision as regular users on first sign-in. Unset: only existing users, matched by email, can sign in with Google |
+| `GOOGLE_CLIENT_ID` | empty | Enables Google sign-in on the GUI login page (OAuth 2.0 *Web* client id). The GUI's public origin must be listed under the client's *Authorized JavaScript origins*. No client secret is used — the gateway verifies Google's signed ID token itself. Google sign-in only signs in users a superadmin added on the Users page (matched by email); it never creates accounts |
+| `GOOGLE_WORKSPACE_DOMAIN` | empty | Restricts Google sign-in to one Workspace domain (bare domain, e.g. `example.com`; requires `GOOGLE_CLIENT_ID`). Set: only accounts in that domain can sign in with Google (they still need a user added on the Users page). Unset: any Google account whose email matches an existing user |
 
 Malformed values are fatal at boot (`invalid NANO_PORT "…"`), never silently
 ignored. See `.env.example` for a commented template.

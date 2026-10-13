@@ -463,7 +463,7 @@ real environment always wins; see `.env.example`). Full reference in
 | `NANO_DB_PATH` | `gateway.db` | SQLite database |
 | `NANO_COOKIE_SECURE` | true | Secure flag on session cookies (false for plain HTTP) |
 | `NANO_TRUSTED_ORIGINS` | empty | Extra Origins allowed on GUI mutations behind a reverse proxy |
-| `GOOGLE_CLIENT_ID` / `GOOGLE_WORKSPACE_DOMAIN` | empty | Optional Google sign-in for the GUI, optionally limited to one Workspace domain (whose members then self-provision as regular users); password sign-in can then be switched off in Settings |
+| `GOOGLE_CLIENT_ID` / `GOOGLE_WORKSPACE_DOMAIN` | empty | Optional Google sign-in for the GUI, for users added on the Users page only (never creates accounts), optionally limited to one Workspace domain; password sign-in can then be switched off in Settings |
 
 **Runtime** — everything you tune while it runs (rotation, retries, daily
 cap, the Claude fallback, adapter knobs, the model catalogs, web tools)
