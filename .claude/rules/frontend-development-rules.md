@@ -11,7 +11,7 @@ The admin GUI lives in `web/` (package `nano-llm-proxy-web`): React 19 + TypeScr
 ```
 web/src/
     main.tsx            # QueryClientProvider → BrowserRouter → Chakra Provider → App + Toaster
-    App.tsx             # session gate (useSession → /api/auth/me) + the whole route tree; superadmin-only routes
+    App.tsx             # session gate (useSession → /api/auth/me) + the whole route tree; admin-only routes (superadmin + admin)
     api/client.ts       # fetch wrapper: api/post/put/patch/del, ApiError, 401 → setUnauthorizedHandler
     api/types.ts        # *View / request / response types mirroring the Go JSON exactly
     components/         # AppLayout, DataTable, ModelCard, UsageCharts, setup dialogs, StatusBadge, ...
@@ -39,8 +39,8 @@ web/public/             # static files (favicon)
 
 ## Routing & Guards
 
-- One route tree in `App.tsx`. Unauthenticated → only `/login`; authenticated → `AppLayout` + routes; `users`/`providers`/`settings` render only for `role === "superadmin"`. Unknown paths redirect to `/`.
-- UI gating is convenience; the Go handlers (`requireSession`, `requireSuperadmin`) are the boundary. A new admin page needs the backend check first.
+- One route tree in `App.tsx`. Unauthenticated → only `/login`; authenticated → `AppLayout` + routes; `users`/`providers`/`settings` render only for admins (`isAdminRole(role)` — superadmin or admin). Unknown paths redirect to `/`.
+- UI gating is convenience; the Go handlers (`requireSession`, `requireAdmin`) are the boundary. A new admin page needs the backend check first.
 - Pages are statically imported; no lazy loading ad hoc (bundle ships inside the binary).
 
 ## API Layer

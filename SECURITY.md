@@ -75,7 +75,7 @@ port to a wide network, put a rate limiter in front of it.
 **Google sign-in is optional and verified locally.** With `GOOGLE_CLIENT_ID`
 set, the GUI accepts Google ID tokens: the gateway checks Google's RS256
 signature, issuer, audience, expiry and a verified email itself (no client
-secret is stored). It only signs in users a superadmin added on the Users
+secret is stored). It only signs in users an admin added on the Users
 page — an unknown email is refused, never created — and
 `GOOGLE_WORKSPACE_DOMAIN` can restrict it further to one Workspace domain.
 Deactivating a user ends their sessions and turns off their client keys.

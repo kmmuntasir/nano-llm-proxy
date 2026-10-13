@@ -21,7 +21,7 @@ You receive **one task** at a time: description, acceptance criteria, references
 
 **Layout:** `main.go` wires only. `internal/store` owns all SQL. `internal/gateway` owns HTTP (`routes.go` registers; one concern per `api_*.go` / adapter file). `internal/settings` is the runtime-settings document. `internal/config` is bootstrap env. `internal/webtools` is search/read + SSRF guard.
 
-**HTTP:** `mux.HandleFunc("METHOD /path/{id}", …)`; wrap with `clientOnly` (`/v1/*`, `/mcp`) or `requireSession` (+ `requireSuperadmin`) for `/api/*`. Use `writeJSON`, `readJSON` (bounded; writes its own error), `apiErr` → `{"error":{"message":"…"}}`, `pathID`. Never invent another error shape. `/v1/*` errors follow the protocol spoken. Handlers stay unexported methods on `*gateway`.
+**HTTP:** `mux.HandleFunc("METHOD /path/{id}", …)`; wrap with `clientOnly` (`/v1/*`, `/mcp`) or `requireSession` (+ `requireAdmin`) for `/api/*`. Use `writeJSON`, `readJSON` (bounded; writes its own error), `apiErr` → `{"error":{"message":"…"}}`, `pathID`. Never invent another error shape. `/v1/*` errors follow the protocol spoken. Handlers stay unexported methods on `*gateway`.
 
 **Database:** SQLite WAL, `gateway.db` 0600. Schema changes ONLY as a new `migrateVn()` in `internal/store/store.go` (one transaction, inserts the `schema_migrations` row) — never edit an applied migration. Parameterized queries only. GUI mutations rebuild in-memory pools in the same request — preserve that.
 

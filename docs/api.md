@@ -251,7 +251,13 @@ pi-mcp-adapter for MCP). Backends are installed with
 
 Used by the embedded GUI; session-cookie authenticated with bcrypt-backed
 logins, per-IP+email backoff, and Origin checks on state-changing requests.
-Roles: `superadmin` (everything below) and `user` (own keys + dashboard).
+Roles: `superadmin` and `admin` (everything below — "admin" in the table
+means either) and `user` (own keys + dashboard). The one difference between
+the two admin roles: an admin can't change a superadmin account in any way
+(deactivate, delete, rename, change role, reset password, manage its client
+keys — viewing is fine) and can't grant the `superadmin` role. Superadmins can
+change other superadmins. Nobody can deactivate or delete their own account
+(409).
 
 | Endpoint | Role | Purpose |
 | --- | --- | --- |
@@ -260,29 +266,29 @@ Roles: `superadmin` (everything below) and `user` (own keys + dashboard).
 | `GET /api/auth/config` | — (open) | Sign-in methods for the login page: `{"credentialLogin": bool, "google": {"clientId", "domain"?}}`; `google` is omitted when Google sign-in isn't configured |
 | `POST /api/auth/google` | — | Google sign-in: body `{"credential": "<Google ID token>"}`; verifies the token (signature, issuer, audience, expiry, verified email, Workspace domain) and starts the same session as password login. Origin-checked and backoff-limited. 404 when not configured, 401 bad token, 403 outside the domain / no account with this email (Google sign-in never creates accounts — add the user on the Users page) / disabled account |
 | `GET/POST /api/me/keys`, `PATCH/DELETE /api/me/keys/{keyId}` | user | Own client keys |
-| `GET/POST /api/users`, `PATCH/DELETE /api/users/{id}` | superadmin | User management. `POST` requires a password (min 10 characters) only while password sign-in is on; with it off, users are created without one and sign in with Google. `PATCH {"disabled": true}` deactivates a user: their sessions end and their client keys stop authenticating until reactivated (the last superadmin can't be deactivated) |
-| `GET/POST /api/users/{id}/keys`, `PATCH/DELETE /api/users/{id}/keys/{keyId}` | superadmin | Per-user client keys |
-| `GET /api/users/{id}/providers`, `PUT /api/users/{id}/providers/{providerId}/access` | superadmin | Per-user provider access. The listing annotates each provider with `disabledForUser`; the PUT takes `{disabled: bool}` and answers 409 for a superadmin target — superadmins always have every provider (stray revocations for them are ignored, and promotion clears a user's revocations). Access is allow-by-default: a revoked provider vanishes from that user's `/v1/models` and their requests to it fail exactly like an unknown provider |
-| `GET/POST /api/providers`, `PATCH/DELETE /api/providers/{id}` | superadmin | Providers (generic CRUD; `baseUrl` and/or `anthropicBaseUrl`, at least one required; built-ins cannot be deleted). Create takes `keys` as `{key, label}` objects — every upstream key needs a label (1-64 characters). It also accepts a `preset` id: unknown presets are 400, the name defaults to the preset id, endpoint roots default from the registry, and the preset is immutable afterwards. Multiple providers per preset are allowed; only `zen` is reserved and undeletable |
-| `GET /api/providers/presets` | superadmin | The curated preset registry (id, label, endpoint roots) behind the GUI's Add Provider dropdown |
-| `POST /api/providers/{id}/keys`, `PATCH/DELETE /api/providers/{id}/keys/{keyId}` | superadmin | Upstream keys; POST requires a label, PATCH may rename a key but never blank its label |
-| `GET /api/providers/{id}/keys/{keyId}/usage` | superadmin | Per-key quota/usage from the provider's preset usage endpoint, fetched on demand (Z.ai coding plans: plan tier, 5-hour and weekly windows, MCP). The upstream `data` object passes through verbatim; presets without a usage endpoint answer 400 |
-| `GET /api/settings` | superadmin | Effective runtime settings document (rotation, retries, Claude fallback, adapter knobs, model catalog) |
-| `PUT /api/settings` | superadmin | Validate and replace the document; omitted fields fall back to defaults, the models.dev sync status is server-owned and preserved. Validation failures return 400 and change nothing. Applies in-request — pool mode and the `/v1/models` cache refresh before the response |
-| `POST /api/settings/model-meta/sync` | superadmin | Run the models.dev catalog sync and the benchmark fetch now; returns the sync status and `benchmarks_status` (200 even when `ok:false` — the errors are in the status blocks; neither sync depends on the other) |
-| `GET /api/dashboard` | user | Pool health and recent activity. Superadmins get per-key pool views and the full activity ring; other users get health counts only (`keys: []`) and just their own activity entries, with the upstream `keyHash` blanked |
+| `GET/POST /api/users`, `PATCH/DELETE /api/users/{id}` | admin | User management. `POST` requires a password (min 10 characters) only while password sign-in is on; with it off, users are created without one and sign in with Google. `PATCH {"disabled": true}` deactivates a user: their sessions end and their client keys stop authenticating until reactivated (the last superadmin can't be deactivated) |
+| `GET/POST /api/users/{id}/keys`, `PATCH/DELETE /api/users/{id}/keys/{keyId}` | admin | Per-user client keys |
+| `GET /api/users/{id}/providers`, `PUT /api/users/{id}/providers/{providerId}/access` | admin | Per-user provider access. The listing annotates each provider with `disabledForUser`; the PUT takes `{disabled: bool}` and answers 409 for an admin or superadmin target — they always have every provider (stray revocations for them are ignored, and promotion clears a user's revocations). Access is allow-by-default: a revoked provider vanishes from that user's `/v1/models` and their requests to it fail exactly like an unknown provider |
+| `GET/POST /api/providers`, `PATCH/DELETE /api/providers/{id}` | admin | Providers (generic CRUD; `baseUrl` and/or `anthropicBaseUrl`, at least one required; built-ins cannot be deleted). Create takes `keys` as `{key, label}` objects — every upstream key needs a label (1-64 characters). It also accepts a `preset` id: unknown presets are 400, the name defaults to the preset id, endpoint roots default from the registry, and the preset is immutable afterwards. Multiple providers per preset are allowed; only `zen` is reserved and undeletable |
+| `GET /api/providers/presets` | admin | The curated preset registry (id, label, endpoint roots) behind the GUI's Add Provider dropdown |
+| `POST /api/providers/{id}/keys`, `PATCH/DELETE /api/providers/{id}/keys/{keyId}` | admin | Upstream keys; POST requires a label, PATCH may rename a key but never blank its label |
+| `GET /api/providers/{id}/keys/{keyId}/usage` | admin | Per-key quota/usage from the provider's preset usage endpoint, fetched on demand (Z.ai coding plans: plan tier, 5-hour and weekly windows, MCP). The upstream `data` object passes through verbatim; presets without a usage endpoint answer 400 |
+| `GET /api/settings` | admin | Effective runtime settings document (rotation, retries, Claude fallback, adapter knobs, model catalog) |
+| `PUT /api/settings` | admin | Validate and replace the document; omitted fields fall back to defaults, the models.dev sync status is server-owned and preserved. Validation failures return 400 and change nothing. Applies in-request — pool mode and the `/v1/models` cache refresh before the response |
+| `POST /api/settings/model-meta/sync` | admin | Run the models.dev catalog sync and the benchmark fetch now; returns the sync status and `benchmarks_status` (200 even when `ok:false` — the errors are in the status blocks; neither sync depends on the other) |
+| `GET /api/dashboard` | user | Pool health and recent activity. Admins get per-key pool views and the full activity ring; other users get health counts only (`keys: []`) and just their own activity entries, with the upstream `keyHash` blanked |
 | `GET /api/models` | user | The merged, enriched model catalog `/v1/models` serves, plus benchmark scores — backs the Models page. Entries the benchmark source knows carry `benchmarks` (`source_id`, `source_name`, optional `intelligence_index`/`coding_index`/`agentic_index`, optional `design_arena` list of `{arena, category, elo, win_rate, rank}`); the body adds `benchmarks_status` (`fetched_at`, `count`, optional `error`). `/v1/models` never carries benchmarks |
-| `GET /api/providers/{id}/models` | superadmin | One provider's live catalog, fetched on demand |
-| `PUT /api/settings/responses-api` | superadmin | Flip the per-model Responses-API flag (`{model, responsesApi}`); sync preserves the flag |
-| `POST /api/webtools/test` | superadmin | Live-probe a web-tools backend: `{target: "searxng" \| "obscura", deep?: bool}`. Runs one real search / `obscura --version` (deep adds an example.com fetch); returns `{ok, latencyMs, version?, detail, nextStep}` |
-| `GET /api/usage/summary?from=&to=` | user | Requests/errors/tokens totals, top models, per-provider (scoped to own user; superadmin sees all) |
+| `GET /api/providers/{id}/models` | admin | One provider's live catalog, fetched on demand |
+| `PUT /api/settings/responses-api` | admin | Flip the per-model Responses-API flag (`{model, responsesApi}`); sync preserves the flag |
+| `POST /api/webtools/test` | admin | Live-probe a web-tools backend: `{target: "searxng" \| "obscura", deep?: bool}`. Runs one real search / `obscura --version` (deep adds an example.com fetch); returns `{ok, latencyMs, version?, detail, nextStep}` |
+| `GET /api/usage/summary?from=&to=` | user | Requests/errors/tokens totals, top models, per-provider (scoped to own user; admins see all) |
 | `GET /api/usage/keys?from=&to=` | user | Per-client-key requests/tokens in range (scoped) |
-| `GET /api/usage/users?from=&to=` | superadmin | Per-user requests/tokens in range |
+| `GET /api/usage/users?from=&to=` | admin | Per-user requests/tokens in range |
 | `GET /api/usage/activity?limit=` | user | Persisted recent requests with token counts (scoped) |
 | `GET /api/usage/timeseries?from=&to=&bucket=&tz=` | user | Per-bucket requests/tokens (`points`) and per-provider requests (`providers`) for the dashboard charts; `bucket` (seconds) is echoed. `bucket=hour\|day` (default hour when the span is ≤ 48h, else day); `tz` = seconds east of UTC (scoped) |
 | `GET /api/usage/overview` | user | Usage monitoring totals (incl. p95 latency, avg TTFB, distinct users/models) and a zero-filled per-bucket series — see [Usage monitoring](#usage-monitoring-apiusage) |
-| `GET /api/usage/breakdown` | user | Grouped, paged, sortable usage table (`groupBy=user\|user_model\|upstream_key` are superadmin-only) |
-| `GET /api/usage/series` | user | Top-N series per group with the rest folded into `other` (`groupBy=user` is superadmin-only) |
+| `GET /api/usage/breakdown` | user | Grouped, paged, sortable usage table (`groupBy=user\|user_model\|upstream_key` are admin-only) |
+| `GET /api/usage/series` | user | Top-N series per group with the rest folded into `other` (`groupBy=user` is admin-only) |
 | `GET /api/usage/requests` | user | Paged raw request log with upstream detail |
 | `GET /api/usage/facets` | user | Distinct users/providers/models/keys/surfaces in the range, for filter dropdowns |
 | `POST /api/me/password` | user | Self-service password reset; requires the current password and wipes all sessions. 403 for Google-linked accounts, which sign in with Google |
@@ -316,9 +322,9 @@ surface on `/v1/responses`) are recorded too, with the 4xx status the client
 got and its message as the fail reason.
 
 All five endpoints below are `GET`, need a session, and answer bad
-parameters with `400` in the standard error shape. Non-superadmins are
+parameters with `400` in the standard error shape. Non-admins are
 always scoped to their own user: passing someone else's `userId`, or a
-superadmin-only grouping, is `403`.
+admin-only grouping, is `403`.
 
 Common filters (overview, breakdown, series, requests):
 
@@ -326,7 +332,7 @@ Common filters (overview, breakdown, series, requests):
 | --- | --- |
 | `from`, `to` | unix seconds; default last 24h; negative values are a 400; `to` is clamped to now and the span is capped at 92 days (the effective range is echoed as `range`) |
 | `tz` | seconds east of UTC, -86400..86400; aligns buckets to the viewer's midnight |
-| `userId` | superadmin only (others are forced to themselves) |
+| `userId` | admins only (others are forced to themselves) |
 | `keyId` | client key id |
 | `provider`, `model` | exact provider name / upstream model id |
 | `surface` | `chat` \| `messages` \| `responses` \| `mcp` |
@@ -345,7 +351,7 @@ range, zero-filled.
 
 **`GET /api/usage/breakdown`** — `groupBy` = `model` (default, keyed on
 provider + model) \| `provider` \| `key` \| `user` \| `user_model` \|
-`upstream_key` (the last three superadmin-only); `sort` = `requests`
+`upstream_key` (the last three admin-only); `sort` = `requests`
 (default) \| `errors` \| `errorRate` \| `inputTokens` \| `outputTokens` \|
 `cachedTokens` \| `totalTokens` \| `avgDurationMs` \| `lastTs` \| `label`; `order` = `desc`
 (default) \| `asc`; `page` (1-based); `pageSize` 1..200 (default 25); `q` =
@@ -357,7 +363,7 @@ the page. Fields outside the grouping are zero/empty (`key` rows also carry
 the owning `userId`/`email`).
 
 **`GET /api/usage/series`** — `groupBy` = `model` (default) \| `provider` \|
-`surface` \| `user` (superadmin-only); `metric` = `requests` (default) \|
+`surface` \| `user` (admin-only); `metric` = `requests` (default) \|
 `totalTokens` \| `cachedTokens` \| `errors`; `top` 1..10 (default 5). Returns
 `{range, bucket, groupBy, metric, series: [{key, label, points: [{ts, value}]}]}`:
 the top groups by the metric (groups with a zero metric are omitted), then an
@@ -369,11 +375,11 @@ same zero-filled bucket timestamps.
 **`GET /api/usage/requests`** — `sort` = `ts` (default) \| `durationMs` \|
 `totalTokens` \| `cachedTokens`; `order`; `page`; `pageSize` 1..200 (default 50). Returns
 `{range, page, pageSize, total, rows: [{id, ts, userId, email, keyId, alias, provider, model, surface, stream, status, upstreamStatus, failReason, upstreamKey, inputTokens, outputTokens, cachedTokens, durationMs, ttfbMs, attempts}]}`.
-`upstreamKey` is blank for non-superadmins.
+`upstreamKey` is blank for non-admins.
 
 **`GET /api/usage/facets`** — range params only. Returns
 `{users: [{id, email}], providers: [..], models: [{provider, model}], keys: [{id, alias, userId}], surfaces: [..]}`;
-`users` is empty for non-superadmins, whose other lists cover only their own
+`users` is empty for non-admins, whose other lists cover only their own
 rows.
 
 ## Errors

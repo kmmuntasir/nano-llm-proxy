@@ -33,7 +33,7 @@ docs/                    # api.md, configuration.md, deployment.md, architecture
 
 ## Routes & API contract
 
-- Surfaces: `/v1/chat/completions`, `/v1/responses`, `/v1/messages`, `/v1/models`, `POST /mcp` (client-key auth via `clientOnly`); `/health` (open); `/api/*` (GUI backend, session-cookie auth via `requireSession`, superadmin-only via `requireSuperadmin`).
+- Surfaces: `/v1/chat/completions`, `/v1/responses`, `/v1/messages`, `/v1/models`, `POST /mcp` (client-key auth via `clientOnly`); `/health` (open); `/api/*` (GUI backend, session-cookie auth via `requireSession`, admin-only (superadmin + admin) via `requireAdmin`; admins may not change superadmin accounts — see `roles.go`).
 - Register with method-prefixed patterns: `mux.HandleFunc("PATCH /api/users/{id}", g.requireSession(...))`. Parse ids with `pathID`.
 - `/api/*` JSON helpers in `api_helpers.go`: `writeJSON`, `readJSON` (1 MiB bounded, writes its own error), `apiErr` → `{"error":{"message":"…"}}`. Do not invent another error shape. `/v1/*` errors follow the shape of the protocol being spoken (OpenAI vs Anthropic) — match the neighboring handler.
 - Mirror shapes exactly in `web/src/api/types.ts` when an `/api/*` response changes. Document public-facing endpoint changes in `docs/api.md`.

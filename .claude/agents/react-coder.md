@@ -44,7 +44,7 @@ For visible changes, also check the page in a browser at desktop and narrow widt
 
 - Queries/mutations follow the TanStack pattern with correct invalidation; no stale UI after writes.
 - `api/types.ts` matches the Go JSON; `import type` used; no `any`.
-- Superadmin-only surfaces gated in `App.tsx` AND backed by `requireSuperadmin`.
+- Admin-only surfaces (superadmin + admin) gated in `App.tsx` AND backed by `requireAdmin`.
 - Chakra components/tokens only; both color modes and narrow widths work.
 - Destructive actions confirmed; errors surfaced (toast or inline), never swallowed.
 - `npm run build` green. `web/dist` not committed.
