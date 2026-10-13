@@ -29,6 +29,7 @@ import type {
 } from "../api/types"
 import { toaster } from "../components/ui/toaster"
 import ComboSelect from "../components/ComboSelect"
+import ConfirmDialog from "../components/ConfirmDialog"
 
 // Editing form for the runtime settings document. The Zen model catalog is
 // sync-managed (models.dev) and browsable on the Models page; the Responses
@@ -109,6 +110,28 @@ function hydrate(s: RuntimeSettingsView): SettingsForm {
     // along or a save from this page would revert it to defaults.
     webTools: { ...s.webTools },
   }
+}
+
+// changedSections names the settings cards whose values differ from the
+// saved document (labels match the card headings), for the save
+// confirmation. Sync-managed model meta isn't edited on this page.
+function changedSections(saved: SettingsForm, f: SettingsForm): string[] {
+  const differs = (a: unknown, b: unknown) => JSON.stringify(a) !== JSON.stringify(b)
+  const sections: [string, unknown, unknown][] = [
+    ["Sign-in", saved.auth, f.auth],
+    ["Routing", saved.rotation, f.rotation],
+    ["Retries & cooldowns", saved.retry, f.retry],
+    ["Anthropic fallback", saved.fallbackModel.trim(), f.fallbackModel.trim()],
+    [
+      "Zen adapter",
+      [saved.userAgent, saved.injectTools, saved.zenFreeOnly],
+      [f.userAgent, f.injectTools, f.zenFreeOnly],
+    ],
+    ["Model catalog", saved.modelMetaAutoSync, f.modelMetaAutoSync],
+    ["Kilo adapter", saved.kiloFreeOnly, f.kiloFreeOnly],
+    ["Web tools", saved.webTools, f.webTools],
+  ]
+  return sections.filter(([, a, b]) => differs(a, b)).map(([label]) => label)
 }
 
 // googleConfigured is undefined while /api/auth/config is unknown — the form
@@ -438,6 +461,7 @@ export default function SettingsPage() {
   const googleConfigured = authConfig.data ? authConfig.data.google !== undefined : undefined
   const [form, setForm] = useState<SettingsForm | null>(null)
   const [saveError, setSaveError] = useState("")
+  const [confirmingSave, setConfirmingSave] = useState(false)
 
   useEffect(() => {
     if (data?.settings) setForm(hydrate(data.settings))
@@ -469,6 +493,12 @@ export default function SettingsPage() {
   const catalogOptions = [
     ...new Set((catalog.data?.data ?? []).map((e) => cleanModelId(e.id))),
   ].sort()
+
+  // what Save would change, for the confirmation dialog
+  const saved = data?.settings ? hydrate(data.settings) : form
+  const changes = changedSections(saved, form)
+  const turningOffPasswords =
+    googleConfigured === true && saved.auth.credentialLogin && !form.auth.credentialLogin
 
   const set = (patch: Partial<SettingsForm>) => setForm({ ...form, ...patch })
   const setRetry = (patch: Partial<SettingsForm["retry"]>) =>
@@ -695,11 +725,42 @@ export default function SettingsPage() {
       <Button
         colorPalette="blue"
         loading={save.isPending}
-        onClick={() => save.mutate(form)}
+        onClick={() => setConfirmingSave(true)}
         w="fit-content"
       >
         Save settings
       </Button>
+      <ConfirmDialog
+        open={confirmingSave}
+        onOpenChange={() => setConfirmingSave(false)}
+        title="Save settings?"
+        body={
+          <VStack align="stretch" gap={2}>
+            {changes.length === 0 ? (
+              <Text>Nothing has changed since the last save — this re-applies the current settings.</Text>
+            ) : (
+              <>
+                <Text>These take effect immediately for all traffic:</Text>
+                <VStack align="stretch" gap={0.5} pl={2}>
+                  {changes.map((c) => (
+                    <Text key={c} fontSize="sm">
+                      • {c}
+                    </Text>
+                  ))}
+                </VStack>
+              </>
+            )}
+            {turningOffPasswords && (
+              <Text fontSize="sm" color="red.fg">
+                Password sign-in will be turned off — everyone will have to sign in with Google.
+              </Text>
+            )}
+          </VStack>
+        }
+        confirmText="Save settings"
+        busy={save.isPending}
+        onConfirm={() => save.mutate(form, { onSettled: () => setConfirmingSave(false) })}
+      />
 
     </VStack>
   )
