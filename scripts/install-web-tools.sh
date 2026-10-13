@@ -302,7 +302,7 @@ install_obscura() {
     arch=$(obscura_arch)
     local tmp
     tmp=$(mktemp -d)
-    trap 'rm -rf "$tmp"' RETURN
+    trap 'rm -rf "$tmp"; trap - RETURN' RETURN
 
     if [[ -n "$OBSCURA_DIR" ]]; then
         log "installing obscura from $OBSCURA_DIR (offline)"
