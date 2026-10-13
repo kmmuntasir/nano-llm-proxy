@@ -10,6 +10,7 @@ import { ChartCard, TimeChart, allZero, pivotSeries } from "./UsageChartKit"
 const METRICS: { value: UsageSeriesMetric; label: string }[] = [
   { value: "requests", label: "Requests" },
   { value: "totalTokens", label: "Total tokens" },
+  { value: "cachedTokens", label: "Cached tokens" },
   { value: "errors", label: "Errors" },
 ]
 const TOP_N = 5
@@ -86,7 +87,7 @@ export default function SeriesCard({
         bucket={query.data?.bucket ?? "hour"}
         kind="bar"
         stacked
-        format={metric === "totalTokens" ? fmtCompact : fmtInt}
+        format={metric === "totalTokens" || metric === "cachedTokens" ? fmtCompact : fmtInt}
       />
     </ChartCard>
   )

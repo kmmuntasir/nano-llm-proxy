@@ -8,7 +8,15 @@ import { useUsageBreakdown } from "../../api/usage"
 import type { UsageFilters } from "../../api/usage"
 import { PaginatedTable } from "../../components/PaginatedTable"
 import type { PaginatedColumn } from "../../components/PaginatedTable"
-import { errorRate, fmtCompact, fmtDuration, fmtInt, fmtPct, fmtShortDateTime } from "./format"
+import {
+  errorRate,
+  fmtCacheHit,
+  fmtCompact,
+  fmtDuration,
+  fmtInt,
+  fmtPct,
+  fmtShortDateTime,
+} from "./format"
 import { ProviderBadge, RangeNotice } from "./UsageParts"
 import { useTableState } from "./urlState"
 
@@ -17,6 +25,7 @@ const SORTS: readonly UsageBreakdownSort[] = [
   "errors",
   "errorRate",
   "inputTokens",
+  "cachedTokens",
   "outputTokens",
   "totalTokens",
   "avgDurationMs",
@@ -113,6 +122,19 @@ const METRIC_COLUMNS: Col[] = [
     align: "end",
     hideOnMobile: true,
     render: (r) => fmtCompact(r.inputTokens),
+  },
+  {
+    id: "cached",
+    header: "Cached",
+    sortKey: "cachedTokens",
+    align: "end",
+    render: (r) => fmtCompact(r.cachedTokens),
+  },
+  {
+    id: "cacheHit",
+    header: "Cache hit",
+    align: "end",
+    render: (r) => fmtCacheHit(r.cachedTokens, r.inputTokens),
   },
   {
     id: "out",
@@ -215,7 +237,9 @@ export function BreakdownTable({
       {totals && (
         <Text fontSize="xs" color="fg.muted">
           All rows: {fmtInt(totals.requests)} requests · {fmtInt(totals.errors)} errors ·{" "}
-          {fmtCompact(totals.inputTokens)} in / {fmtCompact(totals.outputTokens)} out tokens
+          {fmtCompact(totals.inputTokens)} in ({fmtCompact(totals.cachedTokens)} cached,{" "}
+          {fmtCacheHit(totals.cachedTokens, totals.inputTokens)} hit) / {fmtCompact(totals.outputTokens)} out
+          tokens
         </Text>
       )}
       <PaginatedTable

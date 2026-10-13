@@ -169,6 +169,11 @@ func (s *Store) Migrate() error {
 			return err
 		}
 	}
+	if !version.Valid || version.Int64 < 7 {
+		if err := s.migrateV7(); err != nil {
+			return err
+		}
+	}
 	return nil
 }
 
@@ -369,6 +374,24 @@ func (s *Store) migrateV6() error {
 		}
 	}
 	if _, err := tx.Exec(`INSERT INTO schema_migrations (version, applied_at) VALUES (6, ?)`, time.Now().Unix()); err != nil {
+		return err
+	}
+	return tx.Commit()
+}
+
+// migrateV7 records the cache-hit share of each request's prompt.
+// input_tokens stays the TOTAL prompt (OpenAI semantics); cached_tokens is
+// the cache-read subset of it, so pre-V7 rows read as "no cache hits".
+func (s *Store) migrateV7() error {
+	tx, err := s.db.Begin()
+	if err != nil {
+		return err
+	}
+	defer tx.Rollback()
+	if _, err := tx.Exec(`ALTER TABLE usage_events ADD COLUMN cached_tokens INTEGER NOT NULL DEFAULT 0`); err != nil {
+		return fmt.Errorf("migrate v7: %w", err)
+	}
+	if _, err := tx.Exec(`INSERT INTO schema_migrations (version, applied_at) VALUES (7, ?)`, time.Now().Unix()); err != nil {
 		return err
 	}
 	return tx.Commit()
@@ -1146,6 +1169,8 @@ type UsageEvent struct {
 	Attempts       int    // upstream calls made
 	UserEmail      string // snapshot at request time
 	KeyAlias       string // snapshot at request time
+	// V7: cache-read subset of InputTokens (InputTokens is the total prompt).
+	CachedTokens int64
 }
 
 // InsertUsageEvents persists one flushed batch in a single transaction.
@@ -1161,12 +1186,13 @@ func (s *Store) InsertUsageEvents(events []UsageEvent) error {
 	for _, e := range events {
 		if _, err := tx.Exec(`INSERT INTO usage_events
 			(ts, user_id, client_key_id, provider, model, input_tokens, output_tokens, status, duration_ms,
-			 surface, stream, upstream_status, fail_reason, upstream_key, ttfb_ms, attempts, user_email, key_alias)
-			VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+			 surface, stream, upstream_status, fail_reason, upstream_key, ttfb_ms, attempts, user_email, key_alias,
+			 cached_tokens)
+			VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
 			e.TS, e.UserID, e.ClientKeyID, e.Provider, e.Model,
 			e.InputTokens, e.OutputTokens, e.Status, e.DurationMs,
 			e.Surface, e.Stream, e.UpstreamStatus, e.FailReason, e.UpstreamKey,
-			e.TtfbMs, e.Attempts, e.UserEmail, e.KeyAlias); err != nil {
+			e.TtfbMs, e.Attempts, e.UserEmail, e.KeyAlias, e.CachedTokens); err != nil {
 			return err
 		}
 	}

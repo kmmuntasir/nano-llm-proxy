@@ -3,6 +3,7 @@ import type { UsageOverviewTotals, UsageRange } from "../../api/types"
 import type { UsageFilters } from "../../api/usage"
 import {
   errorRate,
+  fmtCacheHit,
   fmtCompact,
   fmtDateTime,
   fmtDuration,
@@ -80,6 +81,11 @@ export function OverviewStats({
       value: t ? `${fmtCompact(t.inputTokens)} / ${fmtCompact(t.outputTokens)}` : "—",
     },
     {
+      label: "Cache hit",
+      value: t ? fmtCacheHit(t.cachedTokens, t.inputTokens) : "—",
+      help: t ? `${fmtCompact(t.cachedTokens)} of ${fmtCompact(t.inputTokens)} input cached` : undefined,
+    },
+    {
       label: "Latency avg / p95",
       value: t ? `${fmtDuration(t.avgDurationMs)} / ${fmtDuration(t.p95DurationMs)}` : "—",
     },
@@ -92,7 +98,7 @@ export function OverviewStats({
       : { label: "Models used", value: t ? fmtInt(t.models) : "—" },
   ]
   return (
-    <SimpleGrid columns={{ base: 2, md: 3, xl: 6 }} gap={3}>
+    <SimpleGrid columns={{ base: 2, md: 4, "2xl": 7 }} gap={3}>
       {items.map((item) => (
         <StatCard key={item.label} item={item} loading={loading} />
       ))}

@@ -80,8 +80,9 @@ const (
 type UsageOverviewTotals struct {
 	Requests      int64 `json:"requests"`
 	Errors        int64 `json:"errors"`
-	InputTokens   int64 `json:"inputTokens"`
+	InputTokens   int64 `json:"inputTokens"` // total prompt incl. cached
 	OutputTokens  int64 `json:"outputTokens"`
+	CachedTokens  int64 `json:"cachedTokens"` // cache-read subset of InputTokens
 	AvgDurationMs int64 `json:"avgDurationMs"`
 	P95DurationMs int64 `json:"p95DurationMs"`
 	AvgTtfbMs     int64 `json:"avgTtfbMs"`
@@ -96,6 +97,7 @@ type UsageOverviewPoint struct {
 	Errors        int64 `json:"errors"`
 	InputTokens   int64 `json:"inputTokens"`
 	OutputTokens  int64 `json:"outputTokens"`
+	CachedTokens  int64 `json:"cachedTokens"`
 	AvgDurationMs int64 `json:"avgDurationMs"`
 }
 
@@ -150,12 +152,13 @@ func (s *Store) UsageOverview(f UsageFilter, bucket, tz int64) (*UsageOverviewTo
 			COALESCE(SUM(CASE WHEN e.status >= 400 THEN 1 ELSE 0 END), 0),
 			COALESCE(SUM(CASE WHEN e.status < 400 THEN 1 ELSE 0 END), 0),
 			COALESCE(SUM(e.input_tokens), 0), COALESCE(SUM(e.output_tokens), 0),
+			COALESCE(SUM(e.cached_tokens), 0),
 			CAST(COALESCE(ROUND(AVG(e.duration_ms)), 0) AS INTEGER),
 			CAST(COALESCE(ROUND(AVG(CASE WHEN e.ttfb_ms > 0 THEN e.ttfb_ms END)), 0) AS INTEGER),
 			COUNT(DISTINCT e.user_id),
 			COUNT(DISTINCT e.provider || '/' || e.model)
 		FROM usage_events e WHERE `+where, args...).
-		Scan(&t.Requests, &t.Errors, &okRows, &t.InputTokens, &t.OutputTokens,
+		Scan(&t.Requests, &t.Errors, &okRows, &t.InputTokens, &t.OutputTokens, &t.CachedTokens,
 			&t.AvgDurationMs, &t.AvgTtfbMs, &t.Users, &t.Models)
 	if err != nil {
 		return nil, nil, fmt.Errorf("usage overview totals: %w", err)
@@ -174,6 +177,7 @@ func (s *Store) UsageOverview(f UsageFilter, bucket, tz int64) (*UsageOverviewTo
 	rows, err := s.db.Query(`SELECT `+expr+` AS b, COUNT(*),
 			COALESCE(SUM(CASE WHEN e.status >= 400 THEN 1 ELSE 0 END), 0),
 			COALESCE(SUM(e.input_tokens), 0), COALESCE(SUM(e.output_tokens), 0),
+			COALESCE(SUM(e.cached_tokens), 0),
 			CAST(COALESCE(ROUND(AVG(e.duration_ms)), 0) AS INTEGER)
 		FROM usage_events e WHERE `+where+` GROUP BY b ORDER BY b`, args...)
 	if err != nil {
@@ -183,7 +187,7 @@ func (s *Store) UsageOverview(f UsageFilter, bucket, tz int64) (*UsageOverviewTo
 	got := map[int64]UsageOverviewPoint{}
 	for rows.Next() {
 		var p UsageOverviewPoint
-		if err := rows.Scan(&p.TS, &p.Requests, &p.Errors, &p.InputTokens, &p.OutputTokens, &p.AvgDurationMs); err != nil {
+		if err := rows.Scan(&p.TS, &p.Requests, &p.Errors, &p.InputTokens, &p.OutputTokens, &p.CachedTokens, &p.AvgDurationMs); err != nil {
 			return nil, nil, err
 		}
 		got[p.TS] = p
@@ -227,10 +231,21 @@ type UsageBreakdownRow struct {
 	Errors        int64  `json:"errors"`
 	InputTokens   int64  `json:"inputTokens"`
 	OutputTokens  int64  `json:"outputTokens"`
+	CachedTokens  int64  `json:"cachedTokens"`
 	AvgDurationMs int64  `json:"avgDurationMs"`
 	AvgTtfbMs     int64  `json:"avgTtfbMs"`
 	FirstTs       int64  `json:"firstTs"`
 	LastTs        int64  `json:"lastTs"`
+}
+
+// UsageBreakdownTotals sums every group matching a breakdown query. It is
+// separate from UsageTotals so the v1 summary payload stays unchanged.
+type UsageBreakdownTotals struct {
+	Requests     int64 `json:"requests"`
+	Errors       int64 `json:"errors"`
+	InputTokens  int64 `json:"inputTokens"`
+	OutputTokens int64 `json:"outputTokens"`
+	CachedTokens int64 `json:"cachedTokens"`
 }
 
 // usageGroup is the SQL shape of one groupBy: the dimension columns (always
@@ -283,6 +298,7 @@ var usageBreakdownSorts = map[string]string{
 	"errorRate":     "CAST(errors AS REAL) / requests",
 	"inputTokens":   "input_tokens",
 	"outputTokens":  "output_tokens",
+	"cachedTokens":  "cached_tokens",
 	"totalTokens":   "input_tokens + output_tokens",
 	"avgDurationMs": "avg_duration_ms",
 	"lastTs":        "last_ts",
@@ -297,7 +313,7 @@ func escapeLike(s string) string {
 
 // UsageBreakdown returns one page of grouped rows, the number of groups
 // matching (for paging), and totals over every matching group.
-func (s *Store) UsageBreakdown(q UsageBreakdownQuery) ([]UsageBreakdownRow, int64, *UsageTotals, error) {
+func (s *Store) UsageBreakdown(q UsageBreakdownQuery) ([]UsageBreakdownRow, int64, *UsageBreakdownTotals, error) {
 	grp, ok := usageBreakdownGroups[q.GroupBy]
 	if !ok {
 		return nil, 0, nil, fmt.Errorf("%w: groupBy %q", ErrUsageParam, q.GroupBy)
@@ -319,6 +335,7 @@ func (s *Store) UsageBreakdown(q UsageBreakdownQuery) ([]UsageBreakdownRow, int6
 			COALESCE(SUM(CASE WHEN e.status >= 400 THEN 1 ELSE 0 END), 0) AS errors,
 			COALESCE(SUM(e.input_tokens), 0) AS input_tokens,
 			COALESCE(SUM(e.output_tokens), 0) AS output_tokens,
+			COALESCE(SUM(e.cached_tokens), 0) AS cached_tokens,
 			CAST(COALESCE(ROUND(AVG(e.duration_ms)), 0) AS INTEGER) AS avg_duration_ms,
 			CAST(COALESCE(ROUND(AVG(CASE WHEN e.ttfb_ms > 0 THEN e.ttfb_ms END)), 0) AS INTEGER) AS avg_ttfb_ms,
 			MIN(e.ts) AS first_ts, MAX(e.ts) AS last_ts` +
@@ -330,15 +347,18 @@ func (s *Store) UsageBreakdown(q UsageBreakdownQuery) ([]UsageBreakdownRow, int6
 	}
 
 	var total int64
-	totals := &UsageTotals{}
+	totals := &UsageBreakdownTotals{}
 	if err := s.db.QueryRow(cte+`SELECT COUNT(*), COALESCE(SUM(requests), 0), COALESCE(SUM(errors), 0),
-			COALESCE(SUM(input_tokens), 0), COALESCE(SUM(output_tokens), 0) FROM g`+match, args...).
-		Scan(&total, &totals.Requests, &totals.Errors, &totals.InputTokens, &totals.OutputTokens); err != nil {
+			COALESCE(SUM(input_tokens), 0), COALESCE(SUM(output_tokens), 0),
+			COALESCE(SUM(cached_tokens), 0) FROM g`+match, args...).
+		Scan(&total, &totals.Requests, &totals.Errors, &totals.InputTokens, &totals.OutputTokens,
+			&totals.CachedTokens); err != nil {
 		return nil, 0, nil, fmt.Errorf("usage breakdown totals: %w", err)
 	}
 	offset := int64(q.Page-1) * int64(q.PageSize)
 	rows, err := s.db.Query(cte+`SELECT user_id, email, provider, model, key_id, alias, upstream_key,
-			requests, errors, input_tokens, output_tokens, avg_duration_ms, avg_ttfb_ms, first_ts, last_ts
+			requests, errors, input_tokens, output_tokens, cached_tokens, avg_duration_ms, avg_ttfb_ms,
+			first_ts, last_ts
 		FROM g`+match+` ORDER BY `+sortExpr+` `+dir+`, label COLLATE NOCASE ASC LIMIT ? OFFSET ?`,
 		append(args, q.PageSize, offset)...)
 	if err != nil {
@@ -349,7 +369,7 @@ func (s *Store) UsageBreakdown(q UsageBreakdownQuery) ([]UsageBreakdownRow, int6
 	for rows.Next() {
 		var r UsageBreakdownRow
 		if err := rows.Scan(&r.UserID, &r.Email, &r.Provider, &r.Model, &r.KeyID, &r.Alias, &r.UpstreamKey,
-			&r.Requests, &r.Errors, &r.InputTokens, &r.OutputTokens, &r.AvgDurationMs, &r.AvgTtfbMs,
+			&r.Requests, &r.Errors, &r.InputTokens, &r.OutputTokens, &r.CachedTokens, &r.AvgDurationMs, &r.AvgTtfbMs,
 			&r.FirstTs, &r.LastTs); err != nil {
 			return nil, 0, nil, err
 		}
@@ -386,9 +406,10 @@ var usageSeriesGroups = map[string]struct{ key, label string }{
 }
 
 var usageSeriesMetrics = map[string]string{
-	"requests":    `COUNT(*)`,
-	"totalTokens": `COALESCE(SUM(e.input_tokens + e.output_tokens), 0)`,
-	"errors":      `COALESCE(SUM(CASE WHEN e.status >= 400 THEN 1 ELSE 0 END), 0)`,
+	"requests":     `COUNT(*)`,
+	"totalTokens":  `COALESCE(SUM(e.input_tokens + e.output_tokens), 0)`,
+	"cachedTokens": `COALESCE(SUM(e.cached_tokens), 0)`,
+	"errors":       `COALESCE(SUM(CASE WHEN e.status >= 400 THEN 1 ELSE 0 END), 0)`,
 }
 
 // UsageSeriesByGroup returns the top groups by metric over the filtered range,
@@ -531,15 +552,17 @@ type UsageRequestRow struct {
 	UpstreamKey    string `json:"upstreamKey"`
 	InputTokens    int64  `json:"inputTokens"`
 	OutputTokens   int64  `json:"outputTokens"`
+	CachedTokens   int64  `json:"cachedTokens"`
 	DurationMs     int64  `json:"durationMs"`
 	TtfbMs         int64  `json:"ttfbMs"`
 	Attempts       int    `json:"attempts"`
 }
 
 var usageRequestSorts = map[string]string{
-	"ts":          "e.ts",
-	"durationMs":  "e.duration_ms",
-	"totalTokens": "(e.input_tokens + e.output_tokens)",
+	"ts":           "e.ts",
+	"durationMs":   "e.duration_ms",
+	"totalTokens":  "(e.input_tokens + e.output_tokens)",
+	"cachedTokens": "e.cached_tokens",
 }
 
 // UsageRequests returns one page of the filtered request log and the total
@@ -569,7 +592,7 @@ func (s *Store) UsageRequests(f UsageFilter, sort string, desc bool, page, pageS
 			CASE WHEN k.id IS NOT NULL THEN k.alias
 				ELSE COALESCE(NULLIF(e.key_alias, ''), 'deleted key #' || e.client_key_id) END,
 			e.provider, e.model, e.surface, e.stream, e.status, e.upstream_status, e.fail_reason,
-			e.upstream_key, e.input_tokens, e.output_tokens, e.duration_ms, e.ttfb_ms, e.attempts`+
+			e.upstream_key, e.input_tokens, e.output_tokens, e.cached_tokens, e.duration_ms, e.ttfb_ms, e.attempts`+
 		usageJoins+` WHERE `+where+` ORDER BY `+sortExpr+` `+dir+`, e.id `+dir+` LIMIT ? OFFSET ?`,
 		append(args, pageSize, int64(page-1)*int64(pageSize))...)
 	if err != nil {
@@ -582,7 +605,7 @@ func (s *Store) UsageRequests(f UsageFilter, sort string, desc bool, page, pageS
 		var stream int64
 		if err := rows.Scan(&r.ID, &r.TS, &r.UserID, &r.Email, &r.KeyID, &r.Alias, &r.Provider, &r.Model,
 			&r.Surface, &stream, &r.Status, &r.UpstreamStatus, &r.FailReason, &r.UpstreamKey,
-			&r.InputTokens, &r.OutputTokens, &r.DurationMs, &r.TtfbMs, &r.Attempts); err != nil {
+			&r.InputTokens, &r.OutputTokens, &r.CachedTokens, &r.DurationMs, &r.TtfbMs, &r.Attempts); err != nil {
 			return nil, 0, err
 		}
 		r.Stream = stream != 0

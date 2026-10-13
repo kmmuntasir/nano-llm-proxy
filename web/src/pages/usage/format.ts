@@ -64,6 +64,20 @@ export function errorRate(errors: number, requests: number): number {
   return requests > 0 ? errors / requests : 0
 }
 
+/**
+ * Share of input served from the prompt cache (inputTokens includes cached),
+ * or null when there was no input — "no data" must not read as 0%.
+ */
+export function cacheHitRate(cachedTokens: number, inputTokens: number): number | null {
+  return inputTokens > 0 ? cachedTokens / inputTokens : null
+}
+
+/** Cache hit rate as "42.5%", "—" when there was no input. */
+export function fmtCacheHit(cachedTokens: number, inputTokens: number): string {
+  const rate = cacheHitRate(cachedTokens, inputTokens)
+  return rate === null ? "—" : fmtPct(rate)
+}
+
 /** 850 → "850 ms", 1234 → "1.23 s", 65000 → "65.0 s" */
 export function fmtDuration(ms: number): string {
   if (!ms) return "—"

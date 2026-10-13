@@ -169,8 +169,8 @@ func TestMigrateV4ConvertsBuiltinKiloToPreset(t *testing.T) {
 	}
 
 	var version int64
-	if err := s.db.QueryRow(`SELECT MAX(version) FROM schema_migrations`).Scan(&version); err != nil || version != 6 {
-		t.Fatalf("schema version = %d, %v; want 6", version, err)
+	if err := s.db.QueryRow(`SELECT MAX(version) FROM schema_migrations`).Scan(&version); err != nil || version != 7 {
+		t.Fatalf("schema version = %d, %v; want 7", version, err)
 	}
 }
 
@@ -381,8 +381,8 @@ func TestMigrateV6EnrichesExistingUsageRows(t *testing.T) {
 		t.Fatalf("Migrate: %v", err)
 	}
 	var version int64
-	if err := s.db.QueryRow(`SELECT MAX(version) FROM schema_migrations`).Scan(&version); err != nil || version != 6 {
-		t.Fatalf("schema version = %d, %v; want 6", version, err)
+	if err := s.db.QueryRow(`SELECT MAX(version) FROM schema_migrations`).Scan(&version); err != nil || version != 7 {
+		t.Fatalf("schema version = %d, %v; want 7", version, err)
 	}
 	for idx, want := range map[string]int{
 		"idx_usage_model_ts":      1,
@@ -507,5 +507,62 @@ func TestUsageOverviewUsesTsIndex(t *testing.T) {
 		if !strings.Contains(plan, "idx_usage_ts") {
 			t.Errorf("plan does not use idx_usage_ts: %s", plan)
 		}
+	}
+}
+
+func TestMigrateV7AddsCachedTokens(t *testing.T) {
+	db, err := sql.Open("sqlite", ":memory:")
+	if err != nil {
+		t.Fatalf("sql.Open: %v", err)
+	}
+	defer db.Close()
+	db.SetMaxOpenConns(1)
+	s := &Store{db: db}
+
+	// a V6 database (what prod runs) with one pre-V7 usage row
+	if _, err := s.db.Exec(`CREATE TABLE IF NOT EXISTS schema_migrations (
+		version INTEGER PRIMARY KEY, applied_at INTEGER NOT NULL)`); err != nil {
+		t.Fatalf("create migrations table: %v", err)
+	}
+	for _, mig := range []func() error{s.migrateV1, s.migrateV2, s.migrateV3, s.migrateV4, s.migrateV5, s.migrateV6} {
+		if err := mig(); err != nil {
+			t.Fatalf("migrate: %v", err)
+		}
+	}
+	const ts = int64(1790000000)
+	if _, err := s.db.Exec(`INSERT INTO usage_events
+		(ts, user_id, client_key_id, provider, model, input_tokens, output_tokens, status, duration_ms, surface)
+		VALUES (?, 42, 7, 'zen', 'old-model', 100, 4, 200, 120, 'chat')`, ts); err != nil {
+		t.Fatalf("seed pre-V7 row: %v", err)
+	}
+
+	if err := s.Migrate(); err != nil {
+		t.Fatalf("Migrate: %v", err)
+	}
+	var version int64
+	if err := s.db.QueryRow(`SELECT MAX(version) FROM schema_migrations`).Scan(&version); err != nil || version != 7 {
+		t.Fatalf("schema version = %d, %v; want 7", version, err)
+	}
+	// idempotent: a second Migrate on V7 is a no-op
+	if err := s.Migrate(); err != nil {
+		t.Fatalf("second Migrate: %v", err)
+	}
+
+	if err := s.InsertUsageEvents([]UsageEvent{{
+		TS: ts + 1, UserID: 42, ClientKeyID: 7, Provider: "zen", Model: "new-model",
+		InputTokens: 1000, OutputTokens: 10, CachedTokens: 800, Status: 200, Surface: "messages",
+	}}); err != nil {
+		t.Fatalf("insert V7 row: %v", err)
+	}
+	f := UsageFilter{From: ts - 10, To: ts + 10}
+	rows, total, err := s.UsageRequests(f, "cachedTokens", true, 1, 10)
+	if err != nil || total != 2 || len(rows) != 2 {
+		t.Fatalf("requests after V7: total=%d rows=%d err=%v", total, len(rows), err)
+	}
+	if rows[0].Model != "new-model" || rows[0].CachedTokens != 800 || rows[0].InputTokens != 1000 {
+		t.Errorf("V7 row did not round-trip / sort first: %+v", rows[0])
+	}
+	if rows[1].Model != "old-model" || rows[1].CachedTokens != 0 || rows[1].InputTokens != 100 {
+		t.Errorf("pre-V7 row did not default cached_tokens to 0: %+v", rows[1])
 	}
 }

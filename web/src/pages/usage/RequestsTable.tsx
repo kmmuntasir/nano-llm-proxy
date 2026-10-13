@@ -5,12 +5,12 @@ import { useUsageRequests } from "../../api/usage"
 import type { UsageFilters } from "../../api/usage"
 import { PaginatedTable } from "../../components/PaginatedTable"
 import type { PaginatedColumn } from "../../components/PaginatedTable"
-import { fmtCompact, fmtDuration, fmtShortDateTime } from "./format"
+import { fmtCacheHit, fmtCompact, fmtDuration, fmtInt, fmtShortDateTime } from "./format"
 import { ProviderBadge, RangeNotice, RequestStatusBadge } from "./UsageParts"
 import { userLabel } from "./BreakdownTable"
 import { useTableState } from "./urlState"
 
-const SORTS: readonly UsageRequestSort[] = ["ts", "durationMs", "totalTokens"]
+const SORTS: readonly UsageRequestSort[] = ["ts", "durationMs", "totalTokens", "cachedTokens"]
 
 type Col = PaginatedColumn<UsageRequestRow, UsageRequestSort>
 
@@ -33,6 +33,9 @@ function RequestDetails({ row, isSuperadmin }: { row: UsageRequestRow; isSuperad
       <Detail label="Upstream status">{row.upstreamStatus || "none"}</Detail>
       <Detail label="Attempts">{row.attempts}</Detail>
       <Detail label="TTFB">{fmtDuration(row.ttfbMs)}</Detail>
+      <Detail label="Cached input">
+        {fmtInt(row.cachedTokens)} of {fmtInt(row.inputTokens)} ({fmtCacheHit(row.cachedTokens, row.inputTokens)})
+      </Detail>
       <Detail label="Stream">{row.stream ? "yes" : "no"}</Detail>
       {isSuperadmin && (
         <Detail label="Upstream key">
@@ -92,6 +95,13 @@ function columns(isSuperadmin: boolean): Col[] {
       sortKey: "totalTokens",
       align: "end",
       render: (r) => `${fmtCompact(r.inputTokens)} / ${fmtCompact(r.outputTokens)}`,
+    },
+    {
+      id: "cached",
+      header: "Cached",
+      sortKey: "cachedTokens",
+      align: "end",
+      render: (r) => fmtCompact(r.cachedTokens),
     },
     {
       id: "duration",

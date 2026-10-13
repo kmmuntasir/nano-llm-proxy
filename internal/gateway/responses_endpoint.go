@@ -159,8 +159,7 @@ func aggregateResponsesSSE(w http.ResponseWriter, resp *http.Response, model str
 	var (
 		text       bytes.Buffer
 		id         string
-		inTok      int64
-		outTok     int64
+		tu         tokenUsage
 		incomplete bool
 		haveUsage  bool
 	)
@@ -170,12 +169,9 @@ func aggregateResponsesSSE(w http.ResponseWriter, resp *http.Response, model str
 			Type     string `json:"type"`
 			Delta    string `json:"delta"`
 			Response *struct {
-				ID     string `json:"id"`
-				Status string `json:"status"`
-				Usage  *struct {
-					InputTokens  int64 `json:"input_tokens"`
-					OutputTokens int64 `json:"output_tokens"`
-				} `json:"usage"`
+				ID     string          `json:"id"`
+				Status string          `json:"status"`
+				Usage  *responsesUsage `json:"usage"`
 			} `json:"response"`
 		}
 		if json.Unmarshal(payload, &ev) != nil {
@@ -197,8 +193,7 @@ func aggregateResponsesSSE(w http.ResponseWriter, resp *http.Response, model str
 					id = ev.Response.ID
 				}
 				if ev.Response.Usage != nil {
-					inTok = ev.Response.Usage.InputTokens
-					outTok = ev.Response.Usage.OutputTokens
+					ev.Response.Usage.into(&tu)
 					haveUsage = true
 				}
 			}
@@ -225,10 +220,15 @@ func aggregateResponsesSSE(w http.ResponseWriter, resp *http.Response, model str
 		}},
 	}
 	if haveUsage {
-		out["usage"] = map[string]any{"input_tokens": inTok, "output_tokens": outTok}
+		out["usage"] = map[string]any{
+			"input_tokens":         tu.in,
+			"output_tokens":        tu.out,
+			"total_tokens":         tu.in + tu.out,
+			"input_tokens_details": map[string]any{"cached_tokens": tu.cached},
+		}
 	}
 	w.Header().Set("Content-Type", "application/json")
 	w.WriteHeader(http.StatusOK)
 	json.NewEncoder(w).Encode(out)
-	return tokenUsage{in: inTok, out: outTok}
+	return tu
 }

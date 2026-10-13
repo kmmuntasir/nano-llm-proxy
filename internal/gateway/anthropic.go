@@ -281,11 +281,6 @@ func chatJSONToAnthropic(chat map[string]any, model string) map[string]any {
 			}
 		}
 	}
-	inTok, outTok := int64(0), int64(0)
-	if u, ok := chat["usage"].(map[string]any); ok {
-		inTok = toInt64(u["prompt_tokens"])
-		outTok = toInt64(u["completion_tokens"])
-	}
 	return map[string]any{
 		"id":            chat["id"],
 		"type":          "message",
@@ -294,7 +289,7 @@ func chatJSONToAnthropic(chat map[string]any, model string) map[string]any {
 		"content":       content,
 		"stop_reason":   stop,
 		"stop_sequence": nil,
-		"usage":         map[string]any{"input_tokens": inTok, "output_tokens": outTok},
+		"usage":         usageFromChatJSON(chat).anthropicUsage(true),
 	}
 }
 
@@ -326,9 +321,8 @@ type anthropicStreamWriter struct {
 	textOpen   bool
 	flushedHdr bool
 	sawTools   bool
-	inTok      int64
-	outTok     int64
-	chatFinish string // last finish_reason seen on the chat stream
+	tu         tokenUsage // total-prompt semantics; split back out on emit
+	chatFinish string     // last finish_reason seen on the chat stream
 	pending    []*pendingToolCall
 	toolIdx    map[int]*pendingToolCall // upstream chunk index -> pending call
 }
@@ -350,7 +344,9 @@ func (a *anthropicStreamWriter) start() {
 		"message": map[string]any{
 			"id": "msg_gw", "type": "message", "role": "assistant",
 			"model": a.model, "content": []any{},
-			"usage": map[string]any{"input_tokens": 0, "output_tokens": 0},
+			// translated upstreams report usage only at the end; the real
+			// figures ride on message_delta (clients take the latest values)
+			"usage": tokenUsage{}.anthropicUsage(true),
 		},
 	})
 	fmt.Fprintf(a.w, "event: message_start\ndata: %s\n\n", start)
@@ -450,7 +446,7 @@ func (a *anthropicStreamWriter) finish(chatFinish string) {
 	md, _ := json.Marshal(map[string]any{
 		"type":  "message_delta",
 		"delta": map[string]any{"stop_reason": stop, "stop_sequence": nil},
-		"usage": map[string]any{"output_tokens": a.outTok},
+		"usage": a.tu.anthropicUsage(true),
 	})
 	fmt.Fprintf(a.w, "event: message_delta\ndata: %s\n\n", md)
 	ms, _ := json.Marshal(map[string]any{"type": "message_stop"})
@@ -477,13 +473,15 @@ func streamChatSSEToAnthropic(a *anthropicStreamWriter, body io.Reader) {
 				} `json:"delta"`
 				FinishReason *string `json:"finish_reason"`
 			} `json:"choices"`
-			Usage *struct {
-				PromptTokens     int64 `json:"prompt_tokens"`
-				CompletionTokens int64 `json:"completion_tokens"`
-			} `json:"usage"`
 		}
 		if json.Unmarshal(payload, &chunk) != nil {
 			return
+		}
+		// usage is tapped separately so both spellings and the cached
+		// details are read the same way as on the passthrough paths
+		var uc usageChunk
+		if json.Unmarshal(payload, &uc) == nil {
+			uc.into(&a.tu)
 		}
 		if len(chunk.Choices) > 0 {
 			d := chunk.Choices[0].Delta
@@ -496,10 +494,6 @@ func streamChatSSEToAnthropic(a *anthropicStreamWriter, body io.Reader) {
 			if chunk.Choices[0].FinishReason != nil {
 				a.chatFinish = *chunk.Choices[0].FinishReason
 			}
-		}
-		if chunk.Usage != nil {
-			a.inTok = chunk.Usage.PromptTokens
-			a.outTok = chunk.Usage.CompletionTokens
 		}
 	})
 	a.finish("")
@@ -521,10 +515,7 @@ func streamResponsesSSEToAnthropic(a *anthropicStreamWriter, body io.Reader) {
 				Input     json.RawMessage `json:"input"`
 			} `json:"item"`
 			Response *struct {
-				Usage *struct {
-					InputTokens  int64 `json:"input_tokens"`
-					OutputTokens int64 `json:"output_tokens"`
-				} `json:"usage"`
+				Usage *responsesUsage `json:"usage"`
 			} `json:"response"`
 		}
 		if json.Unmarshal(payload, &ev) != nil {
@@ -544,9 +535,8 @@ func streamResponsesSSEToAnthropic(a *anthropicStreamWriter, body io.Reader) {
 				})
 			}
 		case "response.completed", "response.incomplete", "response.done":
-			if ev.Response != nil && ev.Response.Usage != nil {
-				a.inTok = ev.Response.Usage.InputTokens
-				a.outTok = ev.Response.Usage.OutputTokens
+			if ev.Response != nil {
+				ev.Response.Usage.into(&a.tu)
 			}
 		}
 	})

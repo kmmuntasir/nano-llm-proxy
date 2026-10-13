@@ -402,11 +402,7 @@ func anthropicJSONToChat(msg map[string]any, model string) map[string]any {
 	if sr, _ := msg["stop_reason"].(string); sr != "" {
 		stop = stopFromAnthropic(sr)
 	}
-	inTok, outTok := int64(0), int64(0)
-	if u, ok := msg["usage"].(map[string]any); ok {
-		inTok = toInt64(u["input_tokens"])
-		outTok = toInt64(u["output_tokens"])
-	}
+	tu := usageFromAnthropicMsg(msg)
 	return map[string]any{
 		"id":     msg["id"],
 		"object": "chat.completion",
@@ -414,9 +410,7 @@ func anthropicJSONToChat(msg map[string]any, model string) map[string]any {
 		"choices": []any{map[string]any{
 			"index": 0, "message": message, "finish_reason": stop,
 		}},
-		"usage": map[string]any{
-			"prompt_tokens": inTok, "completion_tokens": outTok, "total_tokens": inTok + outTok,
-		},
+		"usage": tu.chatUsage(),
 	}
 }
 
@@ -475,23 +469,17 @@ func streamAnthropicSSEToChat(w http.ResponseWriter, body io.Reader, model strin
 				StopReason *string `json:"stop_reason"`
 			} `json:"delta"`
 			Message *struct {
-				Usage *struct {
-					InputTokens  int64 `json:"input_tokens"`
-					OutputTokens int64 `json:"output_tokens"`
-				} `json:"usage"`
+				Usage *anthropicUsageBlock `json:"usage"`
 			} `json:"message"`
-			Usage *struct {
-				InputTokens  int64 `json:"input_tokens"`
-				OutputTokens int64 `json:"output_tokens"`
-			} `json:"usage"`
+			Usage *anthropicUsageBlock `json:"usage"`
 		}
 		if json.Unmarshal(payload, &ev) != nil {
 			return
 		}
 		switch ev.Type {
 		case "message_start":
-			if ev.Message != nil && ev.Message.Usage != nil {
-				tu.add(ev.Message.Usage.InputTokens, ev.Message.Usage.OutputTokens)
+			if ev.Message != nil {
+				ev.Message.Usage.into(&tu)
 			}
 		case "content_block_start":
 			if ev.ContentBlock != nil && ev.ContentBlock.Type == "tool_use" {
@@ -528,14 +516,10 @@ func streamAnthropicSSEToChat(w http.ResponseWriter, body io.Reader, model strin
 			if ev.Delta != nil && ev.Delta.StopReason != nil {
 				finish = stopFromAnthropic(*ev.Delta.StopReason)
 			}
-			if ev.Usage != nil {
-				tu.add(ev.Usage.InputTokens, ev.Usage.OutputTokens)
-			}
+			ev.Usage.into(&tu)
 		}
 	})
-	writeChunk(w, chatChunkJSON(id, model, map[string]any{}, finish, map[string]any{
-		"prompt_tokens": tu.in, "completion_tokens": tu.out, "total_tokens": tu.in + tu.out,
-	}))
+	writeChunk(w, chatChunkJSON(id, model, map[string]any{}, finish, tu.chatUsage()))
 	w.Write([]byte("data: [DONE]\n\n"))
 	flush(w)
 	return tu

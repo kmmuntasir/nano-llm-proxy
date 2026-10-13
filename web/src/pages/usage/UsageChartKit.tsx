@@ -25,7 +25,8 @@ import { REJECTED_PROVIDER, fmtBucketLabel, fmtBucketTick, fmtCompact, fmtInt } 
 // chart palette. Recharts reads dataKeys as property paths, so series are
 // pivoted onto synthetic keys (s0, s1, ...) — model ids contain dots.
 
-export type ChartRow = { ts: number } & Record<string, number>
+// null = no data for that bucket (drawn as a gap, not as zero)
+export type ChartRow = { ts: number } & Record<string, number | null>
 
 export interface ChartSeries {
   dataKey: string
@@ -33,6 +34,8 @@ export interface ChartSeries {
   color: string
   /** plot against the secondary (right) Y axis — for a measure on a different scale */
   axis?: "right"
+  /** dashed stroke (line charts) — e.g. a subset measure drawn over its total */
+  dashed?: boolean
 }
 
 const LEFT = "left"
@@ -147,6 +150,8 @@ export function TimeChart({
   stacked = false,
   format = fmtCompact,
   rightFormat = format,
+  domain,
+  dots = false,
   height = DEFAULT_HEIGHT,
 }: {
   rows: ChartRow[]
@@ -157,6 +162,10 @@ export function TimeChart({
   format?: (n: number) => string
   /** tick formatter for the right axis (only drawn when a series asks for it) */
   rightFormat?: (n: number) => string
+  /** fixed left-axis domain (e.g. [0, 100] for percentages) */
+  domain?: [number, number]
+  /** mark every point (line charts) — keeps isolated points visible between gaps */
+  dots?: boolean
   height?: number
 }) {
   const theme = useChartTheme()
@@ -179,6 +188,7 @@ export function TimeChart({
         yAxisId={LEFT}
         width={Y_AXIS_WIDTH}
         allowDecimals={false}
+        domain={domain}
         tickFormatter={tick0(format)}
         {...theme.axis}
       />
@@ -199,6 +209,7 @@ export function TimeChart({
         cursor={kind === "bar" ? { fill: theme.grid, fillOpacity: 0.4 } : theme.tooltip.cursor}
         labelFormatter={(l) => fmtBucketLabel(Number(l), bucket)}
         formatter={(v, _name, item) => {
+          if (v === null || v === undefined) return "—"
           const s = series.find((x) => x.dataKey === item.dataKey)
           return (s?.axis === "right" ? rightFormat : format)(Number(v))
         }}
@@ -264,7 +275,8 @@ export function TimeChart({
             name={s.name}
             stroke={s.color}
             strokeWidth={2}
-            dot={false}
+            strokeDasharray={s.dashed ? "5 4" : undefined}
+            dot={dots ? { r: 2, fill: s.color, strokeWidth: 0 } : false}
             activeDot={activeDot}
           />
         ))}

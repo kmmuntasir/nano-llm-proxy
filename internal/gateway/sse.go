@@ -44,16 +44,50 @@ func startSSE(w http.ResponseWriter) {
 
 // usageChunk is the usage block OpenAI-compatible streams/attachments carry
 // (field names vary across providers, so both spellings are accepted).
+// Cached prompt tokens come from prompt_tokens_details (chat) or
+// input_tokens_details (Responses); both count a subset of the total.
 type usageChunk struct {
 	Usage *struct {
-		PromptTokens     int64 `json:"prompt_tokens"`
-		CompletionTokens int64 `json:"completion_tokens"`
-		InputTokens      int64 `json:"input_tokens"`
-		OutputTokens     int64 `json:"output_tokens"`
+		PromptTokens        int64         `json:"prompt_tokens"`
+		CompletionTokens    int64         `json:"completion_tokens"`
+		InputTokens         int64         `json:"input_tokens"`
+		OutputTokens        int64         `json:"output_tokens"`
+		PromptTokensDetails *cachedDetail `json:"prompt_tokens_details"`
+		InputTokensDetails  *cachedDetail `json:"input_tokens_details"`
 	} `json:"usage"`
+	// Responses-API streams nest usage under response (response.completed).
+	Response *struct {
+		Usage *responsesUsage `json:"usage"`
+	} `json:"response"`
+}
+
+// cachedDetail is the OpenAI *_tokens_details block carrying cache hits.
+type cachedDetail struct {
+	CachedTokens int64 `json:"cached_tokens"`
+}
+
+// responsesUsage is the Responses-API usage block: input_tokens is the total
+// prompt, input_tokens_details.cached_tokens the cache-hit subset.
+type responsesUsage struct {
+	InputTokens        int64         `json:"input_tokens"`
+	OutputTokens       int64         `json:"output_tokens"`
+	InputTokensDetails *cachedDetail `json:"input_tokens_details"`
+}
+
+func (u *responsesUsage) into(t *tokenUsage) {
+	if u == nil {
+		return
+	}
+	t.add(u.InputTokens, u.OutputTokens)
+	if u.InputTokensDetails != nil {
+		t.addCached(u.InputTokensDetails.CachedTokens)
+	}
 }
 
 func (u *usageChunk) into(t *tokenUsage) {
+	if u.Response != nil {
+		u.Response.Usage.into(t)
+	}
 	if u.Usage == nil {
 		return
 	}
@@ -65,6 +99,12 @@ func (u *usageChunk) into(t *tokenUsage) {
 		out = u.Usage.OutputTokens
 	}
 	t.add(in, out)
+	if d := u.Usage.PromptTokensDetails; d != nil {
+		t.addCached(d.CachedTokens)
+	}
+	if d := u.Usage.InputTokensDetails; d != nil {
+		t.addCached(d.CachedTokens)
+	}
 }
 
 // streamKilo passes a kilo preset's 200-response through verbatim (both stream and
@@ -188,6 +228,7 @@ func aggregateChatSSE(w http.ResponseWriter, resp *http.Response, model string) 
 		if v, ok := usage["completion_tokens"].(float64); ok {
 			tu.out = int64(v)
 		}
+		tu.cached = cachedFromUsageMap(usage)
 	}
 	out := map[string]any{
 		"id":     id,
@@ -206,4 +247,16 @@ func aggregateChatSSE(w http.ResponseWriter, resp *http.Response, model string) 
 	w.WriteHeader(http.StatusOK)
 	json.NewEncoder(w).Encode(out)
 	return tu
+}
+
+// cachedFromUsageMap reads the cache-hit count from a decoded OpenAI usage
+// map (chat prompt_tokens_details or Responses input_tokens_details).
+func cachedFromUsageMap(u map[string]any) int64 {
+	var c int64
+	for _, k := range []string{"prompt_tokens_details", "input_tokens_details"} {
+		if d, ok := u[k].(map[string]any); ok {
+			c = max(c, toInt64(d["cached_tokens"]))
+		}
+	}
+	return c
 }

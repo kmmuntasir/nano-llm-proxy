@@ -31,6 +31,13 @@ Release notes are generated from commit prefixes, so `feat:`, `fix:`,
 
 ### Changed
 
+- Translated `/v1/messages` responses report usage in Anthropic semantics:
+  `input_tokens` excludes cache hits, `cache_read_input_tokens` carries them
+  and `cache_creation_input_tokens` is 0, so clients summing the three get
+  the upstream's total prompt. `message_delta` now carries the full usage
+  block (previously only `output_tokens`). Chat responses translated from
+  Responses or Anthropic upstreams gain
+  `prompt_tokens_details.cached_tokens` (and `total_tokens`).
 - Default `zen.userAgent` is now `opencode/latest/2.0.27/cli`; the 1.18.0
   floor check accepts both the 1.x `opencode/X.Y.Z` and the 2.x
   `opencode/<channel>/X.Y.Z/<client>` shapes.
@@ -49,6 +56,18 @@ Release notes are generated from commit prefixes, so `feat:`, `fix:`,
   the model worked there and failed here.
 
 ### Added
+
+- Cached-input-token tracking. Every adapter now taps the cache-hit count
+  upstreams report (chat `prompt_tokens_details.cached_tokens`, Responses
+  `input_tokens_details.cached_tokens`, Anthropic `cache_read_input_tokens`)
+  into a new `usage_events.cached_tokens` column (migration V7; older rows
+  read 0). `inputTokens` stays the total prompt with `cachedTokens` its
+  cache-read subset; native Anthropic usage is normalized to that meaning
+  (input + cache_read + cache_creation). `/api/usage/overview` (totals and
+  points), `/breakdown` (rows and totals) and `/requests` rows gain
+  `cachedTokens`; breakdown and requests accept `sort=cachedTokens`, series
+  accepts `metric=cachedTokens`. The v1 `/api/usage/summary` family is
+  unchanged.
 
 - Usage monitoring v2 (backend). `usage_events` gains per-request detail
   (migration V6): client surface, stream flag, upstream attempts, last

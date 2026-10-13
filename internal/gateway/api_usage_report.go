@@ -25,14 +25,14 @@ var (
 	usageBreakdownAdminOnly = map[string]bool{"user": true, "user_model": true, "upstream_key": true}
 	usageBreakdownSortNames = map[string]bool{
 		"requests": true, "errors": true, "errorRate": true, "inputTokens": true, "outputTokens": true,
-		"totalTokens": true, "avgDurationMs": true, "lastTs": true, "label": true,
+		"cachedTokens": true, "totalTokens": true, "avgDurationMs": true, "lastTs": true, "label": true,
 	}
 
 	usageSeriesGroupBys   = map[string]bool{"user": true, "model": true, "provider": true, "surface": true}
 	usageSeriesAdminOnly  = map[string]bool{"user": true}
-	usageSeriesMetricKeys = map[string]bool{"requests": true, "totalTokens": true, "errors": true}
+	usageSeriesMetricKeys = map[string]bool{"requests": true, "totalTokens": true, "cachedTokens": true, "errors": true}
 
-	usageRequestSortNames = map[string]bool{"ts": true, "durationMs": true, "totalTokens": true}
+	usageRequestSortNames = map[string]bool{"ts": true, "durationMs": true, "totalTokens": true, "cachedTokens": true}
 )
 
 const usageMaxPage = 1_000_000 // keeps OFFSET arithmetic far from overflow

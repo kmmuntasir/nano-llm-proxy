@@ -9,10 +9,6 @@ import (
 // chat.completion chunks (streaming client) or one chat.completion JSON
 // (non-streaming client). Handles text deltas, function calls, finish, usage.
 func translateResponses(w http.ResponseWriter, resp *http.Response, model string, clientWantsStream bool) tokenUsage {
-	type usage_t struct {
-		InputTokens  int64 `json:"input_tokens"`
-		OutputTokens int64 `json:"output_tokens"`
-	}
 	type event struct {
 		Type  string `json:"type"`
 		Delta string `json:"delta"`
@@ -23,8 +19,8 @@ func translateResponses(w http.ResponseWriter, resp *http.Response, model string
 			Arguments string `json:"arguments"`
 		} `json:"item"`
 		Response *struct {
-			ID    string   `json:"id"`
-			Usage *usage_t `json:"usage"`
+			ID    string          `json:"id"`
+			Usage *responsesUsage `json:"usage"`
 		} `json:"response"`
 	}
 
@@ -34,8 +30,7 @@ func translateResponses(w http.ResponseWriter, resp *http.Response, model string
 		toolCalls  []map[string]any // accumulated for non-stream clients
 		sawTools   bool
 		id         string
-		inTok      int64
-		outTok     int64
+		tu         tokenUsage
 		incomplete bool
 	)
 
@@ -89,9 +84,8 @@ func translateResponses(w http.ResponseWriter, resp *http.Response, model string
 			}
 		case "response.completed", "response.done", "response.incomplete":
 			incomplete = ev.Type == "response.incomplete"
-			if ev.Response != nil && ev.Response.Usage != nil {
-				inTok = ev.Response.Usage.InputTokens
-				outTok = ev.Response.Usage.OutputTokens
+			if ev.Response != nil {
+				ev.Response.Usage.into(&tu)
 			}
 			if ev.Response != nil && ev.Response.ID != "" {
 				id = ev.Response.ID
@@ -103,7 +97,7 @@ func translateResponses(w http.ResponseWriter, resp *http.Response, model string
 		}
 	})
 
-	usage := map[string]any{"prompt_tokens": inTok, "completion_tokens": outTok}
+	usage := tu.chatUsage()
 	finish := finishReason(incomplete)
 	if sawTools {
 		finish = "tool_calls"
@@ -111,7 +105,7 @@ func translateResponses(w http.ResponseWriter, resp *http.Response, model string
 
 	if clientWantsStream {
 		writeFinish(finish, usage)
-		return tokenUsage{in: inTok, out: outTok}
+		return tu
 	}
 
 	msg := map[string]any{"role": "assistant", "content": string(agg)}
@@ -128,7 +122,7 @@ func translateResponses(w http.ResponseWriter, resp *http.Response, model string
 	w.Header().Set("Content-Type", "application/json")
 	w.WriteHeader(http.StatusOK)
 	json.NewEncoder(w).Encode(out)
-	return tokenUsage{in: inTok, out: outTok}
+	return tu
 }
 
 func finishReason(incomplete bool) string {

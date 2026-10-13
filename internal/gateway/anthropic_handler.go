@@ -87,36 +87,36 @@ func writeAnthropicErr(w http.ResponseWriter, status int, msg string) {
 	})
 }
 
-// usageFromAnthropicMsg reads the usage block a converted message carries
-// (both token-name spellings appear depending on the surface).
+// usageFromAnthropicMsg reads the usage block of an Anthropic message (a
+// native upstream's or one this gateway converted). Anthropic input_tokens
+// exclude cache hits, so the total is rebuilt as input + cache_read +
+// cache_creation; an OpenAI prompt_tokens spelling is already a total.
 func usageFromAnthropicMsg(msg map[string]any) tokenUsage {
 	var tu tokenUsage
 	u, ok := msg["usage"].(map[string]any)
 	if !ok {
 		return tu
 	}
-	gv := func(k string) int64 {
-		v, _ := u[k].(float64)
-		return int64(v)
-	}
-	tu.add(gv("input_tokens"), gv("output_tokens"))
+	gv := func(k string) int64 { return toInt64(u[k]) }
+	read := gv("cache_read_input_tokens")
+	tu.add(gv("input_tokens")+read+gv("cache_creation_input_tokens"), gv("output_tokens"))
 	tu.add(gv("prompt_tokens"), gv("completion_tokens"))
+	tu.addCached(read)
 	return tu
 }
 
-// usageFromChatJSON reads the usage block of a non-streaming chat response.
+// usageFromChatJSON reads the usage block of a non-streaming chat response
+// (OpenAI semantics: prompt_tokens is the total, cached hits a subset).
 func usageFromChatJSON(chat map[string]any) tokenUsage {
 	var tu tokenUsage
 	u, ok := chat["usage"].(map[string]any)
 	if !ok {
 		return tu
 	}
-	gv := func(k string) int64 {
-		v, _ := u[k].(float64)
-		return int64(v)
-	}
+	gv := func(k string) int64 { return toInt64(u[k]) }
 	tu.add(gv("prompt_tokens"), gv("completion_tokens"))
 	tu.add(gv("input_tokens"), gv("output_tokens"))
+	tu.addCached(cachedFromUsageMap(u))
 	return tu
 }
 
@@ -161,7 +161,7 @@ func (g *gateway) messagesViaOpenAI(ref providerRef, w http.ResponseWriter, r *h
 		if stream {
 			a.start()
 			streamChatSSEToAnthropic(a, resp.Body)
-			tu = tokenUsage{in: a.inTok, out: a.outTok}
+			tu = a.tu
 		} else {
 			var chatResp map[string]any
 			if err := json.NewDecoder(resp.Body).Decode(&chatResp); err != nil {
@@ -244,7 +244,7 @@ func (g *gateway) messagesViaZen(ref providerRef, w http.ResponseWriter, r *http
 			if stream {
 				a.start()
 				streamResponsesSSEToAnthropic(a, resp.Body)
-				tu = tokenUsage{in: a.inTok, out: a.outTok}
+				tu = a.tu
 			} else {
 				msg := responsesSSEToAnthropicMessage(resp.Body, model)
 				tu = usageFromAnthropicMsg(msg)
@@ -253,7 +253,7 @@ func (g *gateway) messagesViaZen(ref providerRef, w http.ResponseWriter, r *http
 		} else if stream {
 			a.start()
 			streamChatSSEToAnthropic(a, resp.Body)
-			tu = tokenUsage{in: a.inTok, out: a.outTok}
+			tu = a.tu
 		} else {
 			msg := chatSSEToAnthropicMessage(resp.Body, model)
 			tu = usageFromAnthropicMsg(msg)
@@ -300,7 +300,7 @@ func chatSSEToAnthropicMessage(body io.Reader, model string) map[string]any {
 	var content strings.Builder
 	var toolCalls []any
 	finish := ""
-	var inTok, outTok int64
+	var tu tokenUsage
 	sseLines(body, func(payload []byte) {
 		var chunk struct {
 			ID      string `json:"id"`
@@ -317,13 +317,13 @@ func chatSSEToAnthropicMessage(body io.Reader, model string) map[string]any {
 				} `json:"delta"`
 				FinishReason *string `json:"finish_reason"`
 			} `json:"choices"`
-			Usage *struct {
-				PromptTokens     int64 `json:"prompt_tokens"`
-				CompletionTokens int64 `json:"completion_tokens"`
-			} `json:"usage"`
 		}
 		if json.Unmarshal(payload, &chunk) != nil {
 			return
+		}
+		var uc usageChunk
+		if json.Unmarshal(payload, &uc) == nil {
+			uc.into(&tu)
 		}
 		if len(chunk.Choices) > 0 {
 			d := chunk.Choices[0].Delta
@@ -349,10 +349,6 @@ func chatSSEToAnthropicMessage(body io.Reader, model string) map[string]any {
 				finish = *chunk.Choices[0].FinishReason
 			}
 		}
-		if chunk.Usage != nil {
-			inTok = chunk.Usage.PromptTokens
-			outTok = chunk.Usage.CompletionTokens
-		}
 	})
 	chat := map[string]any{
 		"id": "msg_gw", "choices": []any{map[string]any{
@@ -361,7 +357,7 @@ func chatSSEToAnthropicMessage(body io.Reader, model string) map[string]any {
 			},
 			"finish_reason": finish,
 		}},
-		"usage": map[string]any{"prompt_tokens": inTok, "completion_tokens": outTok},
+		"usage": tu.chatUsage(),
 	}
 	if len(toolCalls) == 0 {
 		delete(chat["choices"].([]any)[0].(map[string]any)["message"].(map[string]any), "tool_calls")
@@ -375,7 +371,7 @@ func responsesSSEToAnthropicMessage(body io.Reader, model string) map[string]any
 	var content strings.Builder
 	type call struct{ id, name, args string }
 	var calls []call
-	var inTok, outTok int64
+	var tu tokenUsage
 	sseLines(body, func(payload []byte) {
 		var ev struct {
 			Type  string `json:"type"`
@@ -387,10 +383,7 @@ func responsesSSEToAnthropicMessage(body io.Reader, model string) map[string]any
 				Arguments string `json:"arguments"`
 			} `json:"item"`
 			Response *struct {
-				Usage *struct {
-					InputTokens  int64 `json:"input_tokens"`
-					OutputTokens int64 `json:"output_tokens"`
-				} `json:"usage"`
+				Usage *responsesUsage `json:"usage"`
 			} `json:"response"`
 		}
 		if json.Unmarshal(payload, &ev) != nil {
@@ -404,9 +397,8 @@ func responsesSSEToAnthropicMessage(body io.Reader, model string) map[string]any
 				calls = append(calls, call{ev.Item.CallID, ev.Item.Name, ev.Item.Arguments})
 			}
 		case "response.completed", "response.incomplete", "response.done":
-			if ev.Response != nil && ev.Response.Usage != nil {
-				inTok = ev.Response.Usage.InputTokens
-				outTok = ev.Response.Usage.OutputTokens
+			if ev.Response != nil {
+				ev.Response.Usage.into(&tu)
 			}
 		}
 	})
@@ -428,6 +420,6 @@ func responsesSSEToAnthropicMessage(body io.Reader, model string) map[string]any
 		"content":       contentBlocks,
 		"stop_reason":   stop,
 		"stop_sequence": nil,
-		"usage":         map[string]any{"input_tokens": inTok, "output_tokens": outTok},
+		"usage":         tu.anthropicUsage(true),
 	}
 }

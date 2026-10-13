@@ -98,34 +98,46 @@ func forwardAnthropicHeaders(dst, src http.Header) {
 // nests it under "message".
 type anthropicUsagePayload struct {
 	Message *struct {
-		Usage *struct {
-			InputTokens  int64 `json:"input_tokens"`
-			OutputTokens int64 `json:"output_tokens"`
-		} `json:"usage"`
+		Usage *anthropicUsageBlock `json:"usage"`
 	} `json:"message"`
-	Usage *struct {
-		InputTokens      int64 `json:"input_tokens"`
-		OutputTokens     int64 `json:"output_tokens"`
-		PromptTokens     int64 `json:"prompt_tokens"`
-		CompletionTokens int64 `json:"completion_tokens"`
-	} `json:"usage"`
+	Usage *anthropicUsageBlock `json:"usage"`
+}
+
+// anthropicUsageBlock is one Anthropic usage object. input_tokens EXCLUDES
+// cache hits and cache writes; some Anthropic-compatible upstreams use the
+// OpenAI prompt/completion spelling (a total) instead.
+type anthropicUsageBlock struct {
+	InputTokens              int64 `json:"input_tokens"`
+	OutputTokens             int64 `json:"output_tokens"`
+	CacheReadInputTokens     int64 `json:"cache_read_input_tokens"`
+	CacheCreationInputTokens int64 `json:"cache_creation_input_tokens"`
+	PromptTokens             int64 `json:"prompt_tokens"`
+	CompletionTokens         int64 `json:"completion_tokens"`
+}
+
+// into normalizes the block to the internal total-prompt semantics:
+// in = input + cache_read + cache_creation, cached = cache_read.
+func (u *anthropicUsageBlock) into(t *tokenUsage) {
+	if u == nil {
+		return
+	}
+	in := u.PromptTokens
+	if in == 0 {
+		in = u.InputTokens + u.CacheReadInputTokens + u.CacheCreationInputTokens
+	}
+	out := u.CompletionTokens
+	if out == 0 {
+		out = u.OutputTokens
+	}
+	t.add(in, out)
+	t.addCached(u.CacheReadInputTokens)
 }
 
 func (p *anthropicUsagePayload) into(t *tokenUsage) {
-	if p.Message != nil && p.Message.Usage != nil {
-		t.add(p.Message.Usage.InputTokens, p.Message.Usage.OutputTokens)
+	if p.Message != nil {
+		p.Message.Usage.into(t)
 	}
-	if p.Usage == nil {
-		return
-	}
-	in, out := p.Usage.PromptTokens, p.Usage.CompletionTokens
-	if in == 0 {
-		in = p.Usage.InputTokens
-	}
-	if out == 0 {
-		out = p.Usage.OutputTokens
-	}
-	t.add(in, out)
+	p.Usage.into(t)
 }
 
 // passthroughAnthropic streams an upstream Anthropic response to the client

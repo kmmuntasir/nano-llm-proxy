@@ -460,6 +460,7 @@ func (g *gateway) recordActivity(r *http.Request, ref providerRef, model, upstre
 				Model:          model,
 				InputTokens:    tokens.in,
 				OutputTokens:   tokens.out,
+				CachedTokens:   tokens.cached,
 				Status:         status,
 				DurationMs:     e.DurationMs,
 				Surface:        surface,

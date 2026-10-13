@@ -66,6 +66,14 @@ client. Supported:
   `message_delta` (stop reasons `end_turn`, `tool_use`, `max_tokens`),
   `message_stop`
 - non-streaming clients get one JSON message object
+- `usage` in Anthropic semantics: `input_tokens` excludes cache hits,
+  `cache_read_input_tokens` carries them (always present, `0` when the
+  upstream reported none) and `cache_creation_input_tokens` is `0` — so
+  `input_tokens + cache_read_input_tokens + cache_creation_input_tokens` is
+  the upstream's total prompt (OpenAI `prompt_tokens`). Streaming
+  `message_start` carries zeros (translated upstreams report usage only at
+  the end); the final figures, `output_tokens` included, ride on
+  `message_delta`.
 
 ```bash
 curl http://localhost:8787/v1/messages \
@@ -280,7 +288,14 @@ Every mutation writes to SQLite and rebuilds the in-memory pools/key cache
 in the same request. Usage ranges are unix seconds, capped to 92 days;
 `to` is clamped to now and negative bounds are a 400;
 token counts come from whatever the upstream reports (0 when it reports
-none). Events persist in the `usage_events` table and are pruned after 90
+none). `inputTokens` is always the TOTAL prompt including cache hits and
+`cachedTokens` the cache-read subset of it (OpenAI
+`prompt_tokens_details.cached_tokens` / Responses
+`input_tokens_details.cached_tokens`); native Anthropic usage is normalized
+to the same meaning (`inputTokens` = `input_tokens` +
+`cache_read_input_tokens` + `cache_creation_input_tokens`, `cachedTokens` =
+`cache_read_input_tokens`). Rows recorded before cache tracking (migration
+V7) read `cachedTokens: 0`. Events persist in the `usage_events` table and are pruned after 90
 days.
 
 ### Usage monitoring (`/api/usage/*`)
@@ -318,7 +333,7 @@ User labels prefer the live email, then the request-time snapshot, then
 `deleted user #<id>`; key aliases likewise (`deleted key #<id>`).
 
 **`GET /api/usage/overview`** —
-`{range, bucket, totals: {requests, errors, inputTokens, outputTokens, avgDurationMs, p95DurationMs, avgTtfbMs, users, models}, points: [{ts, requests, errors, inputTokens, outputTokens, avgDurationMs}]}`.
+`{range, bucket, totals: {requests, errors, inputTokens, outputTokens, cachedTokens, avgDurationMs, p95DurationMs, avgTtfbMs, users, models}, points: [{ts, requests, errors, inputTokens, outputTokens, cachedTokens, avgDurationMs}]}`.
 `avgTtfbMs` averages only rows with a recorded TTFB; `p95DurationMs` is the
 nearest-rank p95 over successful rows; `users`/`models` are distinct counts
 (models keyed on provider + model). `points` covers every bucket in the
@@ -328,18 +343,18 @@ range, zero-filled.
 provider + model) \| `provider` \| `key` \| `user` \| `user_model` \|
 `upstream_key` (the last three superadmin-only); `sort` = `requests`
 (default) \| `errors` \| `errorRate` \| `inputTokens` \| `outputTokens` \|
-`totalTokens` \| `avgDurationMs` \| `lastTs` \| `label`; `order` = `desc`
+`cachedTokens` \| `totalTokens` \| `avgDurationMs` \| `lastTs` \| `label`; `order` = `desc`
 (default) \| `asc`; `page` (1-based); `pageSize` 1..200 (default 25); `q` =
 case-insensitive substring of the group label (email, `provider/model`,
 alias, ...; `%`/`_` match literally). Returns
-`{range, groupBy, page, pageSize, total, totals: {requests, errors, inputTokens, outputTokens}, rows: [{userId, email, provider, model, keyId, alias, upstreamKey, requests, errors, inputTokens, outputTokens, avgDurationMs, avgTtfbMs, firstTs, lastTs}]}`.
+`{range, groupBy, page, pageSize, total, totals: {requests, errors, inputTokens, outputTokens, cachedTokens}, rows: [{userId, email, provider, model, keyId, alias, upstreamKey, requests, errors, inputTokens, outputTokens, cachedTokens, avgDurationMs, avgTtfbMs, firstTs, lastTs}]}`.
 `total` counts matching groups; `totals` sums every matching group, not just
 the page. Fields outside the grouping are zero/empty (`key` rows also carry
 the owning `userId`/`email`).
 
 **`GET /api/usage/series`** — `groupBy` = `model` (default) \| `provider` \|
 `surface` \| `user` (superadmin-only); `metric` = `requests` (default) \|
-`totalTokens` \| `errors`; `top` 1..10 (default 5). Returns
+`totalTokens` \| `cachedTokens` \| `errors`; `top` 1..10 (default 5). Returns
 `{range, bucket, groupBy, metric, series: [{key, label, points: [{ts, value}]}]}`:
 the top groups by the metric (groups with a zero metric are omitted), then an
 `other` series (label `Other`) folding the rest when there are more groups
@@ -348,8 +363,8 @@ than `top`. Keys: user → `"<userId>"` (label = email), model →
 same zero-filled bucket timestamps.
 
 **`GET /api/usage/requests`** — `sort` = `ts` (default) \| `durationMs` \|
-`totalTokens`; `order`; `page`; `pageSize` 1..200 (default 50). Returns
-`{range, page, pageSize, total, rows: [{id, ts, userId, email, keyId, alias, provider, model, surface, stream, status, upstreamStatus, failReason, upstreamKey, inputTokens, outputTokens, durationMs, ttfbMs, attempts}]}`.
+`totalTokens` \| `cachedTokens`; `order`; `page`; `pageSize` 1..200 (default 50). Returns
+`{range, page, pageSize, total, rows: [{id, ts, userId, email, keyId, alias, provider, model, surface, stream, status, upstreamStatus, failReason, upstreamKey, inputTokens, outputTokens, cachedTokens, durationMs, ttfbMs, attempts}]}`.
 `upstreamKey` is blank for non-superadmins.
 
 **`GET /api/usage/facets`** — range params only. Returns

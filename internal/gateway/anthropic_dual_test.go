@@ -263,7 +263,7 @@ func TestAnthropicOnlyProviderChatStream(t *testing.T) {
 	if !strings.Contains(body, `"finish_reason":"tool_calls"`) {
 		t.Fatalf("stop_reason tool_use not mapped to finish_reason: %s", body)
 	}
-	if !strings.Contains(body, `"usage":{"completion_tokens":7,"prompt_tokens":21,"total_tokens":28}`) {
+	if !strings.Contains(body, `"usage":{"completion_tokens":7,"prompt_tokens":21,"prompt_tokens_details":{"cached_tokens":0},"total_tokens":28}`) {
 		t.Fatalf("final usage chunk missing: %s", body)
 	}
 	if !strings.HasSuffix(strings.TrimSpace(body), "data: [DONE]") {

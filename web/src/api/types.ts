@@ -167,10 +167,13 @@ export interface UsageRange {
   to: number
 }
 
+// inputTokens is the total prompt size INCLUDING cached input; cachedTokens is
+// the cached subset (0 on rows recorded before cache tracking / when unknown).
 export interface UsageOverviewTotals {
   requests: number
   errors: number
   inputTokens: number
+  cachedTokens: number
   outputTokens: number
   avgDurationMs: number
   p95DurationMs: number
@@ -184,6 +187,7 @@ export interface UsageOverviewPoint {
   requests: number
   errors: number
   inputTokens: number
+  cachedTokens: number
   outputTokens: number
   avgDurationMs: number
 }
@@ -208,6 +212,7 @@ export type UsageBreakdownSort =
   | "errors"
   | "errorRate"
   | "inputTokens"
+  | "cachedTokens"
   | "outputTokens"
   | "totalTokens"
   | "avgDurationMs"
@@ -226,11 +231,16 @@ export interface UsageBreakdownRow {
   requests: number
   errors: number
   inputTokens: number
+  cachedTokens: number
   outputTokens: number
   avgDurationMs: number
   avgTtfbMs: number
   firstTs: number
   lastTs: number
+}
+
+export interface UsageBreakdownTotals extends UsageTotals {
+  cachedTokens: number
 }
 
 export interface UsageBreakdown {
@@ -239,12 +249,12 @@ export interface UsageBreakdown {
   page: number
   pageSize: number
   total: number
-  totals: UsageTotals
+  totals: UsageBreakdownTotals
   rows: UsageBreakdownRow[]
 }
 
 export type UsageSeriesGroupBy = "user" | "model" | "provider" | "surface"
-export type UsageSeriesMetric = "requests" | "totalTokens" | "errors"
+export type UsageSeriesMetric = "requests" | "totalTokens" | "cachedTokens" | "errors"
 
 export interface UsageSeriesPoint {
   ts: number
@@ -267,7 +277,7 @@ export interface UsageSeries {
   series: UsageSeriesLine[]
 }
 
-export type UsageRequestSort = "ts" | "durationMs" | "totalTokens"
+export type UsageRequestSort = "ts" | "durationMs" | "totalTokens" | "cachedTokens"
 
 export interface UsageRequestRow {
   id: number
@@ -285,6 +295,7 @@ export interface UsageRequestRow {
   failReason: string
   upstreamKey: string // blanked for non-superadmins
   inputTokens: number
+  cachedTokens: number
   outputTokens: number
   durationMs: number
   ttfbMs: number

@@ -16,7 +16,12 @@ import (
 // tokenUsage carries the upstream-reported token counts for one request.
 // Upstreams repeat usage on consecutive chunks with the final total, so the
 // largest observed value wins.
-type tokenUsage struct{ in, out int64 }
+//
+// Semantics follow OpenAI: in is the TOTAL prompt token count including any
+// cache hits, cached is the cache-read subset of in (0 = none or unknown).
+// Anthropic-native usage (input_tokens excluding cache, plus
+// cache_read/cache_creation) is normalized into this shape on the way in.
+type tokenUsage struct{ in, out, cached int64 }
 
 func (t *tokenUsage) add(in, out int64) {
 	if in > t.in {
@@ -24,6 +29,45 @@ func (t *tokenUsage) add(in, out int64) {
 	}
 	if out > t.out {
 		t.out = out
+	}
+}
+
+// addCached records the cache-read subset of the prompt (largest wins, like
+// in/out).
+func (t *tokenUsage) addCached(cached int64) {
+	if cached > t.cached {
+		t.cached = cached
+	}
+}
+
+// anthropicUsage is the usage block for a /v1/messages response built from
+// tu: Anthropic clients sum input + cache_read + cache_creation, so the cache
+// hits are split back out of the total. cache_creation is unknown on the
+// translated paths and reported as 0.
+func (t tokenUsage) anthropicUsage(withOutput bool) map[string]any {
+	in := t.in - t.cached
+	if in < 0 {
+		in = 0
+	}
+	u := map[string]any{
+		"input_tokens":                in,
+		"cache_read_input_tokens":     t.cached,
+		"cache_creation_input_tokens": int64(0),
+	}
+	if withOutput {
+		u["output_tokens"] = t.out
+	}
+	return u
+}
+
+// chatUsage is the OpenAI chat usage block for tu (prompt_tokens is the
+// total; cached hits ride in prompt_tokens_details).
+func (t tokenUsage) chatUsage() map[string]any {
+	return map[string]any{
+		"prompt_tokens":         t.in,
+		"completion_tokens":     t.out,
+		"total_tokens":          t.in + t.out,
+		"prompt_tokens_details": map[string]any{"cached_tokens": t.cached},
 	}
 }
 
