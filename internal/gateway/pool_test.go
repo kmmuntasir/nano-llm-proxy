@@ -113,3 +113,106 @@ func TestDailyCapCountSurvivesRebuild(t *testing.T) {
 		t.Fatalf("pick after rebuild = %s, want nil (DayCount must carry over)", got.Label)
 	}
 }
+
+func mkEntries(n int) []config.KeyFileEntry {
+	out := make([]config.KeyFileEntry, n)
+	for i := range n {
+		out[i] = mkEntry(string(rune('a' + i)))
+	}
+	return out
+}
+
+// TestPriorityDailyAdvancesOneKeyPerDay walks a calendar across more than a
+// full cycle: each day's first pick is the key after yesterday's, the last
+// key wraps to the first, and within a day the pick stays put (cache
+// affinity is per day, like plain priority).
+func TestPriorityDailyAdvancesOneKeyPerDay(t *testing.T) {
+	p := newPool("zen", "priority-daily", 0, mkEntries(4))
+	day0 := time.Date(2026, 10, 14, 9, 0, 0, 0, time.Local)
+	first := p.pickAt(nil, day0)
+	start := int(first.Label[0] - 'a')
+	if start != dailyOffset(day0, 4) {
+		t.Fatalf("day0 start = %d, want offset %d", start, dailyOffset(day0, 4))
+	}
+	for d := range 9 {
+		morning := day0.AddDate(0, 0, d).Add(-8 * time.Hour) // 01:00
+		evening := day0.AddDate(0, 0, d).Add(14 * time.Hour) // 23:00
+		want := string(rune('a' + (start+d)%4))
+		for _, at := range []time.Time{morning, evening} {
+			if k := p.pickAt(nil, at); k == nil || k.Label != want {
+				t.Fatalf("day %d at %s: picked %v, want %s", d, at.Format("15:04"), k, want)
+			}
+		}
+	}
+}
+
+// TestPriorityDailyFailsOverAndWraps: today's primary unhealthy → the next
+// key; the walk wraps past the last key to the first; excluded keys (already
+// tried this request) are skipped the same way.
+func TestPriorityDailyFailsOverAndWraps(t *testing.T) {
+	p := newPool("zen", "priority-daily", 0, mkEntries(3))
+	// find a day whose offset lands on the last key, so failover must wrap
+	now := time.Date(2026, 1, 1, 12, 0, 0, 0, time.Local)
+	for dailyOffset(now, 3) != 2 {
+		now = now.AddDate(0, 0, 1)
+	}
+	keys := p.rawKeys()
+	if k := p.pickAt(nil, now); k != keys[2] {
+		t.Fatalf("primary = %v, want c", k)
+	}
+	keys[2].CooldownUntil = now.Add(time.Minute)
+	if k := p.pickAt(nil, now); k != keys[0] {
+		t.Fatalf("failover = %v, want a (wrapped)", k)
+	}
+	if k := p.pickAt(map[string]bool{keys[0].Hash: true}, now); k != keys[1] {
+		t.Fatalf("with a excluded = %v, want b", k)
+	}
+	keys[0].Disabled, keys[1].Disabled = true, true
+	if k := p.pickAt(nil, now); k != nil {
+		t.Fatalf("all unhealthy: picked %v, want nil", k)
+	}
+	// cooldown over → back on today's primary
+	if k := p.pickAt(nil, now.Add(2*time.Minute)); k != keys[2] {
+		t.Fatalf("after cooldown = %v, want c", k)
+	}
+}
+
+// TestPriorityDailyRotatesPerProvider: each pool rotates over its own key
+// count, so two providers on the same day sit at different positions and
+// each covers all of its keys over its own cycle.
+func TestPriorityDailyRotatesPerProvider(t *testing.T) {
+	zen := newPool("zen", "priority-daily", 0, mkEntries(14))
+	kilo := newPool("kilo", "priority-daily", 0, mkEntries(15))
+	day := time.Date(2026, 3, 1, 12, 0, 0, 0, time.Local)
+	seenZen, seenKilo := map[string]bool{}, map[string]bool{}
+	for d := range 15 * 14 {
+		at := day.AddDate(0, 0, d)
+		seenZen[zen.pickAt(nil, at).Label] = true
+		seenKilo[kilo.pickAt(nil, at).Label] = true
+		if d < 14 && len(seenZen) != d+1 {
+			t.Fatalf("zen repeated a key before cycling all 14 (day %d)", d)
+		}
+	}
+	if len(seenZen) != 14 || len(seenKilo) != 15 {
+		t.Fatalf("coverage zen=%d kilo=%d, want 14 and 15", len(seenZen), len(seenKilo))
+	}
+}
+
+// TestDailyOffsetFollowsCalendarAcrossDST: the offset advances exactly one
+// per calendar day even across a 23h/25h day.
+func TestDailyOffsetFollowsCalendarAcrossDST(t *testing.T) {
+	ny, err := time.LoadLocation("America/New_York")
+	if err != nil {
+		t.Skipf("no tzdata: %v", err)
+	}
+	day := time.Date(2026, 3, 7, 23, 30, 0, 0, ny) // spring-forward is Mar 8
+	for d := range 4 {
+		a, b := dailyOffset(day.AddDate(0, 0, d), 1000), dailyOffset(day.AddDate(0, 0, d+1), 1000)
+		if (a+1)%1000 != b {
+			t.Fatalf("day %d→%d offset %d→%d, want +1", d, d+1, a, b)
+		}
+	}
+	if dailyOffset(day, 0) != 0 {
+		t.Fatal("empty pool offset must be 0")
+	}
+}

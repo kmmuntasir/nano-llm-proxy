@@ -14,6 +14,8 @@ func TestRuntimeSettingsValidate(t *testing.T) {
 	}{
 		{"defaults", func(*RuntimeSettings) {}, ""},
 		{"lru", func(rs *RuntimeSettings) { rs.Rotation = RotationLRU }, ""},
+		{"priority", func(rs *RuntimeSettings) { rs.Rotation = RotationPriority }, ""},
+		{"priority-daily", func(rs *RuntimeSettings) { rs.Rotation = RotationPriorityDaily }, ""},
 		{"bad rotation", func(rs *RuntimeSettings) { rs.Rotation = "random" }, "Rotation must be"},
 		{"zero maxKeys", func(rs *RuntimeSettings) { rs.Retry.MaxKeysPerRequest = 0 }, "Max keys per request"},
 		{"huge maxKeys", func(rs *RuntimeSettings) { rs.Retry.MaxKeysPerRequest = 101 }, "Max keys per request"},
@@ -85,5 +87,19 @@ func TestSettingsCloneIsDeep(t *testing.T) {
 	}
 	if rs.Zai.ModelMeta["m"].ContextWindow != 3 {
 		t.Fatalf("Clone is not deep for zai meta: %+v", rs)
+	}
+}
+
+// TestRotationDefaultIsPriorityDaily: fresh documents and documents that
+// omit the field get daily rotation; an explicitly stored mode is kept.
+func TestRotationDefaultIsPriorityDaily(t *testing.T) {
+	if got := DefaultRuntimeSettings().Rotation; got != RotationPriorityDaily {
+		t.Fatalf("default rotation = %q, want %q", got, RotationPriorityDaily)
+	}
+	if got := (&RuntimeSettings{}).ApplyDefaults().Rotation; got != RotationPriorityDaily {
+		t.Fatalf("omitted rotation = %q, want %q", got, RotationPriorityDaily)
+	}
+	if got := (&RuntimeSettings{Rotation: RotationPriority}).ApplyDefaults().Rotation; got != RotationPriority {
+		t.Fatalf("explicit priority rewritten to %q", got)
 	}
 }

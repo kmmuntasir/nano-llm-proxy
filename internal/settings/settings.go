@@ -98,9 +98,14 @@ func UAVersionOK(ua string) bool {
 // the single source of truth, and unmarshalling happens ONTO a default value
 // so absent fields keep it.
 
+// Rotation modes. RotationPriorityDaily is the default: priority's
+// stick-with-failover, with the starting key advancing one position per day
+// so a pool's keys share the load over time instead of the first key
+// carrying everything.
 const (
-	RotationPriority = "priority"
-	RotationLRU      = "lru"
+	RotationPriorityDaily = "priority-daily"
+	RotationPriority      = "priority"
+	RotationLRU           = "lru"
 )
 
 // RetryConfig bounds the per-request key rotation loop and 429 handling.
@@ -179,7 +184,7 @@ const (
 )
 
 type RuntimeSettings struct {
-	Rotation  string            `json:"rotation"` // "priority" (default) | "lru"
+	Rotation  string            `json:"rotation"` // "priority-daily" (default) | "priority" | "lru"
 	Retry     RetryConfig       `json:"retry"`
 	Anthropic AnthropicSettings `json:"anthropic"`
 	Zen       ZenSettings       `json:"zen"`
@@ -192,7 +197,7 @@ type RuntimeSettings struct {
 // for any field a stored document leaves out.
 func DefaultRuntimeSettings() *RuntimeSettings {
 	return &RuntimeSettings{
-		Rotation: RotationPriority,
+		Rotation: RotationPriorityDaily,
 		Retry: RetryConfig{
 			MaxKeysPerRequest: 3,
 			CooldownSeconds:   30,
@@ -228,7 +233,7 @@ func DefaultRuntimeSettings() *RuntimeSettings {
 // Retry-After only).
 func (rs *RuntimeSettings) ApplyDefaults() *RuntimeSettings {
 	if rs.Rotation == "" {
-		rs.Rotation = RotationPriority
+		rs.Rotation = RotationPriorityDaily
 	}
 	if rs.Retry.MaxKeysPerRequest <= 0 {
 		rs.Retry.MaxKeysPerRequest = 3
@@ -271,8 +276,10 @@ func (rs *RuntimeSettings) ApplyDefaults() *RuntimeSettings {
 // are acceptable. The same rules run at PUT time (400) — the database must
 // never hold a document boot would refuse.
 func (rs *RuntimeSettings) Validate() string {
-	if rs.Rotation != RotationPriority && rs.Rotation != RotationLRU {
-		return "Rotation must be \"priority\" or \"lru\""
+	switch rs.Rotation {
+	case RotationPriorityDaily, RotationPriority, RotationLRU:
+	default:
+		return "Rotation must be \"priority-daily\", \"priority\" or \"lru\""
 	}
 	if rs.Retry.MaxKeysPerRequest < 1 || rs.Retry.MaxKeysPerRequest > 100 {
 		return "Max keys per request must be between 1 and 100"

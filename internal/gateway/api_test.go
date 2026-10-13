@@ -528,7 +528,7 @@ func TestSettingsAPIAuth(t *testing.T) {
 	if rec.Code != 200 {
 		t.Fatalf("admin GET settings: got %d: %s", rec.Code, rec.Body.String())
 	}
-	for _, want := range []string{`"rotation":"priority"`, `"maxKeysPerRequest":3`, `"respectRetryAfter":true`} {
+	for _, want := range []string{`"rotation":"priority-daily"`, `"maxKeysPerRequest":3`, `"respectRetryAfter":true`} {
 		if !strings.Contains(rec.Body.String(), want) {
 			t.Fatalf("GET settings missing %s: %s", want, rec.Body.String())
 		}
@@ -569,7 +569,7 @@ func TestSettingsPutValidation(t *testing.T) {
 	if err != nil {
 		t.Fatalf("load after rejects: %v", err)
 	}
-	if rs.Rotation != settings.RotationPriority || rs.Retry.MaxKeysPerRequest != 3 {
+	if rs.Rotation != settings.RotationPriorityDaily || rs.Retry.MaxKeysPerRequest != 3 {
 		t.Fatalf("rejected PUTs still changed the stored document: %+v", rs)
 	}
 }
@@ -651,7 +651,7 @@ func TestSettingsPutCooldownTakesEffect(t *testing.T) {
 
 	rec := httptest.NewRecorder()
 	req := httptest.NewRequest("PUT", "/api/settings",
-		strings.NewReader(`{"retry":{"cooldownSeconds":61,"respectRetryAfter":false}}`))
+		strings.NewReader(`{"rotation":"priority","retry":{"cooldownSeconds":61,"respectRetryAfter":false}}`)) // pinned: the test needs key a tried first
 	req.AddCookie(adminCookie)
 	req.Header.Set("Origin", "https://gateway.example.com")
 	req.RemoteAddr = "10.9.9.9:5555"

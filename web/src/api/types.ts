@@ -449,7 +449,7 @@ export interface WebToolsSettingsView {
 }
 
 export interface RuntimeSettingsView {
-  rotation: "priority" | "lru"
+  rotation: "priority-daily" | "priority" | "lru"
   retry: RetrySettingsView
   anthropic: AnthropicSettingsView
   zen: ZenSettingsView

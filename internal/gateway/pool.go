@@ -4,6 +4,7 @@ import (
 	"crypto/sha256"
 	"encoding/hex"
 	"github.com/kmmuntasir/nano-llm-proxy/internal/config"
+	"github.com/kmmuntasir/nano-llm-proxy/internal/settings"
 	"log"
 	"sort"
 	"sync"
@@ -44,18 +45,22 @@ func (k *KeyState) Status() string {
 
 // Pool is a provider key pool. Mode "priority" sticks to the first healthy
 // key in configured order (prompt-cache affinity; keys.json order = priority)
-// and fails over down the list; mode "lru" spreads load evenly.
+// and fails over down the list; "priority-daily" does the same from a
+// starting key that advances one position per day (see dailyOffset); mode
+// "lru" spreads load evenly.
 type Pool struct {
 	mu       sync.Mutex
 	name     string
-	mode     string // "priority" | "lru"
+	mode     string // "priority-daily" | "priority" | "lru"
 	dailyCap int    // max requests per key per day, 0 = off
 	keys     []*KeyState
 }
 
 func newPool(name, mode string, dailyCap int, entries []config.KeyFileEntry) *Pool {
-	if mode != "lru" {
-		mode = "priority"
+	switch mode {
+	case settings.RotationPriorityDaily, settings.RotationLRU:
+	default:
+		mode = settings.RotationPriority
 	}
 	p := &Pool{name: name, mode: mode, dailyCap: dailyCap}
 	for _, e := range entries {
@@ -102,22 +107,47 @@ func nextMidnight(t time.Time) time.Time {
 	return time.Date(t.Year(), t.Month(), t.Day(), 0, 0, 0, 0, t.Location()).AddDate(0, 0, 1)
 }
 
+// dailyOffset is the position "priority-daily" starts from on now's day:
+// the local calendar day number modulo the pool size, so consecutive days
+// start one key further down and the last key wraps back to the first. It is
+// derived from the date alone — no state to persist, restarts change
+// nothing, and every pool rotates over its own key count. The day turns at
+// local midnight (the same clock as the daily cap); the calendar date, not
+// elapsed seconds, keeps DST days from skipping or repeating a key.
+func dailyOffset(now time.Time, n int) int {
+	if n <= 0 {
+		return 0
+	}
+	day := time.Date(now.Year(), now.Month(), now.Day(), 0, 0, 0, 0, time.UTC).Unix() / 86400
+	return int(day % int64(n))
+}
+
 // pick returns the next healthy key not in exclude, or nil. In priority mode
 // this is the first configured key that is healthy — traffic returns to the
-// primary automatically once its cooldown expires. With a daily cap set, a
-// key that has served its quota today is skipped; the pick that reaches the
-// cap puts the key into cooldown until midnight.
+// primary automatically once its cooldown expires; priority-daily is the
+// same walk starting at today's offset and wrapping past the last key. With
+// a daily cap set, a key that has served its quota today is skipped; the
+// pick that reaches the cap puts the key into cooldown until midnight.
 func (p *Pool) pick(exclude map[string]bool) *KeyState {
+	return p.pickAt(exclude, time.Now())
+}
+
+// pickAt is pick with an explicit clock (tests drive the calendar).
+func (p *Pool) pickAt(exclude map[string]bool, now time.Time) *KeyState {
 	p.mu.Lock()
 	defer p.mu.Unlock()
-	now := time.Now()
 	today := now.Format("2006-01-02")
 	capped := func(k *KeyState) bool {
 		return p.dailyCap > 0 && k.DayStamp == today && k.DayCount >= int64(p.dailyCap)
 	}
 	var best *KeyState
-	if p.mode == "priority" {
-		for _, k := range p.keys {
+	if p.mode != settings.RotationLRU {
+		start := 0
+		if p.mode == settings.RotationPriorityDaily {
+			start = dailyOffset(now, len(p.keys))
+		}
+		for i := range len(p.keys) {
+			k := p.keys[(start+i)%len(p.keys)]
 			if k.Disabled || exclude[k.Hash] || now.Before(k.CooldownUntil) || capped(k) {
 				continue
 			}

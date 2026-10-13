@@ -70,7 +70,7 @@ function cleanModelId(id: string): string {
 }
 
 interface SettingsForm {
-  rotation: "priority" | "lru"
+  rotation: RuntimeSettingsView["rotation"]
   retry: RuntimeSettingsView["retry"]
   fallbackModel: string
   userAgent: string
@@ -429,13 +429,17 @@ export default function SettingsPage() {
                 value={form.rotation}
                 onChange={(e) => set({ rotation: e.target.value as SettingsForm["rotation"] })}
               >
+                <option value="priority-daily">
+                  Priority, daily rotation — first healthy key, next key each day
+                </option>
                 <option value="priority">Priority — stick to the first healthy key</option>
                 <option value="lru">LRU — spread load evenly</option>
               </NativeSelect.Field>
               <NativeSelect.Indicator />
             </NativeSelect.Root>
             <Field.HelperText>
-              Applies to every provider pool the moment you save.
+              Applies to every provider pool the moment you save. Daily rotation
+              moves each provider's starting key one position at server midnight.
             </Field.HelperText>
           </Field.Root>
         </Card.Body>

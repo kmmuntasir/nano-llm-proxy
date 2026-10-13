@@ -43,7 +43,14 @@ func openTestStore(t *testing.T) *store.Store {
 
 // testRuntime returns the runtime settings the gateway boots with when the
 // database holds no document; individual tests tweak fields on it.
-func testRuntime() *settings.RuntimeSettings { return settings.DefaultRuntimeSettings() }
+// testRuntime is the default document pinned to plain priority rotation:
+// failover-order tests assert "key a first", which the date-driven default
+// (priority-daily) would make depend on the calendar day the suite runs.
+func testRuntime() *settings.RuntimeSettings {
+	rs := settings.DefaultRuntimeSettings()
+	rs.Rotation = settings.RotationPriority
+	return rs
+}
 
 // testGateway wires a gateway at a mock upstream for one provider.
 func testGateway(t *testing.T, handler http.Handler) *gateway {
