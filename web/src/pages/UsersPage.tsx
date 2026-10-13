@@ -565,7 +565,8 @@ function UserCard({ u, isSelf }: { u: UserView; isSelf: boolean }) {
           <Button variant="ghost" size="2xs" onClick={() => setManagingKeys(true)}>
             Keys
           </Button>
-          {!isSelf && (
+          {/* superadmins always have every provider */}
+          {!isSelf && u.role !== "superadmin" && (
             <Button variant="ghost" size="2xs" onClick={() => setManagingAccess(true)}>
               Provider access
             </Button>

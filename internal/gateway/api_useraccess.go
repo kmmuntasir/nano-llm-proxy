@@ -8,7 +8,8 @@ import (
 // client keys may route to. Everything is allowed by default — a user only
 // loses access to a provider when a superadmin revokes it here, and the
 // revoked provider then behaves as if it does not exist for them (absent
-// from their /v1/models, unknown prefix when routed).
+// from their /v1/models, unknown prefix when routed). Superadmins always
+// have every provider: one superadmin can't restrict another.
 
 // userProviderJSON is one provider row together with the user's access state.
 type userProviderJSON struct {
@@ -71,8 +72,13 @@ func (g *gateway) handleSetUserProviderAccess(w http.ResponseWriter, r *http.Req
 	if !readJSON(w, r, &req) {
 		return
 	}
-	if u, err := g.store.User(id); err != nil || u == nil {
+	u, err := g.store.User(id)
+	if err != nil || u == nil {
 		apiErr(w, http.StatusNotFound, "No such user")
+		return
+	}
+	if u.Role == "superadmin" {
+		apiErr(w, http.StatusConflict, "Superadmins always have access to every provider")
 		return
 	}
 	if p, err := g.store.Provider(provID); err != nil || p == nil {

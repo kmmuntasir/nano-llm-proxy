@@ -440,9 +440,19 @@ func (s *Store) SetUserProviderAccess(userID, providerID int64, disabled bool) e
 	return err
 }
 
+// ClearUserProviderAccess removes every revocation for a user — run on
+// promotion to superadmin so old revocations can't resurface on a later
+// demotion.
+func (s *Store) ClearUserProviderAccess(userID int64) error {
+	_, err := s.db.Exec(`DELETE FROM user_provider_access WHERE user_id=?`, userID)
+	return err
+}
+
 // DisabledProviderIDs lists the provider ids one user may not use.
+// Superadmins always have every provider, so their rows (if any) are ignored.
 func (s *Store) DisabledProviderIDs(userID int64) (map[int64]bool, error) {
-	rows, err := s.db.Query(`SELECT provider_id FROM user_provider_access WHERE user_id=?`, userID)
+	rows, err := s.db.Query(`SELECT a.provider_id FROM user_provider_access a
+		JOIN users u ON u.id = a.user_id WHERE a.user_id=? AND u.role <> 'superadmin'`, userID)
 	if err != nil {
 		return nil, err
 	}
@@ -459,9 +469,11 @@ func (s *Store) DisabledProviderIDs(userID int64) (map[int64]bool, error) {
 }
 
 // AllProviderAccess loads every restricted pair for the gateway's hot-path
-// cache: userID -> set of disabled provider ids.
+// cache: userID -> set of disabled provider ids. Superadmins are never
+// restricted, whatever rows exist for them.
 func (s *Store) AllProviderAccess() (map[int64]map[int64]bool, error) {
-	rows, err := s.db.Query(`SELECT user_id, provider_id FROM user_provider_access`)
+	rows, err := s.db.Query(`SELECT a.user_id, a.provider_id FROM user_provider_access a
+		JOIN users u ON u.id = a.user_id WHERE u.role <> 'superadmin'`)
 	if err != nil {
 		return nil, err
 	}

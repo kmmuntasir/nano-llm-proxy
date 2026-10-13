@@ -181,6 +181,11 @@ func (g *gateway) handlePatchUser(w http.ResponseWriter, r *http.Request) {
 		if err := g.store.UpdateUser(id, name, email, passHash, req.Role, req.Disabled); err != nil {
 			return err
 		}
+		if req.Role != nil && *req.Role == "superadmin" && target.Role != "superadmin" {
+			if err := g.store.ClearUserProviderAccess(id); err != nil {
+				return err
+			}
+		}
 		if killSessions {
 			return g.store.DeleteUserSessions(id)
 		}

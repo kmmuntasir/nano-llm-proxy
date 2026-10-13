@@ -214,3 +214,66 @@ func catalogIDs(t *testing.T, body string) map[string]bool {
 	}
 	return out
 }
+
+// TestSuperadminsAlwaysHaveEveryProvider: provider access can't be changed
+// for a superadmin, stray revocation rows for one are ignored, and promoting
+// a restricted user clears their revocations for good (a later demotion
+// doesn't bring them back).
+func TestSuperadminsAlwaysHaveEveryProvider(t *testing.T) {
+	g, st := testStoreGateway(t, "http://127.0.0.1:1")
+	prov := addGenericProvider(t, st, "acme", "http://127.0.0.1:1", "ak1")
+	other := insertPlainUser(t, st, "other@example.com", "other-pass-12345", "superadmin")
+	worker := insertPlainUser(t, st, "worker@example.com", "worker-pass-12345", "user")
+	if err := g.rebuildPools(); err != nil {
+		t.Fatal(err)
+	}
+	cookie := loginAs(t, g, "admin@example.com", "super-secret-pass")
+	setAccess := func(userID int64, disabled bool) int {
+		req := httptest.NewRequest("PUT", "/api/users/x/providers/x/access",
+			strings.NewReader(`{"disabled":`+strconv.FormatBool(disabled)+`}`))
+		req.AddCookie(cookie)
+		req.Header.Set("Origin", "https://gateway.example.com")
+		req.SetPathValue("id", strconv.FormatInt(userID, 10))
+		req.SetPathValue("providerId", strconv.FormatInt(prov.ID, 10))
+		rec := httptest.NewRecorder()
+		g.requireSession(g.requireSuperadmin(g.handleSetUserProviderAccess))(rec, req)
+		return rec.Code
+	}
+	setRole := func(userID int64, role string) {
+		req := httptest.NewRequest("PATCH", "/api/users/x", strings.NewReader(`{"role":"`+role+`"}`))
+		req.AddCookie(cookie)
+		req.Header.Set("Origin", "https://gateway.example.com")
+		req.SetPathValue("id", strconv.FormatInt(userID, 10))
+		rec := httptest.NewRecorder()
+		g.requireSession(g.requireSuperadmin(g.handlePatchUser))(rec, req)
+		if rec.Code != 200 {
+			t.Fatalf("set role %s: %d %s", role, rec.Code, rec.Body.String())
+		}
+	}
+
+	if code := setAccess(other.ID, true); code != http.StatusConflict {
+		t.Fatalf("revoke for a superadmin: got %d, want 409", code)
+	}
+	// a row written before this rule (or by hand) has no effect
+	if err := st.SetUserProviderAccess(other.ID, prov.ID, true); err != nil {
+		t.Fatal(err)
+	}
+	if err := g.rebuildPools(); err != nil {
+		t.Fatal(err)
+	}
+	if g.access.disabled(other.ID, prov.ID) {
+		t.Fatal("stray revocation applied to a superadmin")
+	}
+
+	if code := setAccess(worker.ID, true); code != 200 || !g.access.disabled(worker.ID, prov.ID) {
+		t.Fatalf("revoke for a user: got %d", code)
+	}
+	setRole(worker.ID, "superadmin")
+	if g.access.disabled(worker.ID, prov.ID) {
+		t.Fatal("promoted user still restricted")
+	}
+	setRole(worker.ID, "user")
+	if g.access.disabled(worker.ID, prov.ID) {
+		t.Fatal("demotion resurrected an old revocation")
+	}
+}
