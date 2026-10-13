@@ -153,6 +153,160 @@ export interface UsageActivityRow {
   durationMs: number
 }
 
+// --- usage monitoring v2 (GET /api/usage/overview|breakdown|series|requests|facets) ---
+
+export type UsageSurface = "chat" | "messages" | "responses" | "mcp"
+export type UsageStatusFilter = "ok" | "error"
+export type UsageBucket = "hour" | "day"
+export type SortOrder = "asc" | "desc"
+
+// Effective range echoed by every v2 endpoint — differs from the request
+// when the server capped the span (92 days max).
+export interface UsageRange {
+  from: number
+  to: number
+}
+
+export interface UsageOverviewTotals {
+  requests: number
+  errors: number
+  inputTokens: number
+  outputTokens: number
+  avgDurationMs: number
+  p95DurationMs: number
+  avgTtfbMs: number
+  users: number
+  models: number
+}
+
+export interface UsageOverviewPoint {
+  ts: number
+  requests: number
+  errors: number
+  inputTokens: number
+  outputTokens: number
+  avgDurationMs: number
+}
+
+export interface UsageOverview {
+  range: UsageRange
+  bucket: UsageBucket
+  totals: UsageOverviewTotals
+  points: UsageOverviewPoint[]
+}
+
+export type UsageBreakdownGroupBy =
+  | "user"
+  | "model"
+  | "user_model"
+  | "provider"
+  | "key"
+  | "upstream_key"
+
+export type UsageBreakdownSort =
+  | "requests"
+  | "errors"
+  | "errorRate"
+  | "inputTokens"
+  | "outputTokens"
+  | "totalTokens"
+  | "avgDurationMs"
+  | "lastTs"
+  | "label"
+
+// Fields not relevant to the grouping are zero/empty.
+export interface UsageBreakdownRow {
+  userId: number
+  email: string
+  provider: string
+  model: string
+  keyId: number
+  alias: string
+  upstreamKey: string
+  requests: number
+  errors: number
+  inputTokens: number
+  outputTokens: number
+  avgDurationMs: number
+  avgTtfbMs: number
+  firstTs: number
+  lastTs: number
+}
+
+export interface UsageBreakdown {
+  range: UsageRange
+  groupBy: UsageBreakdownGroupBy
+  page: number
+  pageSize: number
+  total: number
+  totals: UsageTotals
+  rows: UsageBreakdownRow[]
+}
+
+export type UsageSeriesGroupBy = "user" | "model" | "provider" | "surface"
+export type UsageSeriesMetric = "requests" | "totalTokens" | "errors"
+
+export interface UsageSeriesPoint {
+  ts: number
+  value: number
+}
+
+// key: user → "<userId>", model → "<provider>/<model>", provider/surface →
+// the name; everything outside the top N is folded into "other".
+export interface UsageSeriesLine {
+  key: string
+  label: string
+  points: UsageSeriesPoint[]
+}
+
+export interface UsageSeries {
+  range: UsageRange
+  bucket: UsageBucket
+  groupBy: UsageSeriesGroupBy
+  metric: UsageSeriesMetric
+  series: UsageSeriesLine[]
+}
+
+export type UsageRequestSort = "ts" | "durationMs" | "totalTokens"
+
+export interface UsageRequestRow {
+  id: number
+  ts: number
+  userId: number
+  email: string
+  keyId: number
+  alias: string
+  provider: string
+  model: string
+  surface: string // "" on pre-V6 rows
+  stream: boolean
+  status: number
+  upstreamStatus: number
+  failReason: string
+  upstreamKey: string // blanked for non-superadmins
+  inputTokens: number
+  outputTokens: number
+  durationMs: number
+  ttfbMs: number
+  attempts: number
+}
+
+export interface UsageRequests {
+  range: UsageRange
+  page: number
+  pageSize: number
+  total: number
+  rows: UsageRequestRow[]
+}
+
+export interface UsageFacets {
+  users: { id: number; email: string }[] // empty for non-superadmins
+  providers: string[]
+  models: { provider: string; model: string }[]
+  keys: { id: number; alias: string; userId: number }[]
+  surfaces: string[]
+}
+
 // --- runtime settings (GET/PUT /api/settings) ---
 
 // models.dev-shaped reasoning controls (mirrors settings.ReasoningOption).

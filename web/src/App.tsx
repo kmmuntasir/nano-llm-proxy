@@ -1,4 +1,4 @@
-import { useEffect } from "react"
+import { Suspense, lazy, useEffect } from "react"
 import { Navigate, Route, Routes, useNavigate } from "react-router-dom"
 import { useQuery } from "@tanstack/react-query"
 import { Box, Spinner } from "@chakra-ui/react"
@@ -10,10 +10,12 @@ import DashboardPage from "./pages/DashboardPage"
 import DocsPage from "./pages/DocsPage"
 import ModelsPage from "./pages/ModelsPage"
 import ProfilePage from "./pages/ProfilePage"
-import UsagePage from "./pages/UsagePage"
 import UsersPage from "./pages/UsersPage"
 import ProvidersPage from "./pages/ProvidersPage"
 import SettingsPage from "./pages/SettingsPage"
+
+// The usage section pulls in Recharts and several views — load it on demand.
+const UsageSection = lazy(() => import("./pages/usage/UsageSection"))
 
 export interface Session {
   user: UserView
@@ -61,7 +63,20 @@ export default function App() {
         <Route path="/" element={<DashboardPage />} />
         <Route path="/models" element={<ModelsPage />} />
         <Route path="/docs" element={<DocsPage />} />
-        <Route path="/usage" element={<UsagePage />} />
+        <Route
+          path="/usage/*"
+          element={
+            <Suspense
+              fallback={
+                <Box p={10} display="grid" placeItems="center">
+                  <Spinner />
+                </Box>
+              }
+            >
+              <UsageSection />
+            </Suspense>
+          }
+        />
         <Route path="/profile" element={<ProfilePage />} />
         <Route path="/keys" element={<Navigate to="/profile" replace />} />
         {isSuperadmin && (

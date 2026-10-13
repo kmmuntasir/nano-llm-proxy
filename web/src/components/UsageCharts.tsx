@@ -17,11 +17,10 @@ import {
 import { Box, Button, Card, HStack, SimpleGrid, Text, VStack } from "@chakra-ui/react"
 import { api } from "../api/client"
 import type { UsageModelRow } from "../api/types"
-import { useColorMode } from "./ui/color-mode"
+import { useChartTheme } from "./chartTheme"
 
-// Dashboard charts over the persisted usage log. Palette slots are the
-// validated dataviz defaults (blue/orange), stepped per color mode; chrome
-// (grid, ticks, surfaces) follows the same system. One measure per chart —
+// Dashboard charts over the persisted usage log. Colors come from the shared
+// chart palette (chartTheme), stepped per color mode. One measure per chart —
 // no dual axes.
 
 interface UsagePoint {
@@ -46,12 +45,6 @@ interface UsageSummary {
   providers: UsageModelRow[]
 }
 
-// validated categorical slots, light + dark steps
-const PALETTE = {
-  light: { s1: "#2a78d6", s2: "#eb6834", grid: "#e1e0d9", tick: "#898781", axis: "#c3c2b7", surface: "#ffffff", ink: "#0b0b0b", ink2: "#52514e" },
-  dark: { s1: "#3987e5", s2: "#d95926", grid: "#2c2c2a", tick: "#898781", axis: "#383835", surface: "#1a1a19", ink: "#ffffff", ink2: "#c3c2b7" },
-}
-
 const RANGES = [
   { label: "Today", days: 1 },
   { label: "7d", days: 7 },
@@ -65,8 +58,8 @@ function fmtCompact(n: number) {
 }
 
 export default function UsageCharts() {
-  const { colorMode } = useColorMode()
-  const c = PALETTE[colorMode === "dark" ? "dark" : "light"]
+  const theme = useChartTheme()
+  const c = { ...theme, s1: theme.series[0], s2: theme.series[1] }
   const [range, setRange] = useState("Today")
 
   const days = RANGES.find((r) => r.label === range)?.days ?? 1
@@ -106,20 +99,11 @@ export default function UsageCharts() {
   const providerRows = [...byTs.entries()]
     .sort((a, b) => a[0] - b[0])
     .map(([ts, row]) => ({ x: fmtX(ts), ...row }))
-  const providerColors = names.map((_, i) => (i === 0 ? c.s1 : i === 1 ? c.s2 : c.tick))
+  const providerColors = names.map((_, i) => theme.color(i))
 
   const topModels = (summary.data?.topModels ?? []).slice(0, 5)
-  const tooltipProps = {
-    cursor: { stroke: c.grid, strokeWidth: 1 },
-    contentStyle: { background: c.surface, border: `1px solid ${c.grid}`, borderRadius: 8, fontSize: 12 },
-    labelStyle: { color: c.ink2, fontSize: 12 },
-    itemStyle: { color: c.ink, fontSize: 12 },
-  }
-  const axis = {
-    tick: { fill: c.tick, fontSize: 11 },
-    tickLine: false,
-    axisLine: { stroke: c.axis },
-  }
+  const tooltipProps = theme.tooltip
+  const axis = theme.axis
 
   return (
     <Card.Root>
