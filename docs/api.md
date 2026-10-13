@@ -256,6 +256,7 @@ Roles: `superadmin` (everything below) and `user` (own keys + dashboard).
 | Endpoint | Role | Purpose |
 | --- | --- | --- |
 | `POST /api/auth/login`, `POST /api/auth/logout`, `GET /api/auth/me` | — | Session lifecycle. Login answers 403 when password sign-in is disabled (`auth.credentialLogin`) |
+| User objects | — | Every user payload (`/api/auth/me`, `/api/users`, login, `PATCH /api/me`) carries `googleLinked` (has signed in with Google — name is Google-owned and refreshed on each Google sign-in; admins can't rename it either) and, for Google users with a photo, `avatarUrl` (an `https://*.googleusercontent.com` URL refreshed on each Google sign-in) |
 | `GET /api/auth/config` | — (open) | Sign-in methods for the login page: `{"credentialLogin": bool, "google": {"clientId", "domain"?}}`; `google` is omitted when Google sign-in isn't configured |
 | `POST /api/auth/google` | — | Google sign-in: body `{"credential": "<Google ID token>"}`; verifies the token (signature, issuer, audience, expiry, verified email, Workspace domain) and starts the same session as password login. Origin-checked and backoff-limited. 404 when not configured, 401 bad token, 403 outside the domain / unknown email without a domain / disabled account |
 | `GET/POST /api/me/keys`, `PATCH/DELETE /api/me/keys/{keyId}` | user | Own client keys |
@@ -285,6 +286,7 @@ Roles: `superadmin` (everything below) and `user` (own keys + dashboard).
 | `GET /api/usage/requests` | user | Paged raw request log with upstream detail |
 | `GET /api/usage/facets` | user | Distinct users/providers/models/keys/surfaces in the range, for filter dropdowns |
 | `POST /api/me/password` | user | Self-service password reset; requires the current password and wipes all sessions |
+| `PATCH /api/me` | user | Rename yourself: body `{"name"}` (trimmed, 1–100 characters) → `{"user"}`. 403 for Google-linked accounts, whose name comes from Google |
 
 Every mutation writes to SQLite and rebuilds the in-memory pools/key cache
 in the same request. Usage ranges are unix seconds, capped to 92 days;
