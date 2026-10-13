@@ -421,7 +421,7 @@ Served by the same binary at `/`.
 | Guide | everyone | User guide rendered with this deployment's URLs: base endpoints, setup for Claude Code / opencode / Codex CLI / Kilo Code / Pi / generic OpenAI-compatible clients, MCP web-tools setup, troubleshooting |
 | Usage | everyone | Date-range usage: totals, top models, providers, per-key (admins also get per-user), recent activity — scoped to the signed-in user |
 | Profile | everyone | Account info, self-service password reset, own client keys (create/disable/delete) plus an MCP web-tools setup dialog |
-| Users | superadmin | User CRUD, roles, password resets, per-user key management, per-user provider access (revoke a provider and it vanishes from that user's model list; their requests to it fail like an unknown provider) |
+| Users | superadmin | User CRUD, roles, password resets, per-user key management, per-user provider access for regular users (revoke a provider and it vanishes from that user's model list; their requests to it fail like an unknown provider — superadmins always have every provider) |
 | Providers | superadmin | Add providers from a curated preset dropdown (or its Custom Provider option), search/filter the provider card grid, edit base URLs, add/remove/toggle/rename upstream keys, fetch per-key plan usage for Z.ai (5-hour/weekly windows, tier, resets), browse each provider's live model catalog (zen models with the Responses-API flag carry a toggle) |
 | Settings | superadmin | Rotation, retries/cooldowns, daily cap, Claude fallback, adapter knobs, model-catalog sync (zen + zai, models.dev), web tools (SearXNG URL, reader mode, obscura knobs, live backend tests) |
 
