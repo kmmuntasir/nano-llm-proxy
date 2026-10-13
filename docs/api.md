@@ -254,8 +254,8 @@ logins, per-IP+email backoff, and Origin checks on state-changing requests.
 Roles: `superadmin` and `admin` (everything below — "admin" in the table
 means either) and `user` (own keys + dashboard). The one difference between
 the two admin roles: an admin can't change a superadmin account in any way
-(deactivate, delete, rename, change role, reset password, manage its client
-keys — viewing is fine) and can't grant the `superadmin` role. Superadmins can
+(deactivate, delete, rename, change role, reset password) and can't grant the
+`superadmin` role. Superadmins can
 change other superadmins. Nobody can deactivate or delete their own account
 (409).
 
@@ -267,7 +267,7 @@ change other superadmins. Nobody can deactivate or delete their own account
 | `POST /api/auth/google` | — | Google sign-in: body `{"credential": "<Google ID token>"}`; verifies the token (signature, issuer, audience, expiry, verified email, Workspace domain) and starts the same session as password login. Origin-checked and backoff-limited. 404 when not configured, 401 bad token, 403 outside the domain / no account with this email (Google sign-in never creates accounts — add the user on the Users page) / disabled account |
 | `GET/POST /api/me/keys`, `PATCH/DELETE /api/me/keys/{keyId}` | user | Own client keys |
 | `GET/POST /api/users`, `PATCH/DELETE /api/users/{id}` | admin | User management. `POST` requires a password (min 10 characters) only while password sign-in is on; with it off, users are created without one and sign in with Google. `PATCH {"disabled": true}` deactivates a user: their sessions end and their client keys stop authenticating until reactivated (the last superadmin can't be deactivated) |
-| `GET/POST /api/users/{id}/keys`, `PATCH/DELETE /api/users/{id}/keys/{keyId}` | admin | Per-user client keys |
+| `GET /api/users/{id}/keys` | admin | Read-only view of a user's client keys. Nobody — not even a superadmin — creates, toggles or deletes another user's keys; owners manage their own via `/api/me/keys`, and deactivating a user turns all of theirs off |
 | `GET /api/users/{id}/providers`, `PUT /api/users/{id}/providers/{providerId}/access` | admin | Per-user provider access. The listing annotates each provider with `disabledForUser`; the PUT takes `{disabled: bool}` and answers 409 for an admin or superadmin target — they always have every provider (stray revocations for them are ignored, and promotion clears a user's revocations). Access is allow-by-default: a revoked provider vanishes from that user's `/v1/models` and their requests to it fail exactly like an unknown provider |
 | `GET/POST /api/providers`, `PATCH/DELETE /api/providers/{id}` | admin | Providers (generic CRUD; `baseUrl` and/or `anthropicBaseUrl`, at least one required; built-ins cannot be deleted). Create takes `keys` as `{key, label}` objects — every upstream key needs a label (1-64 characters). It also accepts a `preset` id: unknown presets are 400, the name defaults to the preset id, endpoint roots default from the registry, and the preset is immutable afterwards. Multiple providers per preset are allowed; only `zen` is reserved and undeletable |
 | `GET /api/providers/presets` | admin | The curated preset registry (id, label, endpoint roots) behind the GUI's Add Provider dropdown |
