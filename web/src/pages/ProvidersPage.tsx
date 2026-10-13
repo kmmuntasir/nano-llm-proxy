@@ -720,14 +720,23 @@ function ProviderCard({ p }: { p: ProviderView }) {
   const [keysOpen, setKeysOpen] = useState(false)
   const [modelsOpen, setModelsOpen] = useState(false)
   const [usageOpen, setUsageOpen] = useState(false)
+  // the enable switch only proposes a change; it applies after the
+  // confirmation dialog (null = no pending change)
+  const [pendingEnabled, setPendingEnabled] = useState<boolean | null>(null)
   const invalidate = () => void qc.invalidateQueries({ queryKey: ["providers"] })
 
   const patchP = useMutation({
     mutationFn: (body: Record<string, unknown>) => patch(`/api/providers/${p.id}`, body),
-    onSuccess: async () => {
+    onSuccess: async (_, body) => {
       setEditField(null)
       invalidate()
-      toaster.create({ title: "Provider updated", type: "success" })
+      const title =
+        body.enabled === true
+          ? "Provider activated"
+          : body.enabled === false
+            ? "Provider deactivated"
+            : "Provider updated"
+      toaster.create({ title, type: "success" })
     },
     onError: (e) =>
       toaster.create({ title: e instanceof ApiError ? e.message : "Failed to update the provider", type: "error" }),
@@ -801,7 +810,10 @@ function ProviderCard({ p }: { p: ProviderView }) {
             )}
             <Switch.Root
               checked={p.enabled}
-              onCheckedChange={(e) => patchP.mutate({ enabled: e.checked })}
+              disabled={patchP.isPending}
+              onCheckedChange={(e) => setPendingEnabled(e.checked)}
+              aria-label={p.enabled ? `deactivate ${p.name}` : `activate ${p.name}`}
+              title={p.enabled ? "Active — click to deactivate" : "Inactive — click to activate"}
             >
               <Switch.HiddenInput />
               <Switch.Control>
@@ -949,6 +961,33 @@ function ProviderCard({ p }: { p: ProviderView }) {
 
       <ModelsListModal provider={p} open={modelsOpen} onOpenChange={setModelsOpen} />
       {p.preset === "zai" && <KeyUsageModal provider={p} open={usageOpen} onOpenChange={setUsageOpen} />}
+      <ConfirmDialog
+        open={pendingEnabled !== null}
+        onOpenChange={() => setPendingEnabled(null)}
+        title={pendingEnabled ? `Activate provider "${p.name}"?` : `Deactivate provider "${p.name}"?`}
+        body={
+          pendingEnabled ? (
+            <Text>
+              Its models return to every client's catalog and{" "}
+              <Code fontFamily="mono">{p.name}/*</Code> requests route again (per-user access
+              restrictions still apply).
+            </Text>
+          ) : (
+            <Text>
+              Its models disappear from every client's catalog and{" "}
+              <Code fontFamily="mono">{p.name}/*</Code> requests stop routing until you reactivate
+              it. Keys and settings are kept.
+            </Text>
+          )
+        }
+        confirmText={pendingEnabled ? "Activate" : "Deactivate"}
+        destructive={pendingEnabled === false}
+        busy={patchP.isPending}
+        onConfirm={() => {
+          if (pendingEnabled === null) return
+          patchP.mutate({ enabled: pendingEnabled }, { onSettled: () => setPendingEnabled(null) })
+        }}
+      />
       <ConfirmDialog
         open={toDelete}
         onOpenChange={() => setToDelete(false)}
