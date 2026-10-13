@@ -169,8 +169,8 @@ func TestMigrateV4ConvertsBuiltinKiloToPreset(t *testing.T) {
 	}
 
 	var version int64
-	if err := s.db.QueryRow(`SELECT MAX(version) FROM schema_migrations`).Scan(&version); err != nil || version != 7 {
-		t.Fatalf("schema version = %d, %v; want 7", version, err)
+	if err := s.db.QueryRow(`SELECT MAX(version) FROM schema_migrations`).Scan(&version); err != nil || version != 8 {
+		t.Fatalf("schema version = %d, %v; want 8", version, err)
 	}
 }
 
@@ -381,8 +381,8 @@ func TestMigrateV6EnrichesExistingUsageRows(t *testing.T) {
 		t.Fatalf("Migrate: %v", err)
 	}
 	var version int64
-	if err := s.db.QueryRow(`SELECT MAX(version) FROM schema_migrations`).Scan(&version); err != nil || version != 7 {
-		t.Fatalf("schema version = %d, %v; want 7", version, err)
+	if err := s.db.QueryRow(`SELECT MAX(version) FROM schema_migrations`).Scan(&version); err != nil || version != 8 {
+		t.Fatalf("schema version = %d, %v; want 8", version, err)
 	}
 	for idx, want := range map[string]int{
 		"idx_usage_model_ts":      1,
@@ -540,8 +540,8 @@ func TestMigrateV7AddsCachedTokens(t *testing.T) {
 		t.Fatalf("Migrate: %v", err)
 	}
 	var version int64
-	if err := s.db.QueryRow(`SELECT MAX(version) FROM schema_migrations`).Scan(&version); err != nil || version != 7 {
-		t.Fatalf("schema version = %d, %v; want 7", version, err)
+	if err := s.db.QueryRow(`SELECT MAX(version) FROM schema_migrations`).Scan(&version); err != nil || version != 8 {
+		t.Fatalf("schema version = %d, %v; want 8", version, err)
 	}
 	// idempotent: a second Migrate on V7 is a no-op
 	if err := s.Migrate(); err != nil {
@@ -564,5 +564,33 @@ func TestMigrateV7AddsCachedTokens(t *testing.T) {
 	}
 	if rows[1].Model != "old-model" || rows[1].CachedTokens != 0 || rows[1].InputTokens != 100 {
 		t.Errorf("pre-V7 row did not default cached_tokens to 0: %+v", rows[1])
+	}
+}
+
+// TestMigrateV8GoogleLinked: existing users start unlinked; LinkGoogleUser
+// sets the flag and takes the Google name, keeping the old one when Google
+// sent none; the flag shows up in every read path.
+func TestMigrateV8GoogleLinked(t *testing.T) {
+	st := openTestStore(t)
+	u := &User{Name: "Old Name", Email: "p@example.com", PasswordHash: "x", Role: "user"}
+	if err := st.InsertUser(u); err != nil {
+		t.Fatal(err)
+	}
+	if got, _ := st.User(u.ID); got.GoogleLinked {
+		t.Fatal("new user should start unlinked")
+	}
+	got, err := st.LinkGoogleUser(u.ID, "Google Name", "https://lh3.googleusercontent.com/a/x")
+	if err != nil || !got.GoogleLinked || got.Name != "Google Name" || got.AvatarURL != "https://lh3.googleusercontent.com/a/x" {
+		t.Fatalf("link: %+v %v", got, err)
+	}
+	if got, _ = st.LinkGoogleUser(u.ID, "", ""); got.Name != "Google Name" || got.AvatarURL != "" {
+		t.Fatalf("relink without name/picture: %+v", got)
+	}
+	if byEmail, _ := st.UserByEmail("p@example.com"); !byEmail.GoogleLinked {
+		t.Fatal("UserByEmail lost the flag")
+	}
+	list, _ := st.ListUsers()
+	if len(list) != 1 || !list[0].GoogleLinked {
+		t.Fatalf("ListUsers lost the flag: %+v", list)
 	}
 }

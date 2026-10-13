@@ -8,6 +8,12 @@ export interface UserView {
   disabled: boolean
   createdAt: number
   keyCount?: number
+  // true once the user has signed in with Google; their name then comes from
+  // the Google profile and can't be edited.
+  googleLinked: boolean
+  // Google profile picture; omitted unless the user signed in with Google and
+  // has one.
+  avatarUrl?: string
 }
 
 // GET /api/auth/config (unauthenticated). google is omitted when Google

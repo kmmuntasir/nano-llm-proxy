@@ -21,6 +21,7 @@ import { api, del, patch, post, put, ApiError } from "../api/client"
 import type { ClientKeyView, UserProviderView, UserView } from "../api/types"
 import ConfirmDialog from "../components/ConfirmDialog"
 import KeyRevealDialog from "../components/KeyRevealDialog"
+import UserAvatar from "../components/UserAvatar"
 import { PasswordInput } from "../components/ui/password-input"
 import { Dialog } from "@chakra-ui/react"
 import { toaster } from "../components/ui/toaster"
@@ -490,17 +491,25 @@ function UserCard({ u, isSelf }: { u: UserView; isSelf: boolean }) {
     <Card.Root size="sm" opacity={u.disabled ? 0.5 : 1}>
       <Card.Body gap={2} px={4} py={3}>
         <HStack justify="space-between" flexWrap="wrap" gap={2}>
-          <VStack align="start" gap={0}>
-            <HStack gap={2}>
-              <Text fontWeight="medium">{u.name}</Text>
-              <Badge variant={u.role === "superadmin" ? "solid" : "subtle"}>
-                {u.role === "superadmin" ? "Superadmin" : "User"}
-              </Badge>
-            </HStack>
-            <Text fontSize="xs" color="fg.muted">
-              {u.email} · {u.keyCount ?? 0} keys · created {fmtTs(u.createdAt)}
-            </Text>
-          </VStack>
+          <HStack gap={3} align="center" minW={0} flex="1">
+            <UserAvatar name={u.name} avatarUrl={u.avatarUrl} size="sm" />
+            <VStack align="start" gap={0} minW={0}>
+              <HStack gap={2} flexWrap="wrap">
+                <Text fontWeight="medium" wordBreak="break-word">{u.name}</Text>
+                <Badge variant={u.role === "superadmin" ? "solid" : "subtle"}>
+                  {u.role === "superadmin" ? "Superadmin" : "User"}
+                </Badge>
+                {u.googleLinked && (
+                  <Badge variant="outline" colorPalette="gray" title="Name comes from Google">
+                    Google
+                  </Badge>
+                )}
+              </HStack>
+              <Text fontSize="xs" color="fg.muted" wordBreak="break-word">
+                {u.email} · {u.keyCount ?? 0} keys · created {fmtTs(u.createdAt)}
+              </Text>
+            </VStack>
+          </HStack>
           <HStack gap={2} flexWrap="wrap">
             {isSelf ? (
               <Text fontSize="xs" color="fg.muted">

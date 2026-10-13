@@ -387,3 +387,87 @@ func TestCredentialLoginSwitch(t *testing.T) {
 		}
 	})
 }
+
+// TestProfileNameOwnership: password users rename themselves; the first
+// Google sign-in takes over the name and locks it — for the user and for
+// admins — while saves that leave it unchanged still work.
+func TestProfileNameOwnership(t *testing.T) {
+	g, f := googleGateway(t, "")
+	cookie := loginAs(t, g, "admin@example.com", "super-secret-pass")
+	rename := func(body string) *httptest.ResponseRecorder {
+		req := httptest.NewRequest("PATCH", "/api/me", strings.NewReader(body))
+		req.AddCookie(cookie)
+		req.Header.Set("Origin", "https://gateway.example.com")
+		rec := httptest.NewRecorder()
+		g.requireSession(g.handleUpdateMe)(rec, req)
+		return rec
+	}
+	if rec := rename(`{"name":"  Renamed Admin  "}`); rec.Code != 200 || !strings.Contains(rec.Body.String(), `"name":"Renamed Admin"`) || !strings.Contains(rec.Body.String(), `"googleLinked":false`) {
+		t.Fatalf("credential rename: %d %s", rec.Code, rec.Body.String())
+	}
+	for _, bad := range []string{`{"name":"   "}`, `{}`, `{"name":"` + strings.Repeat("é", 101) + `"}`} {
+		if rec := rename(bad); rec.Code != http.StatusBadRequest {
+			t.Fatalf("%s: got %d", bad, rec.Code)
+		}
+	}
+
+	// first Google sign-in: name comes from Google, account becomes linked
+	rec := googleLogin(g, f.token(t, validGoogleClaims("admin@example.com", "")), "")
+	if rec.Code != 200 || !strings.Contains(rec.Body.String(), `"name":"Test Person"`) || !strings.Contains(rec.Body.String(), `"googleLinked":true`) {
+		t.Fatalf("google login: %d %s", rec.Code, rec.Body.String())
+	}
+	if rec := rename(`{"name":"Something Else"}`); rec.Code != http.StatusForbidden {
+		t.Fatalf("linked self-rename: got %d", rec.Code)
+	}
+
+	admin, _ := g.store.UserByEmail("admin@example.com")
+	patch := func(body string) int {
+		req := httptest.NewRequest("PATCH", "/api/users/1", strings.NewReader(body))
+		req.SetPathValue("id", "1")
+		req.AddCookie(cookie)
+		req.Header.Set("Origin", "https://gateway.example.com")
+		rec := httptest.NewRecorder()
+		g.requireSession(g.requireSuperadmin(g.handlePatchUser))(rec, req)
+		return rec.Code
+	}
+	if code := patch(`{"name":"Admin Override"}`); code != http.StatusBadRequest {
+		t.Fatalf("admin rename of linked user: got %d", code)
+	}
+	if code := patch(`{"name":"` + admin.Name + `","disabled":false}`); code != 200 {
+		t.Fatalf("admin save with unchanged name: got %d", code)
+	}
+	if u, _ := g.store.User(admin.ID); u.Name != "Test Person" || !u.GoogleLinked {
+		t.Fatalf("user after guards = %+v", u)
+	}
+}
+
+func TestGoogleAvatarURLAllowsOnlyGoogleHosts(t *testing.T) {
+	cases := map[string]string{
+		"https://lh3.googleusercontent.com/a/ACg8oc=s96-c": "https://lh3.googleusercontent.com/a/ACg8oc=s96-c",
+		"http://lh3.googleusercontent.com/a/x":             "", // not https
+		"https://evil.example/a.png":                       "",
+		"https://googleusercontent.com.evil.example/x":     "",
+		"https://user@lh3.googleusercontent.com/x":         "",
+		"javascript:alert(1)":                              "",
+		"":                                                 "",
+	}
+	for in, want := range cases {
+		if got := googleAvatarURL(&googleClaims{Picture: in}); got != want {
+			t.Errorf("%q: got %q, want %q", in, got, want)
+		}
+	}
+}
+
+func TestGoogleLoginStoresAvatar(t *testing.T) {
+	g, f := googleGateway(t, "")
+	c := validGoogleClaims("admin@example.com", "")
+	c["picture"] = "https://lh3.googleusercontent.com/a/pic=s96-c"
+	rec := googleLogin(g, f.token(t, c), "")
+	if rec.Code != 200 || !strings.Contains(rec.Body.String(), `"avatarUrl":"https://lh3.googleusercontent.com/a/pic=s96-c"`) {
+		t.Fatalf("got %d: %s", rec.Code, rec.Body.String())
+	}
+	c["picture"] = "https://evil.example/x.png"
+	if rec := googleLogin(g, f.token(t, c), ""); rec.Code != 200 || strings.Contains(rec.Body.String(), "avatarUrl") {
+		t.Fatalf("foreign picture kept: %s", rec.Body.String())
+	}
+}

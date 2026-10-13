@@ -8,16 +8,93 @@ import {
   Field,
   Heading,
   HStack,
+  Input,
   Text,
   VStack,
 } from "@chakra-ui/react"
 import { useNavigate } from "react-router-dom"
 import { KeyRound } from "lucide-react"
-import { post, ApiError } from "../api/client"
+import { patch, post, ApiError } from "../api/client"
+import type { UserView } from "../api/types"
 import { PasswordInput } from "../components/ui/password-input"
 import { toaster } from "../components/ui/toaster"
+import UserAvatar from "../components/UserAvatar"
 import { useSession } from "../App"
+import type { Session } from "../App"
 import MyKeysPage from "./MyKeysPage"
+
+// NameField edits the signed-in user's display name. Google-linked users get
+// it read-only: the server rewrites it from the Google profile on each sign-in.
+function NameField({ user }: { user: UserView }) {
+  const qc = useQueryClient()
+  const [name, setName] = useState(user.name)
+  const trimmed = name.trim()
+
+  const save = useMutation({
+    mutationFn: () => patch<Session>("/api/me", { name: trimmed }),
+    onSuccess: async (res) => {
+      qc.setQueryData<Session>(["me"], res)
+      setName(res.user.name)
+      await qc.invalidateQueries({ queryKey: ["users"] })
+      toaster.create({ title: "Name updated", type: "success" })
+    },
+    onError: (e) =>
+      toaster.create({
+        title: e instanceof ApiError ? e.message : "Failed to update the name",
+        type: "error",
+      }),
+  })
+
+  if (user.googleLinked) {
+    return (
+      <VStack align="start" gap={0}>
+        <Text fontSize="xs" color="fg.muted">
+          Name
+        </Text>
+        <Text wordBreak="break-word">{user.name}</Text>
+        <Text fontSize="xs" color="fg.muted" mt={1}>
+          Your name comes from your Google account and updates each time you sign in
+          with Google.
+        </Text>
+      </VStack>
+    )
+  }
+
+  return (
+    <Field.Root
+      as="form"
+      maxW="md"
+      onSubmit={(e) => {
+        e.preventDefault()
+        if (!trimmed || trimmed === user.name) return
+        save.mutate()
+      }}
+    >
+      <Field.Label fontSize="xs" color="fg.muted">
+        Name
+      </Field.Label>
+      <HStack gap={2} w="full">
+        <Input
+          size="sm"
+          flex="1"
+          minW={0}
+          autoComplete="name"
+          value={name}
+          onChange={(e) => setName(e.target.value)}
+        />
+        <Button
+          type="submit"
+          size="sm"
+          colorPalette="blue"
+          loading={save.isPending}
+          disabled={!trimmed || trimmed === user.name}
+        >
+          Save
+        </Button>
+      </HStack>
+    </Field.Root>
+  )
+}
 
 // ChangePasswordModal: self-service reset gated on the current password. The
 // server wipes every session on success, so the client bounces to login.
@@ -149,20 +226,22 @@ export default function ProfilePage() {
             </Button>
           </HStack>
         </Card.Header>
-        <Card.Body pt={3}>
+        <Card.Body pt={3} gap={4}>
+          {data && (
+            <HStack gap={4} minW={0}>
+              <UserAvatar name={data.user.name} avatarUrl={data.user.avatarUrl} size="xl" />
+              <VStack align="start" gap={0} minW={0}>
+                <Text fontWeight="medium" wordBreak="break-word">
+                  {data.user.name}
+                </Text>
+                <Text fontSize="sm" color="fg.muted" wordBreak="break-all">
+                  {data.user.email}
+                </Text>
+              </VStack>
+            </HStack>
+          )}
+          {data && <NameField key={data.user.id} user={data.user} />}
           <HStack gap={6} flexWrap="wrap">
-            <VStack align="start" gap={0}>
-              <Text fontSize="xs" color="fg.muted">
-                Name
-              </Text>
-              <Text>{data?.user.name ?? "—"}</Text>
-            </VStack>
-            <VStack align="start" gap={0}>
-              <Text fontSize="xs" color="fg.muted">
-                Email
-              </Text>
-              <Text>{data?.user.email ?? "—"}</Text>
-            </VStack>
             <VStack align="start" gap={0}>
               <Text fontSize="xs" color="fg.muted">
                 Role

@@ -314,6 +314,13 @@ func (g *gateway) handleGoogleLogin(w http.ResponseWriter, r *http.Request) {
 		apiErr(w, http.StatusForbidden, "This account is disabled")
 		return
 	}
+	// every Google sign-in marks the account Google-linked and refreshes its
+	// name and picture from the Google profile
+	if user, err = g.store.LinkGoogleUser(user.ID, strings.TrimSpace(claims.Name), googleAvatarURL(claims)); err != nil || user == nil {
+		log.Printf("google login: link %s: %v", claims.Email, err)
+		apiErr(w, http.StatusInternalServerError, "login failed")
+		return
+	}
 	g.backoff.reset(key)
 	g.startSession(w, r, user, "google")
 }

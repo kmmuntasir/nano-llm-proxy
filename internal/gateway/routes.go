@@ -33,6 +33,7 @@ func (g *gateway) RegisterRoutes(mux *http.ServeMux, webFS fs.FS) {
 	mux.HandleFunc("POST /api/auth/google", g.handleGoogleLogin)
 	mux.HandleFunc("POST /api/auth/logout", g.requireSession(g.handleLogout))
 	mux.HandleFunc("GET /api/auth/me", g.requireSession(g.handleMe))
+	mux.HandleFunc("PATCH /api/me", g.requireSession(g.handleUpdateMe))
 	mux.HandleFunc("POST /api/me/password", g.requireSession(g.handleChangeMyPassword))
 
 	mux.HandleFunc("GET /api/me/keys", g.requireSession(g.handleListMyKeys))

@@ -1,9 +1,12 @@
 package gateway
 
 import (
+	"fmt"
 	"github.com/kmmuntasir/nano-llm-proxy/internal/store"
+	"log"
 	"net/http"
 	"strings"
+	"unicode/utf8"
 
 	"golang.org/x/crypto/bcrypt"
 )
@@ -12,17 +15,21 @@ import (
 // password hashes or key material.
 
 type userJSON struct {
-	ID        int64  `json:"id"`
-	Name      string `json:"name"`
-	Email     string `json:"email"`
-	Role      string `json:"role"`
-	Disabled  bool   `json:"disabled"`
-	CreatedAt int64  `json:"createdAt"`
-	KeyCount  int64  `json:"keyCount"`
+	ID       int64  `json:"id"`
+	Name     string `json:"name"`
+	Email    string `json:"email"`
+	Role     string `json:"role"`
+	Disabled bool   `json:"disabled"`
+	// GoogleLinked: the user has signed in with Google, so the name is
+	// Google-owned (rewritten on every Google sign-in) and not editable.
+	GoogleLinked bool   `json:"googleLinked"`
+	AvatarURL    string `json:"avatarUrl,omitempty"` // Google profile picture
+	CreatedAt    int64  `json:"createdAt"`
+	KeyCount     int64  `json:"keyCount"`
 }
 
 func userView(u *store.User) userJSON {
-	return userJSON{ID: u.ID, Name: u.Name, Email: u.Email, Role: u.Role, Disabled: u.Disabled, CreatedAt: u.CreatedAt}
+	return userJSON{ID: u.ID, Name: u.Name, Email: u.Email, Role: u.Role, Disabled: u.Disabled, GoogleLinked: u.GoogleLinked, AvatarURL: u.AvatarURL, CreatedAt: u.CreatedAt}
 }
 
 func (g *gateway) handleListUsers(w http.ResponseWriter, r *http.Request) {
@@ -133,6 +140,10 @@ func (g *gateway) handlePatchUser(w http.ResponseWriter, r *http.Request) {
 	var name, email *string
 	if req.Name != nil {
 		n := strings.TrimSpace(*req.Name)
+		if target.GoogleLinked && n != target.Name {
+			apiErr(w, http.StatusBadRequest, "This user's name comes from their Google account")
+			return
+		}
 		name = &n
 	}
 	if req.Email != nil {
@@ -202,4 +213,47 @@ func (g *gateway) handleDeleteUser(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	writeJSON(w, http.StatusOK, map[string]any{"ok": true})
+}
+
+// maxUserNameLen bounds self-service display names.
+const maxUserNameLen = 100
+
+// handleUpdateMe serves PATCH /api/me: a signed-in user renames themself.
+// Google-linked accounts can't — their name is taken from Google on every
+// Google sign-in, so an edit would silently revert.
+func (g *gateway) handleUpdateMe(w http.ResponseWriter, r *http.Request) {
+	me := contextUser(r)
+	var req struct {
+		Name *string `json:"name"`
+	}
+	if !readJSON(w, r, &req) {
+		return
+	}
+	if req.Name == nil {
+		apiErr(w, http.StatusBadRequest, "Name is required")
+		return
+	}
+	name := strings.TrimSpace(*req.Name)
+	switch {
+	case name == "":
+		apiErr(w, http.StatusBadRequest, "Name is required")
+		return
+	case utf8.RuneCountInString(name) > maxUserNameLen:
+		apiErr(w, http.StatusBadRequest, fmt.Sprintf("Name must be at most %d characters", maxUserNameLen))
+		return
+	case me.GoogleLinked:
+		apiErr(w, http.StatusForbidden, "Your name comes from your Google account")
+		return
+	}
+	if err := g.store.UpdateUser(me.ID, &name, nil, nil, nil, nil); err != nil {
+		apiErr(w, http.StatusInternalServerError, err.Error())
+		return
+	}
+	u, err := g.store.User(me.ID)
+	if err != nil || u == nil {
+		apiErr(w, http.StatusInternalServerError, "reload user failed")
+		return
+	}
+	log.Printf("user=%s action=profile.rename", u.Email)
+	writeJSON(w, http.StatusOK, map[string]any{"user": userView(u)})
 }

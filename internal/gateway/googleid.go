@@ -12,6 +12,7 @@ import (
 	"io"
 	"math/big"
 	"net/http"
+	"net/url"
 	"regexp"
 	"strconv"
 	"strings"
@@ -44,6 +45,7 @@ type googleClaims struct {
 	EmailVerified any    `json:"email_verified"` // bool, or "true" in older tokens
 	HD            string `json:"hd"`             // Workspace domain, absent for consumer accounts
 	Name          string `json:"name"`
+	Picture       string `json:"picture"`
 	Exp           int64  `json:"exp"`
 	Iat           int64  `json:"iat"`
 }
@@ -206,6 +208,20 @@ func decodeJWTPart(seg string, dst any) error {
 		return err
 	}
 	return json.Unmarshal(raw, dst)
+}
+
+// googleAvatarURL returns the token's profile picture when it is an https
+// URL on Google's avatar host, else "". The token is Google-signed, but the
+// GUI renders this URL in an <img>, so only the expected host is kept.
+func googleAvatarURL(c *googleClaims) string {
+	u, err := url.Parse(c.Picture)
+	if err != nil || u.Scheme != "https" || u.User != nil || len(c.Picture) > 2048 {
+		return ""
+	}
+	if h := strings.ToLower(u.Hostname()); h != "googleusercontent.com" && !strings.HasSuffix(h, ".googleusercontent.com") {
+		return ""
+	}
+	return c.Picture
 }
 
 // googleDomainAllowed reports whether the token's account belongs to the

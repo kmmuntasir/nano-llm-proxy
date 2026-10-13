@@ -32,6 +32,7 @@ import { useColorMode } from "./ui/color-mode"
 import { useTheme } from "next-themes"
 import { post } from "../api/client"
 import { toaster } from "./ui/toaster"
+import UserAvatar from "./UserAvatar"
 import { useSession } from "../App"
 import logoUrl from "../assets/logo.png"
 
@@ -173,11 +174,22 @@ function SidebarFooter() {
     onError: () => toaster.create({ title: "Logout failed", type: "error" }),
   })
 
+  // Stacked, so the drawer footer (a flex row) lays out like the desktop rail.
   return (
-    <>
-      <Text fontSize="xs" color="fg.muted" px={2} mb={2} truncate>
-        {data?.user.email}
-      </Text>
+    <VStack align="stretch" gap={0} w="full" minW={0}>
+      {data && (
+        <HStack gap={2} px={2} mb={2} minW={0}>
+          <UserAvatar name={data.user.name} avatarUrl={data.user.avatarUrl} size="xs" />
+          <VStack align="start" gap={0} minW={0}>
+            <Text fontSize="sm" fontWeight="medium" truncate maxW="full">
+              {data.user.name}
+            </Text>
+            <Text fontSize="xs" color="fg.muted" truncate maxW="full">
+              {data.user.email}
+            </Text>
+          </VStack>
+        </HStack>
+      )}
       <HStack px={1}>
         <ColorModeMenu />
         <IconButton
@@ -190,7 +202,7 @@ function SidebarFooter() {
           <LogOut />
         </IconButton>
       </HStack>
-    </>
+    </VStack>
   )
 }
 

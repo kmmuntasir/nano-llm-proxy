@@ -45,6 +45,8 @@ type User struct {
 	PasswordHash string
 	Role         string // "superadmin" | "user"
 	Disabled     bool
+	GoogleLinked bool   // has signed in with Google at least once; name is Google-owned
+	AvatarURL    string // Google profile picture; "" for password-only users
 	CreatedAt    int64
 	UpdatedAt    int64
 }
@@ -171,6 +173,11 @@ func (s *Store) Migrate() error {
 	}
 	if !version.Valid || version.Int64 < 7 {
 		if err := s.migrateV7(); err != nil {
+			return err
+		}
+	}
+	if !version.Valid || version.Int64 < 8 {
+		if err := s.migrateV8(); err != nil {
 			return err
 		}
 	}
@@ -392,6 +399,30 @@ func (s *Store) migrateV7() error {
 		return fmt.Errorf("migrate v7: %w", err)
 	}
 	if _, err := tx.Exec(`INSERT INTO schema_migrations (version, applied_at) VALUES (7, ?)`, time.Now().Unix()); err != nil {
+		return err
+	}
+	return tx.Commit()
+}
+
+// migrateV8 marks users who have signed in with Google and keeps their
+// Google profile picture. Their name comes from the Google profile
+// (rewritten on every Google sign-in), so it is not user-editable; existing
+// rows start unlinked with no picture.
+func (s *Store) migrateV8() error {
+	tx, err := s.db.Begin()
+	if err != nil {
+		return err
+	}
+	defer tx.Rollback()
+	for _, stmt := range []string{
+		`ALTER TABLE users ADD COLUMN google_linked INTEGER NOT NULL DEFAULT 0`,
+		`ALTER TABLE users ADD COLUMN avatar_url TEXT NOT NULL DEFAULT ''`,
+	} {
+		if _, err := tx.Exec(stmt); err != nil {
+			return fmt.Errorf("migrate v8: %w", err)
+		}
+	}
+	if _, err := tx.Exec(`INSERT INTO schema_migrations (version, applied_at) VALUES (8, ?)`, time.Now().Unix()); err != nil {
 		return err
 	}
 	return tx.Commit()
@@ -703,15 +734,16 @@ func (s *Store) InsertUser(u *User) error {
 	return nil
 }
 
-const userCols = `id, name, email, password_hash, role, disabled, created_at, updated_at`
+const userCols = `id, name, email, password_hash, role, disabled, google_linked, avatar_url, created_at, updated_at`
 
 func scanUser(row interface{ Scan(...any) error }) (*User, error) {
 	u := &User{}
-	var disabled int
-	if err := row.Scan(&u.ID, &u.Name, &u.Email, &u.PasswordHash, &u.Role, &disabled, &u.CreatedAt, &u.UpdatedAt); err != nil {
+	var disabled, linked int
+	if err := row.Scan(&u.ID, &u.Name, &u.Email, &u.PasswordHash, &u.Role, &disabled, &linked, &u.AvatarURL, &u.CreatedAt, &u.UpdatedAt); err != nil {
 		return nil, err
 	}
 	u.Disabled = disabled != 0
+	u.GoogleLinked = linked != 0
 	return u, nil
 }
 
@@ -746,14 +778,28 @@ func (s *Store) ListUsers() ([]UserWithKeyCount, error) {
 	var out []UserWithKeyCount
 	for rows.Next() {
 		u := &User{}
-		var disabled, kc int64
-		if err := rows.Scan(&u.ID, &u.Name, &u.Email, &u.PasswordHash, &u.Role, &disabled, &u.CreatedAt, &u.UpdatedAt, &kc); err != nil {
+		var disabled, linked, kc int64
+		if err := rows.Scan(&u.ID, &u.Name, &u.Email, &u.PasswordHash, &u.Role, &disabled, &linked, &u.AvatarURL, &u.CreatedAt, &u.UpdatedAt, &kc); err != nil {
 			return nil, err
 		}
 		u.Disabled = disabled != 0
+		u.GoogleLinked = linked != 0
 		out = append(out, UserWithKeyCount{User: *u, KeyCount: kc})
 	}
 	return out, rows.Err()
+}
+
+// LinkGoogleUser records a Google sign-in: marks the user Google-linked,
+// takes the name from the Google profile (left unchanged when Google sent
+// none) and stores the current profile picture ("" clears it — the user
+// removed their photo). Returns the updated row.
+func (s *Store) LinkGoogleUser(id int64, name, avatarURL string) (*User, error) {
+	_, err := s.db.Exec(`UPDATE users SET google_linked=1, avatar_url=?,
+		name=CASE WHEN ?<>'' THEN ? ELSE name END, updated_at=? WHERE id=?`, avatarURL, name, name, time.Now().Unix(), id)
+	if err != nil {
+		return nil, err
+	}
+	return s.User(id)
 }
 
 // UpdateUser patches only the non-nil fields; passwordHash should arrive
