@@ -31,69 +31,12 @@ func (g *gateway) handleListMyKeys(w http.ResponseWriter, r *http.Request) {
 	g.listKeysFor(w, contextUser(r).ID)
 }
 
+// handleCreateMyKey creates a client key for the signed-in user. It is the
+// only way a client key comes into existence: nobody — not even a
+// superadmin — can mint a key for another user, so every key is held by
+// the person it belongs to.
 func (g *gateway) handleCreateMyKey(w http.ResponseWriter, r *http.Request) {
-	g.createKeyFor(w, r, contextUser(r), contextUser(r).ID)
-}
-
-func (g *gateway) handlePatchMyKey(w http.ResponseWriter, r *http.Request) {
-	g.patchKeyFor(w, r, contextUser(r).ID)
-}
-
-func (g *gateway) handleDeleteMyKey(w http.ResponseWriter, r *http.Request) {
-	g.deleteKeyFor(w, r, contextUser(r).ID)
-}
-
-// --- admin variants (target = path user id; mutations go through
-// managedUserID, so admins can't touch a superadmin's keys) ---
-
-func (g *gateway) handleListUserKeys(w http.ResponseWriter, r *http.Request) {
-	id, ok := pathID(w, r, "id")
-	if !ok {
-		return
-	}
-	g.listKeysFor(w, id)
-}
-
-func (g *gateway) handleCreateUserKey(w http.ResponseWriter, r *http.Request) {
-	id, ok := g.managedUserID(w, r)
-	if !ok {
-		return
-	}
-	g.createKeyFor(w, r, contextUser(r), id)
-}
-
-func (g *gateway) handlePatchUserKey(w http.ResponseWriter, r *http.Request) {
-	id, ok := g.managedUserID(w, r)
-	if !ok {
-		return
-	}
-	g.patchKeyFor(w, r, id)
-}
-
-func (g *gateway) handleDeleteUserKey(w http.ResponseWriter, r *http.Request) {
-	id, ok := g.managedUserID(w, r)
-	if !ok {
-		return
-	}
-	g.deleteKeyFor(w, r, id)
-}
-
-// --- shared internals ---
-
-func (g *gateway) listKeysFor(w http.ResponseWriter, userID int64) {
-	keys, err := g.store.ListClientKeys(userID)
-	if err != nil {
-		apiErr(w, http.StatusInternalServerError, err.Error())
-		return
-	}
-	out := make([]clientKeyJSON, 0, len(keys))
-	for _, k := range keys {
-		out = append(out, clientKeyView(k))
-	}
-	writeJSON(w, http.StatusOK, map[string]any{"keys": out})
-}
-
-func (g *gateway) createKeyFor(w http.ResponseWriter, r *http.Request, actor *store.User, targetUserID int64) {
+	me := contextUser(r)
 	var req struct {
 		Alias string `json:"alias"`
 	}
@@ -109,14 +52,51 @@ func (g *gateway) createKeyFor(w http.ResponseWriter, r *http.Request, actor *st
 		ck        store.ClientKey
 		err       error
 	)
-	if !g.applyMutation(w, actor, "key.create", "", func() error {
-		plaintext, ck, err = g.store.CreateClientKey(targetUserID, req.Alias)
+	if !g.applyMutation(w, me, "key.create", "", func() error {
+		plaintext, ck, err = g.store.CreateClientKey(me.ID, req.Alias)
 		return err
 	}) {
 		return
 	}
 	// the plaintext appears exactly once, in this response
 	writeJSON(w, http.StatusCreated, map[string]any{"key": plaintext, "entry": clientKeyView(ck)})
+}
+
+func (g *gateway) handlePatchMyKey(w http.ResponseWriter, r *http.Request) {
+	g.patchKeyFor(w, r, contextUser(r).ID)
+}
+
+func (g *gateway) handleDeleteMyKey(w http.ResponseWriter, r *http.Request) {
+	g.deleteKeyFor(w, r, contextUser(r).ID)
+}
+
+// --- admin view (target = path user id) ---
+
+// handleListUserKeys lets an admin see another user's keys. It is the only
+// admin key endpoint: keys are created, toggled and deleted by their owner
+// alone; deactivating the account is the admin's way to cut a user's API
+// access (it turns every one of their keys off).
+func (g *gateway) handleListUserKeys(w http.ResponseWriter, r *http.Request) {
+	id, ok := pathID(w, r, "id")
+	if !ok {
+		return
+	}
+	g.listKeysFor(w, id)
+}
+
+// --- shared internals ---
+
+func (g *gateway) listKeysFor(w http.ResponseWriter, userID int64) {
+	keys, err := g.store.ListClientKeys(userID)
+	if err != nil {
+		apiErr(w, http.StatusInternalServerError, err.Error())
+		return
+	}
+	out := make([]clientKeyJSON, 0, len(keys))
+	for _, k := range keys {
+		out = append(out, clientKeyView(k))
+	}
+	writeJSON(w, http.StatusOK, map[string]any{"keys": out})
 }
 
 func (g *gateway) patchKeyFor(w http.ResponseWriter, r *http.Request, ownerID int64) {

@@ -24,7 +24,8 @@ import type { Role } from "../api/roles"
 import { useCredentialLogin } from "../api/useAuthConfig"
 import type { ClientKeyView, UserProviderView, UserView } from "../api/types"
 import ConfirmDialog from "../components/ConfirmDialog"
-import KeyRevealDialog from "../components/KeyRevealDialog"
+import { DataTable } from "../components/DataTable"
+import type { Column } from "../components/DataTable"
 import RoleBadge from "../components/RoleBadge"
 import UserAvatar from "../components/UserAvatar"
 import { PasswordInput } from "../components/ui/password-input"
@@ -199,58 +200,42 @@ function AddUserModal({
   )
 }
 
-// UserKeysModal manages one user's client keys; readOnly when the actor
-// can't change the account (an admin viewing a superadmin's keys).
+// UserKeysModal lists one user's client keys, read-only. Keys are created,
+// toggled and deleted only by their owner (My keys); an admin's lever over
+// another user's API access is deactivating the account.
 function UserKeysModal({
   userID,
-  readOnly,
   open,
   onOpenChange,
 }: {
   userID: number
-  readOnly: boolean
   open: boolean
   onOpenChange: (o: boolean) => void
 }) {
-  const qc = useQueryClient()
-  const [revealed, setRevealed] = useState<string | null>(null)
-  const { data } = useQuery({
+  const { data, isLoading } = useQuery({
     queryKey: ["userKeys", userID],
     queryFn: () => api<{ keys: ClientKeyView[] }>(`/api/users/${userID}/keys`),
     enabled: open,
   })
 
-  const create = useMutation({
-    mutationFn: () => post<{ key: string }>(`/api/users/${userID}/keys`, { alias: "gui" }),
-    onSuccess: async (res) => {
-      setRevealed(res.key)
-      await qc.invalidateQueries({ queryKey: ["userKeys", userID] })
-      await qc.invalidateQueries({ queryKey: ["users"] })
-      toaster.create({ title: "Key created", type: "success" })
+  const columns: Column<ClientKeyView>[] = [
+    { header: "Key", render: (k) => <Code fontFamily="mono">{k.keyHint}…</Code> },
+    { header: "Alias", render: (k) => <Text wordBreak="break-word">{k.alias || "—"}</Text> },
+    { header: "Requests", render: (k) => <Text>{k.requestCount.toLocaleString()}</Text> },
+    {
+      header: "Status",
+      render: (k) =>
+        k.disabled ? (
+          <Badge variant="subtle" colorPalette="gray">
+            Disabled
+          </Badge>
+        ) : (
+          <Badge variant="subtle" colorPalette="green">
+            Active
+          </Badge>
+        ),
     },
-    onError: (e) =>
-      toaster.create({ title: e instanceof ApiError ? e.message : "create failed", type: "error" }),
-  })
-  const remove = useMutation({
-    mutationFn: (id: number) => del(`/api/users/${userID}/keys/${id}`),
-    onSuccess: async () => {
-      await qc.invalidateQueries({ queryKey: ["userKeys", userID] })
-      await qc.invalidateQueries({ queryKey: ["users"] })
-      toaster.create({ title: "Key deleted", type: "success" })
-    },
-    onError: (e) =>
-      toaster.create({ title: e instanceof ApiError ? e.message : "delete failed", type: "error" }),
-  })
-  const toggle = useMutation({
-    mutationFn: ({ id, disabled }: { id: number; disabled: boolean }) =>
-      patch(`/api/users/${userID}/keys/${id}`, { disabled }),
-    onSuccess: async () => {
-      await qc.invalidateQueries({ queryKey: ["userKeys", userID] })
-      toaster.create({ title: "Key updated", type: "success" })
-    },
-    onError: (e) =>
-      toaster.create({ title: e instanceof ApiError ? e.message : "update failed", type: "error" }),
-  })
+  ]
 
   return (
     <Dialog.Root open={open} onOpenChange={(e) => onOpenChange(e.open)} size="lg">
@@ -261,53 +246,24 @@ function UserKeysModal({
             <Dialog.Title>Client keys</Dialog.Title>
           </Dialog.Header>
           <Dialog.Body>
-            {readOnly ? (
-              <Text fontSize="xs" color="fg.muted" mb={3}>
-                View only — admins can't change a superadmin's keys.
+            {isLoading ? (
+              <Text fontSize="sm" color="fg.muted">
+                Loading…
               </Text>
             ) : (
-              <Button size="xs" colorPalette="blue" mb={3} onClick={() => create.mutate()}>
-                <Plus /> New key
-              </Button>
+              <DataTable
+                columns={columns}
+                rows={data?.keys ?? []}
+                rowKey={(k) => String(k.id)}
+                empty="No keys for this user yet."
+              />
             )}
-            <VStack align="stretch" gap={1}>
-              {(data?.keys ?? []).map((k) => (
-                <HStack key={k.id} gap={3} fontSize="sm">
-                  <Code fontFamily="mono">{k.keyHint}…</Code>
-                  <Text>{k.alias || "—"}</Text>
-                  <Text color="fg.muted">{k.requestCount} reqs</Text>
-                  <Switch.Root
-                    size="sm"
-                    checked={!k.disabled}
-                    disabled={readOnly}
-                    onCheckedChange={(e) => toggle.mutate({ id: k.id, disabled: !e.checked })}
-                  >
-                    <Switch.HiddenInput />
-                    <Switch.Control>
-                      <Switch.Thumb />
-                    </Switch.Control>
-                  </Switch.Root>
-                  {!readOnly && (
-                    <IconButton
-                      variant="ghost"
-                      size="xs"
-                      aria-label="delete key"
-                      colorPalette="red"
-                      onClick={() => remove.mutate(k.id)}
-                    >
-                      <Trash2 />
-                    </IconButton>
-                  )}
-                </HStack>
-              ))}
-              {(data?.keys ?? []).length === 0 && (
-                <Text fontSize="sm" color="fg.muted">
-                  No keys for this user yet.
-                </Text>
-              )}
-            </VStack>
-            <KeyRevealDialog plaintext={revealed} onClose={() => setRevealed(null)} />
           </Dialog.Body>
+          <Dialog.Footer>
+            <Dialog.ActionTrigger asChild>
+              <Button variant="outline">Close</Button>
+            </Dialog.ActionTrigger>
+          </Dialog.Footer>
           <Dialog.CloseTrigger />
         </Dialog.Content>
       </Dialog.Positioner>
@@ -728,12 +684,7 @@ function UserCard({ u, actor, isSelf }: { u: UserView; actor: Actor; isSelf: boo
           </IconButton>
         )}
       </Card.Footer>
-      <UserKeysModal
-        userID={u.id}
-        readOnly={!canManage}
-        open={managingKeys}
-        onOpenChange={setManagingKeys}
-      />
+      <UserKeysModal userID={u.id} open={managingKeys} onOpenChange={setManagingKeys} />
       <EditUserDialog user={u} actor={actor} open={editing} onOpenChange={setEditing} />
       <UserProviderAccessModal user={u} open={managingAccess} onOpenChange={setManagingAccess} />
       <ConfirmDialog

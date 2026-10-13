@@ -69,8 +69,6 @@ func TestRoleRules(t *testing.T) {
 	expect("admin renames super", patchU(admin, s2.ID, `{"name":"x"}`), http.StatusForbidden)
 	expect("admin demotes super", patchU(admin, s2.ID, `{"role":"user"}`), http.StatusForbidden)
 	expect("admin resets super password", patchU(admin, s2.ID, `{"password":"new-password-123"}`), http.StatusForbidden)
-	expect("admin creates key for super", call(admin, "POST", "/api/users/x/keys", s2.ID, `{"alias":"x"}`, g.handleCreateUserKey), http.StatusForbidden)
-	expect("admin deletes super key", call(admin, "DELETE", "/api/users/x/keys/x", s2.ID, "", g.handleDeleteUserKey), http.StatusForbidden)
 	expect("admin lists super keys", call(admin, "GET", "/api/users/x/keys", s2.ID, "", g.handleListUserKeys), 200)
 
 	// ...and can't hand out the superadmin role
@@ -90,4 +88,52 @@ func TestRoleRules(t *testing.T) {
 
 	// a superadmin can delete another superadmin
 	expect("super deletes super", deleteU(super, s2.ID), 200)
+}
+
+// TestOnlyOwnersManageKeys: no route lets anyone — even a superadmin —
+// create, toggle or delete another user's client keys (only viewing them);
+// a user still manages their own.
+func TestOnlyOwnersManageKeys(t *testing.T) {
+	g, st := testStoreGateway(t, "http://127.0.0.1:1")
+	worker := insertPlainUser(t, st, "worker@example.com", "worker-pass-1234", "user")
+	if _, _, err := st.CreateClientKey(worker.ID, "laptop"); err != nil {
+		t.Fatal(err)
+	}
+	keys, _ := st.ListClientKeys(worker.ID)
+	mux := http.NewServeMux()
+	g.RegisterRoutes(mux, nil)
+	send := func(cookie *http.Cookie, method, path, body string) int {
+		req := httptest.NewRequest(method, path, strings.NewReader(body))
+		req.AddCookie(cookie)
+		req.Header.Set("Origin", "https://gateway.example.com")
+		rec := httptest.NewRecorder()
+		mux.ServeHTTP(rec, req)
+		return rec.Code
+	}
+	super := loginAs(t, g, "admin@example.com", "super-secret-pass")
+	base := fmt.Sprintf("/api/users/%d/keys", worker.ID)
+	one := fmt.Sprintf("%s/%d", base, keys[0].ID)
+	if code := send(super, "GET", base, ""); code != 200 {
+		t.Fatalf("superadmin listing a user's keys: got %d", code)
+	}
+	for _, c := range []struct{ method, path, body string }{
+		{"POST", base, `{"alias":"x"}`},
+		{"PATCH", one, `{"disabled":true}`},
+		{"DELETE", one, ""},
+	} {
+		if code := send(super, c.method, c.path, c.body); code != http.StatusMethodNotAllowed && code != http.StatusNotFound {
+			t.Fatalf("superadmin %s %s: got %d, want 404/405", c.method, c.path, code)
+		}
+	}
+	after, _ := st.ListClientKeys(worker.ID)
+	if len(after) != 1 || after[0].Disabled {
+		t.Fatalf("another user's keys were changed: %+v", after)
+	}
+	own := loginAs(t, g, "worker@example.com", "worker-pass-1234")
+	if code := send(own, "POST", "/api/me/keys", `{"alias":"x"}`); code != http.StatusCreated {
+		t.Fatalf("user creating their own key: got %d", code)
+	}
+	if code := send(own, "PATCH", fmt.Sprintf("/api/me/keys/%d", keys[0].ID), `{"disabled":true}`); code != 200 {
+		t.Fatalf("user toggling their own key: got %d", code)
+	}
 }

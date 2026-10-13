@@ -46,9 +46,6 @@ func (g *gateway) RegisterRoutes(mux *http.ServeMux, webFS fs.FS) {
 	mux.HandleFunc("PATCH /api/users/{id}", g.requireSession(g.requireAdmin(g.handlePatchUser)))
 	mux.HandleFunc("DELETE /api/users/{id}", g.requireSession(g.requireAdmin(g.handleDeleteUser)))
 	mux.HandleFunc("GET /api/users/{id}/keys", g.requireSession(g.requireAdmin(g.handleListUserKeys)))
-	mux.HandleFunc("POST /api/users/{id}/keys", g.requireSession(g.requireAdmin(g.handleCreateUserKey)))
-	mux.HandleFunc("PATCH /api/users/{id}/keys/{keyId}", g.requireSession(g.requireAdmin(g.handlePatchUserKey)))
-	mux.HandleFunc("DELETE /api/users/{id}/keys/{keyId}", g.requireSession(g.requireAdmin(g.handleDeleteUserKey)))
 	mux.HandleFunc("GET /api/users/{id}/providers", g.requireSession(g.requireAdmin(g.handleListUserProviders)))
 	mux.HandleFunc("PUT /api/users/{id}/providers/{providerId}/access", g.requireSession(g.requireAdmin(g.handleSetUserProviderAccess)))
 
