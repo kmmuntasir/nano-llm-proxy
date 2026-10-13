@@ -191,6 +191,16 @@ type RuntimeSettings struct {
 	Kilo      KiloSettings      `json:"kilo"`
 	Zai       ZaiSettings       `json:"zai"`
 	WebTools  WebToolsSettings  `json:"webTools"`
+	Auth      AuthSettings      `json:"auth"`
+}
+
+// AuthSettings controls GUI sign-in methods. Google sign-in is on whenever
+// the operator configured it (GOOGLE_CLIENT_ID, a bootstrap value); only
+// password sign-in is switchable here. The gateway treats CredentialLogin as
+// true whenever Google isn't configured, so a stored false can never lock
+// everyone out.
+type AuthSettings struct {
+	CredentialLogin bool `json:"credentialLogin"`
 }
 
 // DefaultRuntimeSettings is the seed for a fresh database and the fallback
@@ -198,6 +208,7 @@ type RuntimeSettings struct {
 func DefaultRuntimeSettings() *RuntimeSettings {
 	return &RuntimeSettings{
 		Rotation: RotationPriorityDaily,
+		Auth:     AuthSettings{CredentialLogin: true},
 		Retry: RetryConfig{
 			MaxKeysPerRequest: 3,
 			CooldownSeconds:   30,

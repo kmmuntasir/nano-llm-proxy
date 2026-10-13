@@ -62,6 +62,7 @@ type gateway struct {
 
 	client   *http.Client
 	webtools *webtools.Service // /mcp tool backends (SearXNG + native/obscura reader)
+	google   *googleVerifier   // Google sign-in ID-token verifier; nil when not configured
 
 	mcpOnce    sync.Once    // builds mcpHandler exactly once
 	mcpHandler http.Handler // SDK streamable-HTTP handler behind /mcp
@@ -99,6 +100,9 @@ func newGateway(cfg *config.Config, rs *settings.RuntimeSettings, kf *config.Key
 	g.cfgPtr.Store(cfg)
 	g.rsPtr.Store(rs)
 	g.initHTTPClient()
+	if cfg.GoogleEnabled() {
+		g.google = newGoogleVerifier(cfg.GoogleClientID, g.client)
+	}
 	g.webtools = webtools.NewService(func() settings.WebToolsSettings { return g.rs().WebTools })
 	return g
 }

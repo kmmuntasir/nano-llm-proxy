@@ -16,6 +16,8 @@ import {
 import { RefreshCw } from "lucide-react"
 import { api, post, put, ApiError } from "../api/client"
 import type {
+  AuthConfigView,
+  AuthSettingsView,
   BenchmarksStatusView,
   CatalogModelsView,
   ModelMetaSyncStatusView,
@@ -70,6 +72,7 @@ function cleanModelId(id: string): string {
 }
 
 interface SettingsForm {
+  auth: AuthSettingsView
   rotation: RuntimeSettingsView["rotation"]
   retry: RuntimeSettingsView["retry"]
   fallbackModel: string
@@ -89,6 +92,7 @@ interface SettingsForm {
 
 function hydrate(s: RuntimeSettingsView): SettingsForm {
   return {
+    auth: { ...s.auth },
     rotation: s.rotation,
     retry: { ...s.retry },
     fallbackModel: s.anthropic.fallbackModel ?? "",
@@ -106,12 +110,18 @@ function hydrate(s: RuntimeSettingsView): SettingsForm {
   }
 }
 
+// googleConfigured is undefined while /api/auth/config is unknown — the form
+// value is sent as-is and the server validates it.
 function buildPayload(
   f: SettingsForm,
+  googleConfigured: boolean | undefined,
 ): { ok: true; value: RuntimeSettingsView } | { ok: false; error: string } {
   return {
     ok: true,
     value: {
+      // Without Google, password sign-in is effectively always on; a stale
+      // stored false would otherwise make the server reject every save.
+      auth: { credentialLogin: googleConfigured === false ? true : f.auth.credentialLogin },
       rotation: f.rotation,
       retry: { ...f.retry },
       anthropic: { fallbackModel: f.fallbackModel.trim() },
@@ -127,6 +137,61 @@ function buildPayload(
       webTools: f.webTools,
     },
   }
+}
+
+// SignInCard toggles email + password sign-in. Google sign-in is configured
+// by the operator (GOOGLE_CLIENT_ID) and can't be switched off here.
+function SignInCard({
+  value,
+  onChange,
+  config,
+}: {
+  value: AuthSettingsView
+  onChange: (patch: Partial<AuthSettingsView>) => void
+  config?: AuthConfigView
+}) {
+  const google = config?.google
+  const locked = config !== undefined && !google
+  const checked = locked || value.credentialLogin
+
+  return (
+    <Card.Root>
+      <Card.Header>
+        <Heading size="sm">Sign-in</Heading>
+      </Card.Header>
+      <Card.Body>
+        <Field.Root disabled={locked}>
+          <Switch.Root
+            checked={checked}
+            disabled={locked}
+            onCheckedChange={(e) => onChange({ credentialLogin: e.checked })}
+          >
+            <Switch.HiddenInput />
+            <Switch.Control>
+              <Switch.Thumb />
+            </Switch.Control>
+            <Switch.Label>Password sign-in</Switch.Label>
+          </Switch.Root>
+          {locked && (
+            <Field.HelperText>
+              Google sign-in isn't configured on this server (
+              <Code fontFamily="mono">GOOGLE_CLIENT_ID</Code>) — password sign-in can't be
+              turned off.
+            </Field.HelperText>
+          )}
+          {google && (
+            <Field.HelperText>
+              Google sign-in is always on. Turning this off disables email + password sign-in
+              for everyone.{" "}
+              {google.domain
+                ? `New ${google.domain} accounts are created on first Google sign-in as regular users.`
+                : "Only existing users can sign in with Google."}
+            </Field.HelperText>
+          )}
+        </Field.Root>
+      </Card.Body>
+    </Card.Root>
+  )
 }
 
 function SyncCard({ status }: { status?: ModelMetaSyncStatusView }) {
@@ -369,6 +434,11 @@ export default function SettingsPage() {
     queryFn: () => api<CatalogModelsView>("/api/models"),
     staleTime: 5 * 60_000,
   })
+  const authConfig = useQuery({
+    queryKey: ["auth-config"],
+    queryFn: () => api<AuthConfigView>("/api/auth/config"),
+  })
+  const googleConfigured = authConfig.data ? authConfig.data.google !== undefined : undefined
   const [form, setForm] = useState<SettingsForm | null>(null)
   const [saveError, setSaveError] = useState("")
 
@@ -378,13 +448,16 @@ export default function SettingsPage() {
 
   const save = useMutation({
     mutationFn: (f: SettingsForm) => {
-      const payload = buildPayload(f)
+      const payload = buildPayload(f, googleConfigured)
       if (!payload.ok) throw new ApiError(400, payload.error)
       return put<{ ok: boolean }>("/api/settings", payload.value)
     },
     onSuccess: async () => {
       setSaveError("")
-      await qc.invalidateQueries({ queryKey: ["settings"] })
+      await Promise.all([
+        qc.invalidateQueries({ queryKey: ["settings"] }),
+        qc.invalidateQueries({ queryKey: ["auth-config"] }),
+      ])
       toaster.create({ title: "Settings saved — live immediately", type: "success" })
     },
     onError: (e) => {
@@ -415,6 +488,12 @@ export default function SettingsPage() {
       {isLoading && <Text>Loading…</Text>}
 
       <SyncCard status={data?.settings.zen.modelMetaSyncStatus} />
+
+      <SignInCard
+        value={form.auth}
+        onChange={(patch) => set({ auth: { ...form.auth, ...patch } })}
+        config={authConfig.data}
+      />
 
       {/* routing */}
       <Card.Root>

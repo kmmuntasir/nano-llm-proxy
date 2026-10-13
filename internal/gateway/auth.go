@@ -3,6 +3,7 @@ package gateway
 import (
 	"context"
 	"crypto/subtle"
+	"errors"
 	"github.com/kmmuntasir/nano-llm-proxy/internal/store"
 	"log"
 	"net"
@@ -175,6 +176,10 @@ func (g *gateway) handleLogin(w http.ResponseWriter, r *http.Request) {
 	if !readJSON(w, r, &req) {
 		return
 	}
+	if !g.credentialLoginEnabled() {
+		apiErr(w, http.StatusForbidden, "Password sign-in is disabled — sign in with Google")
+		return
+	}
 	key := backoffKey(r, req.Email)
 	if !g.backoff.allow(key) {
 		writeJSON(w, http.StatusTooManyRequests, map[string]any{"error": map[string]string{"message": "too many failed attempts — try again later"}})
@@ -192,6 +197,13 @@ func (g *gateway) handleLogin(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	g.backoff.reset(key)
+	g.startSession(w, r, user, "password")
+}
+
+// startSession creates a session for an authenticated user, sets the
+// cookie, and answers with the user — shared by every sign-in method so
+// they all produce the identical session.
+func (g *gateway) startSession(w http.ResponseWriter, r *http.Request, user *store.User, method string) {
 	raw, exp, err := g.store.CreateSession(user.ID, sessionTTL)
 	if err != nil {
 		writeJSON(w, http.StatusInternalServerError, map[string]any{"error": map[string]string{"message": "session create failed"}})
@@ -206,8 +218,123 @@ func (g *gateway) handleLogin(w http.ResponseWriter, r *http.Request) {
 		SameSite: http.SameSiteLaxMode,
 		Secure:   g.conf().SecureCookies(),
 	})
-	log.Printf("gui login user=%s ip=%s", user.Email, r.RemoteAddr)
+	log.Printf("gui login user=%s method=%s ip=%s", user.Email, method, r.RemoteAddr)
 	writeJSON(w, http.StatusOK, map[string]any{"user": userView(user)})
+}
+
+// credentialLoginEnabled is the effective password sign-in switch: the
+// runtime setting, forced on whenever Google sign-in isn't configured so a
+// stored false can never lock every account out.
+func (g *gateway) credentialLoginEnabled() bool {
+	return g.rs().Auth.CredentialLogin || !g.conf().GoogleEnabled()
+}
+
+// handleAuthConfig serves GET /api/auth/config (unauthenticated): which
+// sign-in methods the login page should offer. The client id is public by
+// design — Google Identity Services needs it in the browser.
+func (g *gateway) handleAuthConfig(w http.ResponseWriter, r *http.Request) {
+	out := map[string]any{"credentialLogin": g.credentialLoginEnabled()}
+	if c := g.conf(); c.GoogleEnabled() {
+		google := map[string]string{"clientId": c.GoogleClientID}
+		if c.GoogleWorkspaceDomain != "" {
+			google["domain"] = c.GoogleWorkspaceDomain
+		}
+		out["google"] = google
+	}
+	writeJSON(w, http.StatusOK, out)
+}
+
+// handleGoogleLogin serves POST /api/auth/google: verify the Google ID token,
+// then sign in the account with that email. With a Workspace domain
+// configured, a first sign-in from that domain creates a regular user (the
+// same self-provisioning meal-management uses); without one, only existing
+// accounts can sign in — an open gateway must not let any Google account
+// mint itself access to the upstream keys.
+func (g *gateway) handleGoogleLogin(w http.ResponseWriter, r *http.Request) {
+	if g.google == nil {
+		apiErr(w, http.StatusNotFound, "Google sign-in is not configured")
+		return
+	}
+	if !g.originAllowed(r) {
+		apiErr(w, http.StatusForbidden, "cross-origin request rejected")
+		return
+	}
+	var req struct {
+		Credential string `json:"credential"`
+	}
+	if !readJSON(w, r, &req) {
+		return
+	}
+	if req.Credential == "" {
+		apiErr(w, http.StatusBadRequest, "credential is required")
+		return
+	}
+	key := backoffKey(r, "google")
+	if !g.backoff.allow(key) {
+		apiErr(w, http.StatusTooManyRequests, "too many failed attempts — try again later")
+		return
+	}
+	claims, err := g.google.verify(r.Context(), req.Credential)
+	if err != nil {
+		if !errors.Is(err, errGoogleToken) {
+			log.Printf("google login: %v", err)
+			apiErr(w, http.StatusBadGateway, "Couldn't reach Google to verify the sign-in — try again")
+			return
+		}
+		g.backoff.fail(key)
+		log.Printf("google login rejected ip=%s: %v", r.RemoteAddr, err)
+		apiErr(w, http.StatusUnauthorized, "Google sign-in failed")
+		return
+	}
+	domain := g.conf().GoogleWorkspaceDomain
+	if !googleDomainAllowed(claims, domain) {
+		g.backoff.fail(key)
+		log.Printf("google login rejected email=%s ip=%s: outside domain %s", claims.Email, r.RemoteAddr, domain)
+		apiErr(w, http.StatusForbidden, "This Google account is outside the "+domain+" domain")
+		return
+	}
+	user, err := g.store.UserByEmail(claims.Email)
+	if err != nil {
+		apiErr(w, http.StatusInternalServerError, "login failed")
+		return
+	}
+	if user == nil {
+		if domain == "" {
+			g.backoff.fail(key)
+			apiErr(w, http.StatusForbidden, "No account for this email — ask an admin to add you")
+			return
+		}
+		if user, err = g.provisionGoogleUser(claims); err != nil {
+			log.Printf("google login: provision %s: %v", claims.Email, err)
+			apiErr(w, http.StatusInternalServerError, "login failed")
+			return
+		}
+	}
+	if user.Disabled {
+		apiErr(w, http.StatusForbidden, "This account is disabled")
+		return
+	}
+	g.backoff.reset(key)
+	g.startSession(w, r, user, "google")
+}
+
+// provisionGoogleUser creates a regular user for a first Google sign-in. It
+// has no password (an empty hash never verifies); an admin can set one later.
+// A concurrent first sign-in losing the unique-email race re-reads the row.
+func (g *gateway) provisionGoogleUser(c *googleClaims) (*store.User, error) {
+	name := strings.TrimSpace(c.Name)
+	if name == "" {
+		name = c.Email[:strings.IndexByte(c.Email, '@')]
+	}
+	u := &store.User{Name: name, Email: c.Email, Role: "user"}
+	if err := g.store.InsertUser(u); err != nil {
+		if existing, lerr := g.store.UserByEmail(c.Email); lerr == nil && existing != nil {
+			return existing, nil
+		}
+		return nil, err
+	}
+	log.Printf("google login: created user=%s", u.Email)
+	return u, nil
 }
 
 func (g *gateway) handleLogout(w http.ResponseWriter, r *http.Request) {

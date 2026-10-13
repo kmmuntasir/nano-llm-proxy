@@ -1,6 +1,6 @@
 import { useState } from "react"
 import { useNavigate } from "react-router-dom"
-import { useQueryClient } from "@tanstack/react-query"
+import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query"
 import {
   Box,
   Button,
@@ -9,14 +9,17 @@ import {
   HStack,
   Heading,
   Input,
+  Separator,
+  Spinner,
   Text,
   VStack,
 } from "@chakra-ui/react"
-import { post, ApiError } from "../api/client"
+import { api, post, ApiError } from "../api/client"
 import { PasswordInput } from "../components/ui/password-input"
 import { toaster } from "../components/ui/toaster"
+import GoogleSignInButton from "../components/GoogleSignInButton"
 import logoUrl from "../assets/logo.png"
-import type { UserView } from "../api/types"
+import type { AuthConfigView, UserView } from "../api/types"
 
 export default function LoginPage() {
   const [email, setEmail] = useState("")
@@ -25,6 +28,30 @@ export default function LoginPage() {
   const [busy, setBusy] = useState(false)
   const qc = useQueryClient()
   const navigate = useNavigate()
+  const config = useQuery({
+    queryKey: ["auth-config"],
+    queryFn: () => api<AuthConfigView>("/api/auth/config"),
+  })
+
+  const signedIn = async () => {
+    await qc.invalidateQueries()
+    navigate("/")
+  }
+
+  const google = useMutation({
+    mutationFn: (credential: string) => post<{ user: UserView }>("/api/auth/google", { credential }),
+    onMutate: () => setError(""),
+    onSuccess: signedIn,
+    onError: (err) => {
+      const msg = err instanceof ApiError ? err.message : "Google sign-in failed"
+      setError(msg)
+      toaster.create({ title: msg, type: "error" })
+    },
+  })
+
+  // Config failure falls back to the password form; the server still enforces.
+  const googleConfig = config.data?.google
+  const showPassword = config.data?.credentialLogin ?? true
 
   const submit = async (e: React.FormEvent) => {
     e.preventDefault()
@@ -32,8 +59,7 @@ export default function LoginPage() {
     setBusy(true)
     try {
       await post<{ user: UserView }>("/api/auth/login", { email, password })
-      await qc.invalidateQueries()
-      navigate("/")
+      await signedIn()
     } catch (err) {
       const msg = err instanceof ApiError ? err.message : "Login failed — check your email and password"
       setError(msg)
@@ -56,38 +82,76 @@ export default function LoginPage() {
           </Text>
         </Card.Header>
         <Card.Body>
-          <form onSubmit={submit}>
-            <VStack gap={4}>
-              <Field.Root required>
-                <Field.Label>Email <Field.RequiredIndicator /></Field.Label>
-                <Input
-                  type="email"
-                  autoComplete="username"
-                  value={email}
-                  onChange={(e) => setEmail(e.target.value)}
-                  autoFocus
-                />
-              </Field.Root>
-              <Field.Root required>
-                <Field.Label>Password <Field.RequiredIndicator /></Field.Label>
-                {/* native password field here: password managers may save/fill the login */}
-                <PasswordInput
-                  native
-                  autoComplete="current-password"
-                  value={password}
-                  onChange={(e) => setPassword(e.target.value)}
-                />
-              </Field.Root>
+          {config.isLoading ? (
+            <Box display="grid" placeItems="center" py={6}>
+              <Spinner />
+            </Box>
+          ) : (
+            <VStack gap={4} align="stretch">
+              {googleConfig && (
+                <VStack gap={2} align="stretch">
+                  <GoogleSignInButton
+                    clientId={googleConfig.clientId}
+                    onCredential={(credential) => google.mutate(credential)}
+                  />
+                  {googleConfig.domain && (
+                    <Text color="fg.muted" fontSize="xs" textAlign="center" wordBreak="break-word">
+                      Use your {googleConfig.domain} Google account
+                    </Text>
+                  )}
+                  {google.isPending && (
+                    <HStack gap={2} justify="center" color="fg.muted" fontSize="sm">
+                      <Spinner size="xs" />
+                      <Text>Signing in…</Text>
+                    </HStack>
+                  )}
+                </VStack>
+              )}
+              {googleConfig && showPassword && (
+                <HStack gap={3}>
+                  <Separator flex="1" />
+                  <Text color="fg.muted" fontSize="xs" flexShrink={0}>
+                    or
+                  </Text>
+                  <Separator flex="1" />
+                </HStack>
+              )}
+              {showPassword && (
+                <form onSubmit={submit}>
+                  <VStack gap={4}>
+                    <Field.Root required>
+                      <Field.Label>Email <Field.RequiredIndicator /></Field.Label>
+                      <Input
+                        type="email"
+                        autoComplete="username"
+                        value={email}
+                        onChange={(e) => setEmail(e.target.value)}
+                        autoFocus
+                      />
+                    </Field.Root>
+                    <Field.Root required>
+                      <Field.Label>Password <Field.RequiredIndicator /></Field.Label>
+                      {/* native password field here: password managers may save/fill the login */}
+                      <PasswordInput
+                        native
+                        autoComplete="current-password"
+                        value={password}
+                        onChange={(e) => setPassword(e.target.value)}
+                      />
+                    </Field.Root>
+                    <Button type="submit" colorPalette="blue" w="full" loading={busy}>
+                      Sign in
+                    </Button>
+                  </VStack>
+                </form>
+              )}
               {error && (
                 <Text color="red.fg" fontSize="sm" role="alert">
                   {error}
                 </Text>
               )}
-              <Button type="submit" colorPalette="blue" w="full" loading={busy}>
-                Sign in
-              </Button>
             </VStack>
-          </form>
+          )}
         </Card.Body>
       </Card.Root>
     </Box>

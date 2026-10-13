@@ -29,6 +29,8 @@ func (g *gateway) RegisterRoutes(mux *http.ServeMux, webFS fs.FS) {
 
 	// GUI backend — session-cookie auth
 	mux.HandleFunc("POST /api/auth/login", g.handleLogin)
+	mux.HandleFunc("GET /api/auth/config", g.handleAuthConfig)
+	mux.HandleFunc("POST /api/auth/google", g.handleGoogleLogin)
 	mux.HandleFunc("POST /api/auth/logout", g.requireSession(g.handleLogout))
 	mux.HandleFunc("GET /api/auth/me", g.requireSession(g.handleMe))
 	mux.HandleFunc("POST /api/me/password", g.requireSession(g.handleChangeMyPassword))

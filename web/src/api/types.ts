@@ -10,6 +10,20 @@ export interface UserView {
   keyCount?: number
 }
 
+// GET /api/auth/config (unauthenticated). google is omitted when Google
+// sign-in isn't configured; domain is omitted when there's no Workspace
+// restriction. credentialLogin is the effective value (always true without
+// Google).
+export interface GoogleAuthConfigView {
+  clientId: string
+  domain?: string
+}
+
+export interface AuthConfigView {
+  credentialLogin: boolean
+  google?: GoogleAuthConfigView
+}
+
 export interface ClientKeyView {
   id: number
   userId: number
@@ -448,7 +462,14 @@ export interface WebToolsSettingsView {
   maxChars: number
 }
 
+// Sign-in options. credentialLogin=false disables email + password sign-in;
+// the server refuses that unless Google sign-in is configured.
+export interface AuthSettingsView {
+  credentialLogin: boolean
+}
+
 export interface RuntimeSettingsView {
+  auth: AuthSettingsView
   rotation: "priority-daily" | "priority" | "lru"
   retry: RetrySettingsView
   anthropic: AnthropicSettingsView

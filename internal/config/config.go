@@ -19,6 +19,12 @@ type Config struct {
 	TrustedOrigins []string // extra Origin hosts accepted on /api mutations when serving the GUI behind a reverse proxy (same-host is always allowed)
 	APIKeys        []string // store==nil test allowlist only (clientOnly legacy path)
 
+	// Google sign-in (GUI). Enabled when GoogleClientID is set; a non-empty
+	// GoogleWorkspaceDomain restricts sign-in to that domain and lets its
+	// members self-provision as regular users on first sign-in.
+	GoogleClientID        string
+	GoogleWorkspaceDomain string
+
 	Zen  ZenProviderConfig // first-boot provider seeding + store==nil test fallback
 	Kilo KiloProviderConfig
 }
@@ -35,6 +41,11 @@ type KiloProviderConfig struct {
 // (default true; set NANO_COOKIE_SECURE=false for plain-http local GUI dev).
 func (c *Config) SecureCookies() bool {
 	return c.CookieSecure == nil || *c.CookieSecure
+}
+
+// GoogleEnabled reports whether Google sign-in is configured.
+func (c *Config) GoogleEnabled() bool {
+	return c.GoogleClientID != ""
 }
 
 type KeyFileEntry struct {

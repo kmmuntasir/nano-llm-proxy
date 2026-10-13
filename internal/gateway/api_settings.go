@@ -5,6 +5,7 @@ import (
 	"strings"
 
 	"github.com/kmmuntasir/nano-llm-proxy/internal/settings"
+	"github.com/kmmuntasir/nano-llm-proxy/internal/store"
 )
 
 // handleGetSettings serves the effective runtime settings document
@@ -36,6 +37,12 @@ func (g *gateway) handlePutSettings(w http.ResponseWriter, r *http.Request) {
 	if msg := rs.Validate(); msg != "" {
 		apiErr(w, http.StatusBadRequest, msg)
 		return
+	}
+	if !rs.Auth.CredentialLogin && g.rs().Auth.CredentialLogin {
+		if msg := g.credentialOffBlocked(actor); msg != "" {
+			apiErr(w, http.StatusBadRequest, msg)
+			return
+		}
 	}
 	// the sync status lives in the DB and is server-owned; take it from there
 	// so a concurrent sync (or a stale in-memory snapshot) can't lose it
@@ -103,4 +110,18 @@ func (g *gateway) handleSetResponsesAPI(w http.ResponseWriter, r *http.Request) 
 	g.surfaceOver = map[string]string{}
 	g.mu.Unlock()
 	writeJSON(w, http.StatusOK, map[string]any{"ok": true})
+}
+
+// credentialOffBlocked explains why password sign-in can't be turned off, or
+// returns "". Without Google sign-in nobody could log in at all; with a
+// Workspace domain, an acting admin outside it couldn't log back in.
+func (g *gateway) credentialOffBlocked(actor *store.User) string {
+	c := g.conf()
+	if !c.GoogleEnabled() {
+		return "Password sign-in can't be disabled: Google sign-in is not configured on this server"
+	}
+	if d := c.GoogleWorkspaceDomain; d != "" && actor != nil && !strings.HasSuffix(strings.ToLower(actor.Email), "@"+d) {
+		return "Password sign-in can't be disabled: your account (" + actor.Email + ") is outside the " + d + " Google domain, so it would lock you out"
+	}
+	return ""
 }

@@ -90,5 +90,15 @@ func LoadEnvConfig() (*Config, error) {
 			}
 		}
 	}
+	cfg.GoogleClientID = strings.TrimSpace(os.Getenv("GOOGLE_CLIENT_ID"))
+	if v := strings.TrimSpace(os.Getenv("GOOGLE_WORKSPACE_DOMAIN")); v != "" {
+		if cfg.GoogleClientID == "" {
+			return nil, fmt.Errorf("GOOGLE_WORKSPACE_DOMAIN is set but GOOGLE_CLIENT_ID is not")
+		}
+		if strings.ContainsAny(v, "@/: ") || !strings.Contains(v, ".") {
+			return nil, fmt.Errorf("invalid GOOGLE_WORKSPACE_DOMAIN %q (want a bare domain like example.com)", v)
+		}
+		cfg.GoogleWorkspaceDomain = strings.ToLower(v)
+	}
 	return cfg.applyDefaults(), nil
 }
