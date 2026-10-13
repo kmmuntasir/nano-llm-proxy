@@ -58,7 +58,9 @@ func (g *gateway) handleCreateUser(w http.ResponseWriter, r *http.Request) {
 	if !readJSON(w, r, &req) {
 		return
 	}
-	hash, ok := validateNewUser(w, &req.Name, &req.Email, &req.Password, &req.Role)
+	// with password sign-in off the account signs in with Google, so a
+	// password is optional (one sent anyway is still validated and stored)
+	hash, ok := validateNewUser(w, &req.Name, &req.Email, &req.Password, &req.Role, g.credentialLoginEnabled() || req.Password != "")
 	if !ok {
 		return
 	}
@@ -69,7 +71,10 @@ func (g *gateway) handleCreateUser(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, http.StatusCreated, map[string]any{"user": userView(u)})
 }
 
-func validateNewUser(w http.ResponseWriter, name, email, password, role *string) (string, bool) {
+// validateNewUser normalizes and checks a create-user request and returns
+// the password hash ("" when no password is required and none was given —
+// an empty hash never verifies).
+func validateNewUser(w http.ResponseWriter, name, email, password, role *string, requirePassword bool) (string, bool) {
 	*name = strings.TrimSpace(*name)
 	*email = strings.ToLower(strings.TrimSpace(*email))
 	*role = strings.TrimSpace(*role)
@@ -83,6 +88,9 @@ func validateNewUser(w http.ResponseWriter, name, email, password, role *string)
 	if *role != "user" && *role != "superadmin" {
 		apiErr(w, http.StatusBadRequest, `Role must be "user" or "superadmin"`)
 		return "", false
+	}
+	if !requirePassword {
+		return "", true
 	}
 	if len(*password) < 10 {
 		apiErr(w, http.StatusBadRequest, "Password must be at least 10 characters")

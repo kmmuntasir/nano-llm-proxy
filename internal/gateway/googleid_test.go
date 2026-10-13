@@ -471,3 +471,34 @@ func TestGoogleLoginStoresAvatar(t *testing.T) {
 		t.Fatalf("foreign picture kept: %s", rec.Body.String())
 	}
 }
+
+// TestCreateUserPasswordOptionalWhenCredentialLoginOff: with password
+// sign-in off, admins add Google users without a password; with it on, a
+// password is still required, and a short one is refused either way.
+func TestCreateUserPasswordOptionalWhenCredentialLoginOff(t *testing.T) {
+	g, _ := googleGateway(t, "example.com")
+	cookie := loginAs(t, g, "admin@example.com", "super-secret-pass")
+	create := func(body string) *httptest.ResponseRecorder {
+		req := httptest.NewRequest("POST", "/api/users", strings.NewReader(body))
+		req.AddCookie(cookie)
+		req.Header.Set("Origin", "https://gateway.example.com")
+		rec := httptest.NewRecorder()
+		g.requireSession(g.requireSuperadmin(g.handleCreateUser))(rec, req)
+		return rec
+	}
+	if rec := create(`{"name":"A","email":"a@example.com"}`); rec.Code != http.StatusBadRequest {
+		t.Fatalf("credential login on, no password: got %d", rec.Code)
+	}
+	rs := g.rs().Clone()
+	rs.Auth.CredentialLogin = false
+	g.rsPtr.Store(rs)
+	if rec := create(`{"name":"B","email":"b@example.com"}`); rec.Code != http.StatusCreated {
+		t.Fatalf("credential login off, no password: got %d: %s", rec.Code, rec.Body.String())
+	}
+	if u, _ := g.store.UserByEmail("b@example.com"); u == nil || u.PasswordHash != "" {
+		t.Fatalf("user b = %+v, want no password", u)
+	}
+	if rec := create(`{"name":"C","email":"c@example.com","password":"short"}`); rec.Code != http.StatusBadRequest {
+		t.Fatalf("short password while off: got %d", rec.Code)
+	}
+}

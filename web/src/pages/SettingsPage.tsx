@@ -15,6 +15,7 @@ import {
 } from "@chakra-ui/react"
 import { RefreshCw } from "lucide-react"
 import { api, post, put, ApiError } from "../api/client"
+import { useAuthConfig } from "../api/useAuthConfig"
 import type {
   AuthConfigView,
   AuthSettingsView,
@@ -434,10 +435,7 @@ export default function SettingsPage() {
     queryFn: () => api<CatalogModelsView>("/api/models"),
     staleTime: 5 * 60_000,
   })
-  const authConfig = useQuery({
-    queryKey: ["auth-config"],
-    queryFn: () => api<AuthConfigView>("/api/auth/config"),
-  })
+  const authConfig = useAuthConfig()
   const googleConfigured = authConfig.data ? authConfig.data.google !== undefined : undefined
   const [form, setForm] = useState<SettingsForm | null>(null)
   const [saveError, setSaveError] = useState("")

@@ -18,6 +18,7 @@ import {
 } from "@chakra-ui/react"
 import { KeyRound, Plus, Trash2 } from "lucide-react"
 import { api, del, patch, post, put, ApiError } from "../api/client"
+import { useCredentialLogin } from "../api/useAuthConfig"
 import type { ClientKeyView, UserProviderView, UserView } from "../api/types"
 import ConfirmDialog from "../components/ConfirmDialog"
 import KeyRevealDialog from "../components/KeyRevealDialog"
@@ -57,9 +58,15 @@ function AddUserModal({ open, onOpenChange }: { open: boolean; onOpenChange: (o:
   const [confirm, setConfirm] = useState("")
   const [role, setRole] = useState("user")
   const [error, setError] = useState("")
+  // with password sign-in off, new users sign in with Google — no password
+  const credentialLogin = useCredentialLogin()
 
   const create = useMutation({
-    mutationFn: () => post<{ user: UserView }>("/api/users", { name, email, password, role }),
+    mutationFn: () =>
+      post<{ user: UserView }>(
+        "/api/users",
+        credentialLogin ? { name, email, password, role } : { name, email, role },
+      ),
     onSuccess: async () => {
       setName("")
       setEmail("")
@@ -80,7 +87,7 @@ function AddUserModal({ open, onOpenChange }: { open: boolean; onOpenChange: (o:
 
   const submit = () => {
     setError("")
-    if (password !== confirm) {
+    if (credentialLogin && password !== confirm) {
       setError("Passwords don't match")
       return
     }
@@ -112,23 +119,31 @@ function AddUserModal({ open, onOpenChange }: { open: boolean; onOpenChange: (o:
                 <Field.Label>Email <Field.RequiredIndicator /></Field.Label>
                 <Input autoComplete="off" type="email" value={email} onChange={(e) => setEmail(e.target.value)} />
               </Field.Root>
-              <Field.Root required>
-                <Field.Label>New password <Field.RequiredIndicator /></Field.Label>
-                <PasswordInput
-                  value={password}
-                  onChange={(e) => setPassword(e.target.value)}
-                  autoComplete="new-password"
-                />
-                <Field.HelperText>min 10 chars</Field.HelperText>
-              </Field.Root>
-              <Field.Root required>
-                <Field.Label>Confirm password <Field.RequiredIndicator /></Field.Label>
-                <PasswordInput
-                  value={confirm}
-                  onChange={(e) => setConfirm(e.target.value)}
-                  autoComplete="new-password"
-                />
-              </Field.Root>
+              {credentialLogin ? (
+                <>
+                  <Field.Root required>
+                    <Field.Label>New password <Field.RequiredIndicator /></Field.Label>
+                    <PasswordInput
+                      value={password}
+                      onChange={(e) => setPassword(e.target.value)}
+                      autoComplete="new-password"
+                    />
+                    <Field.HelperText>min 10 chars</Field.HelperText>
+                  </Field.Root>
+                  <Field.Root required>
+                    <Field.Label>Confirm password <Field.RequiredIndicator /></Field.Label>
+                    <PasswordInput
+                      value={confirm}
+                      onChange={(e) => setConfirm(e.target.value)}
+                      autoComplete="new-password"
+                    />
+                  </Field.Root>
+                </>
+              ) : (
+                <Text fontSize="xs" color="fg.muted">
+                  Password sign-in is off — this user signs in with Google using this email.
+                </Text>
+              )}
               <RoleField value={role} onChange={setRole} />
               {error && (
                 <Text color="red.fg" fontSize="sm">
@@ -465,6 +480,7 @@ function UserCard({ u, isSelf }: { u: UserView; isSelf: boolean }) {
   const [managingKeys, setManagingKeys] = useState(false)
   const [managingAccess, setManagingAccess] = useState(false)
   const [resetting, setResetting] = useState(false)
+  const credentialLogin = useCredentialLogin()
 
   const patchU = useMutation({
     mutationFn: (body: Record<string, unknown>) => patch(`/api/users/${u.id}`, body),
@@ -538,7 +554,7 @@ function UserCard({ u, isSelf }: { u: UserView; isSelf: boolean }) {
               Provider access
             </Button>
           )}
-          {!isSelf && (
+          {!isSelf && credentialLogin && (
             <Button variant="ghost" size="2xs" onClick={() => setResetting(true)}>
               <KeyRound /> Reset password
             </Button>

@@ -15,6 +15,7 @@ import {
 import { useNavigate } from "react-router-dom"
 import { KeyRound } from "lucide-react"
 import { patch, post, ApiError } from "../api/client"
+import { useCredentialLogin } from "../api/useAuthConfig"
 import type { UserView } from "../api/types"
 import { PasswordInput } from "../components/ui/password-input"
 import { toaster } from "../components/ui/toaster"
@@ -207,6 +208,8 @@ function ChangePasswordModal({ open, onOpenChange }: { open: boolean; onOpenChan
 export default function ProfilePage() {
   const { data } = useSession()
   const [changing, setChanging] = useState(false)
+  // a password is useless while password sign-in is off
+  const credentialLogin = useCredentialLogin()
 
   return (
     <VStack align="stretch" gap={6}>
@@ -216,14 +219,16 @@ export default function ProfilePage() {
         <Card.Header>
           <HStack justify="space-between" flexWrap="wrap" gap={2}>
             <Heading size="sm">Account</Heading>
-            <Button
-              size="xs"
-              variant="outline"
-              onClick={() => setChanging(true)}
-              aria-label="change password"
-            >
-              <KeyRound /> Change password
-            </Button>
+            {credentialLogin && (
+              <Button
+                size="xs"
+                variant="outline"
+                onClick={() => setChanging(true)}
+                aria-label="change password"
+              >
+                <KeyRound /> Change password
+              </Button>
+            )}
           </HStack>
         </Card.Header>
         <Card.Body pt={3} gap={4}>

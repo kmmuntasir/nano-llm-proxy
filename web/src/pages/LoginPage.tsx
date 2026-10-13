@@ -1,6 +1,6 @@
 import { useState } from "react"
 import { useNavigate } from "react-router-dom"
-import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query"
+import { useMutation, useQueryClient } from "@tanstack/react-query"
 import {
   Box,
   Button,
@@ -14,12 +14,13 @@ import {
   Text,
   VStack,
 } from "@chakra-ui/react"
-import { api, post, ApiError } from "../api/client"
+import { post, ApiError } from "../api/client"
+import { useAuthConfig } from "../api/useAuthConfig"
 import { PasswordInput } from "../components/ui/password-input"
 import { toaster } from "../components/ui/toaster"
 import GoogleSignInButton from "../components/GoogleSignInButton"
 import logoUrl from "../assets/logo.png"
-import type { AuthConfigView, UserView } from "../api/types"
+import type { UserView } from "../api/types"
 
 export default function LoginPage() {
   const [email, setEmail] = useState("")
@@ -28,10 +29,7 @@ export default function LoginPage() {
   const [busy, setBusy] = useState(false)
   const qc = useQueryClient()
   const navigate = useNavigate()
-  const config = useQuery({
-    queryKey: ["auth-config"],
-    queryFn: () => api<AuthConfigView>("/api/auth/config"),
-  })
+  const config = useAuthConfig()
 
   const signedIn = async () => {
     await qc.invalidateQueries()
