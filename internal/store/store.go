@@ -899,8 +899,10 @@ type ClientKeyWithEmail struct {
 }
 
 // AllClientKeys feeds the hot-path clientKeyCache reload (joins owner email).
+// Disabled is effective: a key is off when it or its owner is deactivated,
+// so deactivating a user cuts their API access, not just their GUI sessions.
 func (s *Store) AllClientKeys() ([]ClientKeyWithEmail, error) {
-	rows, err := s.db.Query(`SELECT k.id, k.user_id, k.key_hash, k.key_hint, k.alias, k.disabled,
+	rows, err := s.db.Query(`SELECT k.id, k.user_id, k.key_hash, k.key_hint, k.alias, (k.disabled OR u.disabled),
 		k.created_at, k.last_used_at, k.request_count, u.email FROM api_keys k
 		JOIN users u ON u.id = k.user_id ORDER BY k.id`)
 	if err != nil {

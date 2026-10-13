@@ -482,11 +482,17 @@ function UserCard({ u, isSelf }: { u: UserView; isSelf: boolean }) {
   const [resetting, setResetting] = useState(false)
   const credentialLogin = useCredentialLogin()
 
+  // the activation switch only proposes a change; it applies after the
+  // confirmation dialog (null = no pending change)
+  const [pendingActive, setPendingActive] = useState<boolean | null>(null)
+
   const patchU = useMutation({
     mutationFn: (body: Record<string, unknown>) => patch(`/api/users/${u.id}`, body),
-    onSuccess: async () => {
+    onSuccess: async (_, body) => {
       await qc.invalidateQueries({ queryKey: ["users"] })
-      toaster.create({ title: "User updated", type: "success" })
+      const title =
+        body.disabled === true ? "User deactivated" : body.disabled === false ? "User activated" : "User updated"
+      toaster.create({ title, type: "success" })
     },
     onError: (e) =>
       toaster.create({ title: e instanceof ApiError ? e.message : "update failed", type: "error" }),
@@ -520,6 +526,11 @@ function UserCard({ u, isSelf }: { u: UserView; isSelf: boolean }) {
                     Google
                   </Badge>
                 )}
+                {u.disabled && (
+                  <Badge variant="subtle" colorPalette="red">
+                    Deactivated
+                  </Badge>
+                )}
               </HStack>
               <Text fontSize="xs" color="fg.muted" wordBreak="break-word">
                 {u.email} · {u.keyCount ?? 0} keys · created {fmtTs(u.createdAt)}
@@ -535,12 +546,17 @@ function UserCard({ u, isSelf }: { u: UserView; isSelf: boolean }) {
               <Switch.Root
                 size="sm"
                 checked={!u.disabled}
-                onCheckedChange={(e) => patchU.mutate({ disabled: !e.checked })}
+                disabled={patchU.isPending}
+                onCheckedChange={(e) => setPendingActive(e.checked)}
+                aria-label={u.disabled ? `activate ${u.name}` : `deactivate ${u.name}`}
               >
                 <Switch.HiddenInput />
                 <Switch.Control>
                   <Switch.Thumb />
                 </Switch.Control>
+                <Switch.Label fontSize="xs" color="fg.muted">
+                  {u.disabled ? "Inactive" : "Active"}
+                </Switch.Label>
               </Switch.Root>
             )}
           </HStack>
@@ -575,6 +591,25 @@ function UserCard({ u, isSelf }: { u: UserView; isSelf: boolean }) {
       <UserKeysModal userID={u.id} open={managingKeys} onOpenChange={setManagingKeys} />
       <UserProviderAccessModal user={u} open={managingAccess} onOpenChange={setManagingAccess} />
       <ResetPasswordModal user={u} open={resetting} onOpenChange={setResetting} />
+      <ConfirmDialog
+        open={pendingActive !== null}
+        onOpenChange={() => setPendingActive(null)}
+        title={pendingActive ? `Activate ${u.name}?` : `Deactivate ${u.name}?`}
+        body={
+          <Text>
+            {pendingActive
+              ? "They can sign in again and their client keys work again (keys you turned off individually stay off)."
+              : "They are signed out right away, can't sign in, and their client keys stop working until you reactivate them. Nothing is deleted."}
+          </Text>
+        }
+        confirmText={pendingActive ? "Activate" : "Deactivate"}
+        destructive={pendingActive === false}
+        busy={patchU.isPending}
+        onConfirm={() => {
+          if (pendingActive === null) return
+          patchU.mutate({ disabled: !pendingActive }, { onSettled: () => setPendingActive(null) })
+        }}
+      />
       <ConfirmDialog
         open={toDelete}
         onOpenChange={() => setToDelete(false)}

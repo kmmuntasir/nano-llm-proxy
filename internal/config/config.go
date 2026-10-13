@@ -19,9 +19,9 @@ type Config struct {
 	TrustedOrigins []string // extra Origin hosts accepted on /api mutations when serving the GUI behind a reverse proxy (same-host is always allowed)
 	APIKeys        []string // store==nil test allowlist only (clientOnly legacy path)
 
-	// Google sign-in (GUI). Enabled when GoogleClientID is set; a non-empty
-	// GoogleWorkspaceDomain restricts sign-in to that domain and lets its
-	// members self-provision as regular users on first sign-in.
+	// Google sign-in (GUI). Enabled when GoogleClientID is set; it signs in
+	// existing accounts only (created on the Users page). A non-empty
+	// GoogleWorkspaceDomain additionally restricts it to that domain.
 	GoogleClientID        string
 	GoogleWorkspaceDomain string
 

@@ -184,9 +184,8 @@ function SignInCard({
             <Field.HelperText>
               Google sign-in is always on. Turning this off disables email + password sign-in
               for everyone.{" "}
-              {google.domain
-                ? `New ${google.domain} accounts are created on first Google sign-in as regular users.`
-                : "Only existing users can sign in with Google."}
+              Only users added on the Users page can sign in with Google
+              {google.domain ? `, and only with a ${google.domain} account.` : "."}
             </Field.HelperText>
           )}
         </Field.Root>

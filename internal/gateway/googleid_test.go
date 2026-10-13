@@ -9,6 +9,7 @@ import (
 	"encoding/base64"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"math/big"
 	"net/http"
 	"net/http/httptest"
@@ -18,6 +19,7 @@ import (
 	"time"
 
 	"github.com/kmmuntasir/nano-llm-proxy/internal/settings"
+	"github.com/kmmuntasir/nano-llm-proxy/internal/store"
 )
 
 const testGoogleClientID = "test-client.apps.googleusercontent.com"
@@ -238,21 +240,20 @@ func TestGoogleLoginFlows(t *testing.T) {
 			t.Fatal("user was created without a domain restriction")
 		}
 	})
-	t.Run("domain: first sign-in creates a regular user, second reuses it", func(t *testing.T) {
+	t.Run("domain: unknown in-domain email is refused; an admin-added user signs in", func(t *testing.T) {
 		g, f := googleGateway(t, "corp.example")
 		tok := f.token(t, validGoogleClaims("new.person@corp.example", "corp.example"))
-		for range 2 {
-			if rec := googleLogin(g, tok, ""); rec.Code != 200 || !strings.Contains(rec.Body.String(), `"role":"user"`) {
-				t.Fatalf("got %d: %s", rec.Code, rec.Body.String())
-			}
+		if rec := googleLogin(g, tok, ""); rec.Code != http.StatusForbidden {
+			t.Fatalf("unknown user: got %d: %s", rec.Code, rec.Body.String())
 		}
-		u, _ := g.store.UserByEmail("new.person@corp.example")
-		if u == nil || u.Role != "user" || u.Name != "Test Person" || u.PasswordHash != "" {
-			t.Fatalf("provisioned user = %+v", u)
+		if u, _ := g.store.UserByEmail("new.person@corp.example"); u != nil {
+			t.Fatal("Google sign-in created an account")
 		}
-		users, _ := g.store.ListUsers()
-		if len(users) != 2 {
-			t.Fatalf("users = %d, want 2 (admin + one provisioned)", len(users))
+		if err := g.store.InsertUser(&store.User{Name: "Added", Email: "new.person@corp.example", Role: "user"}); err != nil {
+			t.Fatal(err)
+		}
+		if rec := googleLogin(g, tok, ""); rec.Code != 200 || !strings.Contains(rec.Body.String(), `"role":"user"`) {
+			t.Fatalf("admin-added user: got %d: %s", rec.Code, rec.Body.String())
 		}
 	})
 	t.Run("domain: outside accounts are refused", func(t *testing.T) {
@@ -268,8 +269,10 @@ func TestGoogleLoginFlows(t *testing.T) {
 	})
 	t.Run("disabled account is refused", func(t *testing.T) {
 		g, f := googleGateway(t, "corp.example")
-		googleLogin(g, f.token(t, validGoogleClaims("p@corp.example", "corp.example")), "")
-		u, _ := g.store.UserByEmail("p@corp.example")
+		u := &store.User{Name: "P", Email: "p@corp.example", Role: "user"}
+		if err := g.store.InsertUser(u); err != nil {
+			t.Fatal(err)
+		}
 		disabled := true
 		if err := g.store.UpdateUser(u.ID, nil, nil, nil, nil, &disabled); err != nil {
 			t.Fatal(err)
@@ -419,6 +422,14 @@ func TestProfileNameOwnership(t *testing.T) {
 	if rec := rename(`{"name":"Something Else"}`); rec.Code != http.StatusForbidden {
 		t.Fatalf("linked self-rename: got %d", rec.Code)
 	}
+	pwReq := httptest.NewRequest("POST", "/api/me/password", strings.NewReader(`{"currentPassword":"super-secret-pass","newPassword":"another-long-pass"}`))
+	pwReq.AddCookie(cookie)
+	pwReq.Header.Set("Origin", "https://gateway.example.com")
+	pwRec := httptest.NewRecorder()
+	g.requireSession(g.handleChangeMyPassword)(pwRec, pwReq)
+	if pwRec.Code != http.StatusForbidden {
+		t.Fatalf("linked password change: got %d", pwRec.Code)
+	}
 
 	admin, _ := g.store.UserByEmail("admin@example.com")
 	patch := func(body string) int {
@@ -500,5 +511,45 @@ func TestCreateUserPasswordOptionalWhenCredentialLoginOff(t *testing.T) {
 	}
 	if rec := create(`{"name":"C","email":"c@example.com","password":"short"}`); rec.Code != http.StatusBadRequest {
 		t.Fatalf("short password while off: got %d", rec.Code)
+	}
+}
+
+// TestDeactivatedUserLosesAPIAccess: deactivating a user turns off their
+// client keys on the hot path too (not just GUI sessions); reactivating
+// restores them.
+func TestDeactivatedUserLosesAPIAccess(t *testing.T) {
+	g, st := testStoreGateway(t, "http://127.0.0.1:1")
+	cookie := loginAs(t, g, "admin@example.com", "super-secret-pass")
+	u := &store.User{Name: "Worker", Email: "worker@example.com", Role: "user"}
+	if err := st.InsertUser(u); err != nil {
+		t.Fatal(err)
+	}
+	key := newClientKey(t, g, st, u.ID, "w")
+	authed := func() int {
+		rec := httptest.NewRecorder()
+		g.clientOnly(passThrough200)(rec, bearerReq(key))
+		return rec.Code
+	}
+	setDisabled := func(d bool) {
+		req := httptest.NewRequest("PATCH", "/api/users/x", strings.NewReader(fmt.Sprintf(`{"disabled":%v}`, d)))
+		req.SetPathValue("id", fmt.Sprint(u.ID))
+		req.AddCookie(cookie)
+		req.Header.Set("Origin", "https://gateway.example.com")
+		rec := httptest.NewRecorder()
+		g.requireSession(g.requireSuperadmin(g.handlePatchUser))(rec, req)
+		if rec.Code != 200 {
+			t.Fatalf("patch disabled=%v: %d %s", d, rec.Code, rec.Body.String())
+		}
+	}
+	if code := authed(); code != 200 {
+		t.Fatalf("active user's key: got %d", code)
+	}
+	setDisabled(true)
+	if code := authed(); code != http.StatusUnauthorized {
+		t.Fatalf("deactivated user's key: got %d, want 401", code)
+	}
+	setDisabled(false)
+	if code := authed(); code != 200 {
+		t.Fatalf("reactivated user's key: got %d", code)
 	}
 }

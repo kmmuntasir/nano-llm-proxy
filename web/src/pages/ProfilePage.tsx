@@ -208,8 +208,10 @@ function ChangePasswordModal({ open, onOpenChange }: { open: boolean; onOpenChan
 export default function ProfilePage() {
   const { data } = useSession()
   const [changing, setChanging] = useState(false)
-  // a password is useless while password sign-in is off
+  // a password is useless while password sign-in is off, and Google-linked
+  // accounts sign in with Google
   const credentialLogin = useCredentialLogin()
+  const canChangePassword = credentialLogin && !data?.user.googleLinked
 
   return (
     <VStack align="stretch" gap={6}>
@@ -219,7 +221,7 @@ export default function ProfilePage() {
         <Card.Header>
           <HStack justify="space-between" flexWrap="wrap" gap={2}>
             <Heading size="sm">Account</Heading>
-            {credentialLogin && (
+            {canChangePassword && (
               <Button
                 size="xs"
                 variant="outline"

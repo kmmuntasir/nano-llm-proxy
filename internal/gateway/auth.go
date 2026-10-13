@@ -245,11 +245,10 @@ func (g *gateway) handleAuthConfig(w http.ResponseWriter, r *http.Request) {
 }
 
 // handleGoogleLogin serves POST /api/auth/google: verify the Google ID token,
-// then sign in the account with that email. With a Workspace domain
-// configured, a first sign-in from that domain creates a regular user (the
-// same self-provisioning meal-management uses); without one, only existing
-// accounts can sign in — an open gateway must not let any Google account
-// mint itself access to the upstream keys.
+// then sign in the existing account with that email. Accounts are only ever
+// created by a superadmin on the Users page — an unknown email is refused,
+// so no Google account can mint itself access to the upstream keys. A
+// configured Workspace domain is an additional restriction.
 func (g *gateway) handleGoogleLogin(w http.ResponseWriter, r *http.Request) {
 	if g.google == nil {
 		apiErr(w, http.StatusNotFound, "Google sign-in is not configured")
@@ -299,16 +298,10 @@ func (g *gateway) handleGoogleLogin(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	if user == nil {
-		if domain == "" {
-			g.backoff.fail(key)
-			apiErr(w, http.StatusForbidden, "No account for this email — ask an admin to add you")
-			return
-		}
-		if user, err = g.provisionGoogleUser(claims); err != nil {
-			log.Printf("google login: provision %s: %v", claims.Email, err)
-			apiErr(w, http.StatusInternalServerError, "login failed")
-			return
-		}
+		g.backoff.fail(key)
+		log.Printf("google login rejected email=%s ip=%s: no account", claims.Email, r.RemoteAddr)
+		apiErr(w, http.StatusForbidden, "No account for this email — ask an admin to add you")
+		return
 	}
 	if user.Disabled {
 		apiErr(w, http.StatusForbidden, "This account is disabled")
@@ -323,25 +316,6 @@ func (g *gateway) handleGoogleLogin(w http.ResponseWriter, r *http.Request) {
 	}
 	g.backoff.reset(key)
 	g.startSession(w, r, user, "google")
-}
-
-// provisionGoogleUser creates a regular user for a first Google sign-in. It
-// has no password (an empty hash never verifies); an admin can set one later.
-// A concurrent first sign-in losing the unique-email race re-reads the row.
-func (g *gateway) provisionGoogleUser(c *googleClaims) (*store.User, error) {
-	name := strings.TrimSpace(c.Name)
-	if name == "" {
-		name = c.Email[:strings.IndexByte(c.Email, '@')]
-	}
-	u := &store.User{Name: name, Email: c.Email, Role: "user"}
-	if err := g.store.InsertUser(u); err != nil {
-		if existing, lerr := g.store.UserByEmail(c.Email); lerr == nil && existing != nil {
-			return existing, nil
-		}
-		return nil, err
-	}
-	log.Printf("google login: created user=%s", u.Email)
-	return u, nil
 }
 
 func (g *gateway) handleLogout(w http.ResponseWriter, r *http.Request) {
@@ -393,6 +367,11 @@ func ResetAdminPassword(st *store.Store) {
 // user (and anyone holding a stolen session cookie) logs in again.
 func (g *gateway) handleChangeMyPassword(w http.ResponseWriter, r *http.Request) {
 	u := contextUser(r)
+	// Google-linked accounts sign in with Google; they don't manage a password
+	if u.GoogleLinked {
+		apiErr(w, http.StatusForbidden, "Your account signs in with Google")
+		return
+	}
 	var req struct {
 		CurrentPassword string `json:"currentPassword"`
 		NewPassword     string `json:"newPassword"`
