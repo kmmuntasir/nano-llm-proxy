@@ -5223,8 +5223,8 @@ OTHER DEALINGS IN THE FONT SOFTWARE.
         <text data-detail="fine" x="520" y="356" class="t-backend" font-size="7" text-anchor="middle">CGO_ENABLED=0 · ~24 MB</text>
         </g>
 
-        <g id="node-pool" data-node-id="pool" data-node-label="Key Pools" tabindex="0" role="button" aria-label="Focus Key Pools, priority | LRU · failover, One Linux host · one systemd unit · no Docker" aria-pressed="false" data-node-kind="security" data-node-sublabel="priority | LRU · failover" data-node-context="One Linux host · one systemd unit · no Docker">
-          <title>Key Pools · priority | LRU · failover · One Linux host · one systemd unit · no Docker</title>
+        <g id="node-pool" data-node-id="pool" data-node-label="Key Pools" tabindex="0" role="button" aria-label="Focus Key Pools, priority-daily | priority | LRU, One Linux host · one systemd unit · no Docker" aria-pressed="false" data-node-kind="security" data-node-sublabel="priority-daily | priority | LRU" data-node-context="One Linux host · one systemd unit · no Docker">
+          <title>Key Pools · priority-daily | priority | LRU · One Linux host · one systemd unit · no Docker</title>
           <rect x="640" y="300" width="170" height="64" rx="6" class="c-mask"/>
           <rect x="640" y="300" width="170" height="64" rx="6" class="c-security" stroke-width="1.5"/>
           <g aria-hidden="true" data-semantic-sigil="security" class="semantic-sigil s-security" transform="translate(646 306) scale(0.6875)">
@@ -5232,7 +5232,7 @@ OTHER DEALINGS IN THE FONT SOFTWARE.
             <path d="m5.8 8 1.5 1.5 3-3"/>
           </g>
           <text data-node-label="" data-detail-anchor="" x="725" y="330" class="t-primary" font-size="11" font-weight="600" text-anchor="middle">Key Pools</text>
-        <text data-detail="context" x="725" y="346" class="t-muted" font-size="9" text-anchor="middle">priority | LRU · failover</text>
+        <text data-detail="context" x="725" y="346" class="t-muted" font-size="9" text-anchor="middle">priority-daily | priority | LRU</text>
         </g>
 
         <g id="node-providers" data-node-id="providers" data-node-label="Upstream Providers" tabindex="0" role="button" aria-label="Focus Upstream Providers, 10 presets + custom URLs, Architecture component" aria-pressed="false" data-node-kind="external" data-node-sublabel="10 presets + custom URLs" data-node-context="Architecture component">
@@ -5586,7 +5586,7 @@ OTHER DEALINGS IN THE FONT SOFTWARE.
         </div>
         <ul>
           <li>&bull; Model prefix selects the provider; body passes through natively</li>
-          <li>&bull; priority sticks to the first healthy key, LRU spreads load</li>
+          <li>&bull; priority sticks to the first healthy key (daily rotation moves the start key each day), LRU spreads load</li>
           <li>&bull; 429 cools down, genuine 401 blacklists, failover stops at first byte</li>
         </ul>
       </div>

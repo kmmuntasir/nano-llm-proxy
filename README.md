@@ -61,7 +61,8 @@ database for.
 - Three request surfaces — `/v1/chat/completions`, `/v1/responses`,
   `/v1/messages` — plus a merged `/v1/models` catalog and an open `/health`
 - Streaming everywhere; non-streaming clients get aggregated responses
-- Key pools per provider: `priority` rotation (stick-with-failover,
+- Key pools per provider: `priority-daily` (default — stick-with-failover
+  whose starting key advances daily), `priority` (stick-with-failover,
   prompt-cache friendly) or `lru` (spread); cooldowns honor `Retry-After`
 - Failure classification: genuine auth failures **blacklist** a key until you
   re-enable it; rate limits and upstream flakes cool it down briefly (and
@@ -242,11 +243,12 @@ and bare IDs are accepted everywhere.
 
 ## Key rotation
 
-Each provider's keys form an ordered pool. Two modes (Settings → Routing):
+Each provider's keys form an ordered pool. Three modes (Settings → Routing):
 
 | Mode | Behavior | Good for |
 | --- | --- | --- |
-| `priority` (default) | Traffic sticks to the first healthy key; failover walks down the list | Prompt-cache affinity — agentic sessions re-send long transcripts every turn |
+| `priority-daily` (default) | Like `priority`, but the starting key moves one position each day (key 1 today, key 2 tomorrow, …, wrapping back to key 1); failover walks on from there | Cache affinity within a day while every key takes its turn — no single key absorbs all traffic |
+| `priority` | Traffic sticks to the first healthy key; failover walks down the list | Prompt-cache affinity — agentic sessions re-send long transcripts every turn |
 | `lru` | Every request takes the least-recently-used key | Spreading load across many keys or many users |
 
 Failure handling per request:
@@ -523,7 +525,7 @@ cd web && npm ci && npm run dev       # GUI dev server
 | Path | Responsibility |
 | --- | --- |
 | `main.go` | bootstrap wiring: .env, store open, route registration, listen |
-| `internal/gateway/` | the runtime: gateway assembly, hot-path rebuild, failure classifier, key pools (priority/LRU + daily cap), zen adapter + preset/generic adapters, Responses ↔ chat and Anthropic conversions, admin API handlers, sessions/auth, models.dev sync, the `/mcp` MCP server |
+| `internal/gateway/` | the runtime: gateway assembly, hot-path rebuild, failure classifier, key pools (priority-daily/priority/LRU + daily cap), zen adapter + preset/generic adapters, Responses ↔ chat and Anthropic conversions, admin API handlers, sessions/auth, models.dev sync, the `/mcp` MCP server |
 | `internal/webtools/` | web-tool backends: SearXNG client, native fetch + readability → markdown, obscura executor, SSRF guard, escalation policy |
 | `internal/store/` | SQLite: migrations, bootstrap, users/keys/providers/settings CRUD, usage log |
 | `internal/settings/` | runtime-settings document: defaults, validation, `ModelMeta` schema |

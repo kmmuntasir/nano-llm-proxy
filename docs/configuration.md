@@ -39,7 +39,7 @@ block is server-owned).
 
 | Path | Default | Meaning |
 | --- | --- | --- |
-| `rotation` | `priority` | `priority` (stick with failover, prompt-cache friendly) or `lru` (spread load). Rebuilds every pool on save |
+| `rotation` | `priority-daily` | `priority-daily` (stick with failover from a starting key that advances one position per day, per provider), `priority` (stick with failover from the first key, prompt-cache friendly) or `lru` (spread load). Rebuilds every pool on save |
 | `retry.maxKeysPerRequest` | 3 | Failover attempts per request (1–100) |
 | `retry.cooldownSeconds` | 30 | Default 429 cooldown (0 = only honor `Retry-After`) |
 | `retry.respectRetryAfter` | true | Prefer the upstream `Retry-After` duration |
@@ -244,6 +244,15 @@ Serve over TLS and keep `NANO_COOKIE_SECURE=true` in production.
 - **Choose the primary key:** in `priority` rotation the first healthy key of
   a provider serves everything. Keys run in the order they were added to the
   provider; disable the busy one in the GUI to push traffic down the pool.
+- **Daily rotation (`priority-daily`, the default):** each provider's starting
+  key is *day number mod enabled-key count*, so it moves one key down the list
+  at server-local midnight and wraps from the last key to the first; failover
+  continues down the list (wrapping) from there. Each provider rotates over its
+  own keys. The position comes from the date alone — restarts don't reset it —
+  but adding, removing, or disabling a key changes the count and therefore
+  shifts which key starts today. A document saved with an explicit `rotation`
+  keeps it; only fresh installs (or documents without the field) get the
+  default.
 - **Re-enable / disable an upstream key:** GUI → Providers → key switch;
   effective immediately (pools rebuild in-request).
 - **Cooldowns, daily-cap state, and pool counters are in-memory:** a restart
