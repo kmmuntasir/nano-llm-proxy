@@ -255,7 +255,9 @@ Roles: `superadmin` (everything below) and `user` (own keys + dashboard).
 
 | Endpoint | Role | Purpose |
 | --- | --- | --- |
-| `POST /api/auth/login`, `POST /api/auth/logout`, `GET /api/auth/me` | — | Session lifecycle |
+| `POST /api/auth/login`, `POST /api/auth/logout`, `GET /api/auth/me` | — | Session lifecycle. Login answers 403 when password sign-in is disabled (`auth.credentialLogin`) |
+| `GET /api/auth/config` | — (open) | Sign-in methods for the login page: `{"credentialLogin": bool, "google": {"clientId", "domain"?}}`; `google` is omitted when Google sign-in isn't configured |
+| `POST /api/auth/google` | — | Google sign-in: body `{"credential": "<Google ID token>"}`; verifies the token (signature, issuer, audience, expiry, verified email, Workspace domain) and starts the same session as password login. Origin-checked and backoff-limited. 404 when not configured, 401 bad token, 403 outside the domain / unknown email without a domain / disabled account |
 | `GET/POST /api/me/keys`, `PATCH/DELETE /api/me/keys/{keyId}` | user | Own client keys |
 | `GET/POST /api/users`, `PATCH/DELETE /api/users/{id}` | superadmin | User management |
 | `GET/POST /api/users/{id}/keys`, `PATCH/DELETE /api/users/{id}/keys/{keyId}` | superadmin | Per-user client keys |

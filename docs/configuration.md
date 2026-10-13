@@ -25,6 +25,8 @@ environment (so `systemd EnvironmentFile=` and `docker -e` work unchanged).
 | `NANO_DB_PATH` | `gateway.db` | SQLite database (created and migrated at boot, 0600) |
 | `NANO_COOKIE_SECURE` | true | `Secure` flag on GUI session cookies. Set false only for plain-HTTP local use |
 | `NANO_TRUSTED_ORIGINS` | empty | Comma-separated extra Origin hosts accepted on state-changing `/api` requests. Same-host is always allowed. Set your public host here when serving the GUI behind a reverse proxy |
+| `GOOGLE_CLIENT_ID` | empty | Enables Google sign-in on the GUI login page (OAuth 2.0 *Web* client id). The GUI's public origin must be listed under the client's *Authorized JavaScript origins*. No client secret is used — the gateway verifies Google's signed ID token itself |
+| `GOOGLE_WORKSPACE_DOMAIN` | empty | Restricts Google sign-in to one Workspace domain (bare domain, e.g. `example.com`; requires `GOOGLE_CLIENT_ID`). Set: members of the domain self-provision as regular users on first sign-in. Unset: only existing users, matched by email, can sign in with Google |
 
 Malformed values are fatal at boot (`invalid NANO_PORT "…"`), never silently
 ignored. See `.env.example` for a commented template.
@@ -54,6 +56,7 @@ block is server-owned).
 | `kilo.freeOnly` | false | Same catalog restriction as `zen.freeOnly`, applied to Kilo preset providers |
 | `kilo.modelMeta` | empty | Per-model *reasoning* metadata (reasoning flag + reasoning options) for Kilo preset providers, filled by the models.dev sync. Kilo's own catalog already carries context/output limits, modalities and `supported_parameters`, and those always win — only the reasoning facts are taken from here. A model models.dev doesn't document keeps both fields absent rather than an unverified `false` |
 | `zai.modelMeta` | empty | Per-model metadata for Z.ai preset providers (context window, max output, modalities, reasoning, reasoning options, description); filled by the models.dev sync. Unknown models advertise a 1M context window so coding agents don't downshift to 128K |
+| `auth.credentialLogin` | true | Email + password sign-in on the GUI. Can be turned off only when Google sign-in is configured, and only by a superadmin who could sign back in with Google (inside `GOOGLE_WORKSPACE_DOMAIN` when one is set). Treated as on whenever `GOOGLE_CLIENT_ID` is unset, so removing it is the escape hatch |
 | `webTools.enabled` | false | Serve the MCP web tools at `POST /mcp` to every client key. Off after upgrades — the SearXNG/obscura backends must be installed first (see `docs/deployment.md`) |
 | `webTools.searxngUrl` | `http://127.0.0.1:8888` | SearXNG base URL; the JSON API must be enabled there (`search.formats` includes `json`) |
 | `webTools.readerMode` | `fast` | `fast` = native fetch first, escalate to obscura; `render` = obscura first, fall back to native. Either way `web_read`'s `render: true` argument forces the browser leg |

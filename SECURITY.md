@@ -72,6 +72,13 @@ or the GUI will reject its own mutations on Origin.
 email backoff, which blunts credential stuffing, but if you expose the admin
 port to a wide network, put a rate limiter in front of it.
 
+**Google sign-in is optional and verified locally.** With `GOOGLE_CLIENT_ID`
+set, the GUI accepts Google ID tokens: the gateway checks Google's RS256
+signature, issuer, audience, expiry and a verified email itself (no client
+secret is stored). Set `GOOGLE_WORKSPACE_DOMAIN` before exposing it: with a
+domain, its members self-provision as regular users; without one, only
+existing accounts can sign in with Google.
+
 **`web_read` fetches URLs on behalf of authenticated users.** It has SSRF
 protection, but treat the web tools as a privileged feature: enable them only
 if you trust the client keys you have issued.

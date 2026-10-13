@@ -435,7 +435,9 @@ Forgot the password? Run `./nano-llm-proxy -reset-admin-password` with
 - Clients authenticate with `fg-…` keys: stored sha256-hashed, cached in
   memory, and revocation takes effect on the very next request.
 - GUI logins: bcrypt passwords, HttpOnly session cookies, per-IP+email login
-  backoff, Origin checks on state-changing requests.
+  backoff, Origin checks on state-changing requests. Optional Google sign-in
+  verifies Google's signed ID token locally (signature, audience, expiry,
+  verified email, Workspace domain); password sign-in can then be disabled.
 - Upstream provider keys are visible only to the server (the GUI shows hashed
   prefixes and status). They must remain usable verbatim, so they live in the
   SQLite file **without envelope encryption** — keep it at 0600 and out of
@@ -461,6 +463,7 @@ real environment always wins; see `.env.example`). Full reference in
 | `NANO_DB_PATH` | `gateway.db` | SQLite database |
 | `NANO_COOKIE_SECURE` | true | Secure flag on session cookies (false for plain HTTP) |
 | `NANO_TRUSTED_ORIGINS` | empty | Extra Origins allowed on GUI mutations behind a reverse proxy |
+| `GOOGLE_CLIENT_ID` / `GOOGLE_WORKSPACE_DOMAIN` | empty | Optional Google sign-in for the GUI, optionally limited to one Workspace domain (whose members then self-provision as regular users); password sign-in can then be switched off in Settings |
 
 **Runtime** — everything you tune while it runs (rotation, retries, daily
 cap, the Claude fallback, adapter knobs, the model catalogs, web tools)
