@@ -1,10 +1,8 @@
 package gateway
 
 import (
-	"crypto/rand"
 	"crypto/sha256"
 	"encoding/hex"
-	"fmt"
 	"github.com/kmmuntasir/nano-llm-proxy/internal/config"
 	"log"
 	"sort"
@@ -235,21 +233,4 @@ func (p *Pool) healthyCount() int {
 		}
 	}
 	return n
-}
-
-// newZenSessionID fabricates "ses_" + 12 hex + 14 alnum — format-checked only.
-func newZenSessionID() string {
-	hexBuf := make([]byte, 6)
-	if _, err := rand.Read(hexBuf); err != nil {
-		panic(err)
-	}
-	const alphabet = "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789"
-	tail := make([]byte, 14)
-	if _, err := rand.Read(tail); err != nil {
-		panic(err)
-	}
-	for i := range tail {
-		tail[i] = alphabet[int(tail[i])%len(alphabet)]
-	}
-	return fmt.Sprintf("ses_%s%s", hex.EncodeToString(hexBuf), tail)
 }

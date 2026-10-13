@@ -205,7 +205,7 @@ func (g *gateway) messagesViaZen(ref providerRef, w http.ResponseWriter, r *http
 			v := g.classify(ref.pool, k, resp)
 			resp.Body.Close()
 			if v.cooldown > 0 {
-				ref.pool.cooldown(k, v.cooldown, fmt.Sprintf("HTTP %d", v.status))
+				ref.pool.cooldown(k, v.cooldown, fmt.Sprintf("HTTP %d", resp.StatusCode))
 			}
 			switch v.action {
 			case "failfast":
@@ -255,7 +255,7 @@ func (g *gateway) messagesViaZen(ref providerRef, w http.ResponseWriter, r *http
 }
 
 // postUpstream POSTs one upstream attempt. zenFingerprint injects the
-// opencode client fingerprint (UA + session header) — decided by provider
+// opencode client fingerprint (see setZenFingerprint) — decided by provider
 // type, never by URL substring.
 func (g *gateway) postUpstream(r *http.Request, url, key string, body []byte, zenFingerprint bool) (*http.Response, bool) {
 	req, err := http.NewRequestWithContext(r.Context(), http.MethodPost, url, bytes.NewReader(body))
@@ -265,8 +265,7 @@ func (g *gateway) postUpstream(r *http.Request, url, key string, body []byte, ze
 	req.Header.Set("Authorization", "Bearer "+key)
 	req.Header.Set("Content-Type", "application/json")
 	if zenFingerprint {
-		req.Header.Set("User-Agent", g.rs().Zen.UserAgent)
-		req.Header.Set("x-opencode-session", newZenSessionID())
+		setZenFingerprint(req, g.rs().Zen.UserAgent, key)
 	}
 	resp, err := g.client.Do(req)
 	if err != nil {

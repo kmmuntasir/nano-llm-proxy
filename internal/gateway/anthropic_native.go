@@ -51,7 +51,7 @@ func (g *gateway) messagesViaAnthropic(ref providerRef, w http.ResponseWriter, r
 			v := g.classify(ref.pool, k, resp)
 			resp.Body.Close()
 			if v.cooldown > 0 {
-				ref.pool.cooldown(k, v.cooldown, fmt.Sprintf("HTTP %d", v.status))
+				ref.pool.cooldown(k, v.cooldown, fmt.Sprintf("HTTP %d", resp.StatusCode))
 			}
 			if v.action == "failfast" {
 				return v.hint, tokenUsage{}

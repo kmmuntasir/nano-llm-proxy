@@ -54,11 +54,33 @@ type ModelMeta struct {
 	Cost             *ModelCost        `json:"cost,omitempty"`
 }
 
-// UAVersionOK validates "opencode/<semver>" against the server's 1.18.0
-// floor. Enforced on settings saves and at boot.
+// DefaultZenUserAgent mirrors the opencode release the zen fingerprint was
+// last captured from (see internal/gateway/zenfp.go).
+const DefaultZenUserAgent = "opencode/latest/2.0.27/cli"
+
+// UAVersionOK validates an opencode user agent against the server's 1.18.0
+// floor. Enforced on settings saves and at boot. Accepts both the 1.x shape
+// "opencode/<semver>" and the 2.x shape "opencode/<channel>/<semver>/<client>"
+// (e.g. "opencode/latest/2.0.27/cli").
 func UAVersionOK(ua string) bool {
+	rest, ok := strings.CutPrefix(ua, "opencode/")
+	if !ok {
+		return false
+	}
+	parts := strings.Split(rest, "/")
+	switch len(parts) {
+	case 1:
+		rest = parts[0]
+	case 3:
+		if parts[0] == "" || parts[2] == "" {
+			return false
+		}
+		rest = parts[1]
+	default:
+		return false
+	}
 	var maj, min, pat int
-	if n, _ := fmt.Sscanf(ua, "opencode/%d.%d.%d", &maj, &min, &pat); n < 2 {
+	if n, _ := fmt.Sscanf(rest, "%d.%d.%d", &maj, &min, &pat); n < 2 {
 		return false
 	}
 	if maj != 1 {
@@ -178,7 +200,7 @@ func DefaultRuntimeSettings() *RuntimeSettings {
 		},
 		Anthropic: AnthropicSettings{},
 		Zen: ZenSettings{
-			UserAgent:   "opencode/1.18.32",
+			UserAgent:   DefaultZenUserAgent,
 			InjectTools: true,
 			ModelMeta:   map[string]ModelMeta{},
 		},
@@ -212,7 +234,7 @@ func (rs *RuntimeSettings) ApplyDefaults() *RuntimeSettings {
 		rs.Retry.MaxKeysPerRequest = 3
 	}
 	if rs.Zen.UserAgent == "" {
-		rs.Zen.UserAgent = "opencode/1.18.32"
+		rs.Zen.UserAgent = DefaultZenUserAgent
 	}
 	if rs.Zen.ModelMeta == nil {
 		rs.Zen.ModelMeta = map[string]ModelMeta{}

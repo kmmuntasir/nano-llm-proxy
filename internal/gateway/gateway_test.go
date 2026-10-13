@@ -193,7 +193,7 @@ func TestZenFingerprintInjection(t *testing.T) {
 	if rec.Code != 200 {
 		t.Fatalf("expected 200, got %d %s", rec.Code, rec.Body.String())
 	}
-	if gotUA != "opencode/1.18.32" {
+	if gotUA != settings.DefaultZenUserAgent {
 		t.Fatalf("UA not set: %q", gotUA)
 	}
 	if !validZenSession(gotSession) {
@@ -222,7 +222,7 @@ func validZenSession(s string) bool {
 			return false
 		}
 	}
-	return true
+	return zenSessionFresh(s, time.Now())
 }
 
 func TestSurfaceFlipOn503(t *testing.T) {
@@ -381,7 +381,7 @@ func TestResponsesEndpointAggregation(t *testing.T) {
 		t.Fatalf("usage not mapped: %v", usage)
 	}
 	// fingerprint checks
-	if gotUA != "opencode/1.18.32" || !validZenSession(gotSession) {
+	if gotUA != settings.DefaultZenUserAgent || !validZenSession(gotSession) {
 		t.Fatalf("fingerprint missing: ua=%q session=%q", gotUA, gotSession)
 	}
 	if s, _ := gotBody["stream"].(bool); !s {
@@ -838,6 +838,8 @@ func TestUAVersionFloor(t *testing.T) {
 		"opencode/1.0.0": false, "opencode/1.17.9": false, "opencode/1.18.0": true,
 		"opencode/1.18.32": true, "opencode/2.0.0": true, "opencode/9.9.9": true,
 		"opencode": false, "myapp/1.0": false, "opencode/1.18": true,
+		"opencode/latest/2.0.27/cli": true, "opencode/latest/1.17.9/cli": false,
+		"opencode/latest/2.0.27": false, "opencode//2.0.27/cli": false,
 	}
 	for ua, want := range cases {
 		if got := settings.UAVersionOK(ua); got != want {

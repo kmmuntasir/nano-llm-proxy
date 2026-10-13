@@ -11,6 +11,21 @@ Release notes are generated from commit prefixes, so `feat:`, `fix:`,
 
 ### Fixed
 
+- zen free models work again. Since 2026-10-12 zen validates the
+  `x-opencode-session` header as a real opencode identifier, and the
+  gateway's random `ses_` ids drew `403 FreeTierError` on every request. The
+  gateway now mints opencode-encoded session ids and sends the full opencode
+  2.x fingerprint (`x-opencode-client`, `x-opencode-project`, the session id
+  under all four session headers, `traceparent`/`b3`).
+- Key cooldown logs show the upstream status (`HTTP 429`) instead of
+  `HTTP 0`.
+
+### Changed
+
+- Default `zen.userAgent` is now `opencode/latest/2.0.27/cli`; the 1.18.0
+  floor check accepts both the 1.x `opencode/X.Y.Z` and the 2.x
+  `opencode/<channel>/X.Y.Z/<client>` shapes.
+
 - zen models fronted by a strict role validator (e.g. `fledge-alpha-free`)
   no longer 502 for pi / oh-my-pi. Those clients send the instruction message
   as `role: "developer"` whenever the catalog says the model reasons — which

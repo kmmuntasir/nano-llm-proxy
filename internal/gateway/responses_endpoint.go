@@ -104,8 +104,7 @@ func (g *gateway) proxyZenResponses(ref providerRef, w http.ResponseWriter, r *h
 		}
 		req.Header.Set("Authorization", "Bearer "+k.Key)
 		req.Header.Set("Content-Type", "application/json")
-		req.Header.Set("User-Agent", g.rs().Zen.UserAgent)
-		req.Header.Set("x-opencode-session", newZenSessionID())
+		setZenFingerprint(req, g.rs().Zen.UserAgent, k.Key)
 
 		resp, err := g.client.Do(req)
 		if err != nil {
@@ -117,7 +116,7 @@ func (g *gateway) proxyZenResponses(ref providerRef, w http.ResponseWriter, r *h
 			v := g.classify(ref.pool, k, resp)
 			resp.Body.Close()
 			if v.cooldown > 0 {
-				ref.pool.cooldown(k, v.cooldown, fmt.Sprintf("HTTP %d", v.status))
+				ref.pool.cooldown(k, v.cooldown, fmt.Sprintf("HTTP %d", resp.StatusCode))
 			}
 			if v.action == "failfast" {
 				return v.hint
