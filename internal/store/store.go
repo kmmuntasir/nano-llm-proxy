@@ -164,6 +164,11 @@ func (s *Store) Migrate() error {
 			return err
 		}
 	}
+	if !version.Valid || version.Int64 < 6 {
+		if err := s.migrateV6(); err != nil {
+			return err
+		}
+	}
 	return nil
 }
 
@@ -326,6 +331,44 @@ func (s *Store) migrateV5() error {
 		return err
 	}
 	if _, err := tx.Exec(`INSERT INTO schema_migrations (version, applied_at) VALUES (5, ?)`, time.Now().Unix()); err != nil {
+		return err
+	}
+	return tx.Commit()
+}
+
+// migrateV6 enriches usage_events with per-request detail for usage
+// monitoring v2: the client surface, stream flag, upstream outcome (status,
+// serving key label, time to first upstream byte, keys tried), the hint
+// shown on failure, and email/alias snapshots so rows stay labelled after a
+// user or key is deleted. Every column is NOT NULL with a default, so
+// pre-V6 rows remain valid (empty/zero = "not recorded"). Indexes cover the
+// model and user×model filters; provider filters ride idx_usage_ts (few
+// providers, so a (provider, ts) index would mostly cost write amplification).
+func (s *Store) migrateV6() error {
+	tx, err := s.db.Begin()
+	if err != nil {
+		return err
+	}
+	defer tx.Rollback()
+	stmts := []string{
+		`ALTER TABLE usage_events ADD COLUMN surface TEXT NOT NULL DEFAULT ''`,
+		`ALTER TABLE usage_events ADD COLUMN stream INTEGER NOT NULL DEFAULT 0`,
+		`ALTER TABLE usage_events ADD COLUMN upstream_status INTEGER NOT NULL DEFAULT 0`,
+		`ALTER TABLE usage_events ADD COLUMN fail_reason TEXT NOT NULL DEFAULT ''`,
+		`ALTER TABLE usage_events ADD COLUMN upstream_key TEXT NOT NULL DEFAULT ''`,
+		`ALTER TABLE usage_events ADD COLUMN ttfb_ms INTEGER NOT NULL DEFAULT 0`,
+		`ALTER TABLE usage_events ADD COLUMN attempts INTEGER NOT NULL DEFAULT 0`,
+		`ALTER TABLE usage_events ADD COLUMN user_email TEXT NOT NULL DEFAULT ''`,
+		`ALTER TABLE usage_events ADD COLUMN key_alias TEXT NOT NULL DEFAULT ''`,
+		`CREATE INDEX idx_usage_model_ts ON usage_events(model, ts)`,
+		`CREATE INDEX idx_usage_user_model_ts ON usage_events(user_id, model, ts)`,
+	}
+	for _, q := range stmts {
+		if _, err := tx.Exec(q); err != nil {
+			return fmt.Errorf("migrate v6: %w", err)
+		}
+	}
+	if _, err := tx.Exec(`INSERT INTO schema_migrations (version, applied_at) VALUES (6, ?)`, time.Now().Unix()); err != nil {
 		return err
 	}
 	return tx.Commit()
@@ -1093,6 +1136,16 @@ type UsageEvent struct {
 	OutputTokens int64
 	Status       int
 	DurationMs   int64
+	// V6 detail (zero values = not recorded).
+	Surface        string // chat | messages | responses | mcp
+	Stream         bool
+	UpstreamStatus int    // last upstream HTTP status (0 = none / network error)
+	FailReason     string // client-facing hint on failure (≤300 chars)
+	UpstreamKey    string // label of the serving / last-tried upstream key
+	TtfbMs         int64  // request start → first upstream 200
+	Attempts       int    // upstream calls made
+	UserEmail      string // snapshot at request time
+	KeyAlias       string // snapshot at request time
 }
 
 // InsertUsageEvents persists one flushed batch in a single transaction.
@@ -1107,10 +1160,13 @@ func (s *Store) InsertUsageEvents(events []UsageEvent) error {
 	defer tx.Rollback()
 	for _, e := range events {
 		if _, err := tx.Exec(`INSERT INTO usage_events
-			(ts, user_id, client_key_id, provider, model, input_tokens, output_tokens, status, duration_ms)
-			VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+			(ts, user_id, client_key_id, provider, model, input_tokens, output_tokens, status, duration_ms,
+			 surface, stream, upstream_status, fail_reason, upstream_key, ttfb_ms, attempts, user_email, key_alias)
+			VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
 			e.TS, e.UserID, e.ClientKeyID, e.Provider, e.Model,
-			e.InputTokens, e.OutputTokens, e.Status, e.DurationMs); err != nil {
+			e.InputTokens, e.OutputTokens, e.Status, e.DurationMs,
+			e.Surface, e.Stream, e.UpstreamStatus, e.FailReason, e.UpstreamKey,
+			e.TtfbMs, e.Attempts, e.UserEmail, e.KeyAlias); err != nil {
 			return err
 		}
 	}

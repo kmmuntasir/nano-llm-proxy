@@ -17,12 +17,14 @@ func (g *gateway) proxyOpenAI(ref providerRef, w http.ResponseWriter, r *http.Re
 	exclude := map[string]bool{}
 	var lastHint string
 
+	tr := traceFrom(r)
 	for attempt := 0; attempt < g.rs().Retry.MaxKeysPerRequest; attempt++ {
 		k := ref.pool.pick(exclude)
 		if k == nil {
 			break
 		}
 		exclude[k.Hash] = true
+		tr.attempt(k.Label)
 		req, err := http.NewRequestWithContext(r.Context(), http.MethodPost,
 			ref.baseURL+"/chat/completions", bytes.NewReader(raw))
 		if err != nil {
@@ -32,10 +34,12 @@ func (g *gateway) proxyOpenAI(ref providerRef, w http.ResponseWriter, r *http.Re
 		req.Header.Set("Content-Type", "application/json")
 		resp, err := g.client.Do(req)
 		if err != nil {
+			tr.upstream(0)
 			ref.pool.cooldown(k, 10*time.Second, "network: "+err.Error())
 			lastHint = "upstream network error"
 			continue
 		}
+		tr.upstream(resp.StatusCode)
 		if resp.StatusCode != http.StatusOK {
 			v := g.classify(ref.pool, k, resp)
 			resp.Body.Close()

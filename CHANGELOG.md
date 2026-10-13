@@ -21,6 +21,13 @@ Release notes are generated from commit prefixes, so `feat:`, `fix:`,
   `HTTP 0`.
 - Untagged builds (`go build` without `-tags prod`) no longer panic at
   startup on a duplicate `/` route; they serve the GUI-not-built stub.
+- `/api/dashboard` no longer shows every user's recent requests to every
+  logged-in user. Non-superadmins now get only their own activity entries
+  (upstream key hash blanked) and pool health counts without per-key views.
+- Client-facing errors for a rejected upstream key no longer include the
+  key's label.
+- Usage date ranges reject negative bounds and clamp `to` to now; extreme
+  values could previously hang or exhaust memory in the bucketed endpoints.
 
 ### Changed
 
@@ -43,6 +50,22 @@ Release notes are generated from commit prefixes, so `feat:`, `fix:`,
 
 ### Added
 
+- Usage monitoring v2 (backend). `usage_events` gains per-request detail
+  (migration V6): client surface, stream flag, upstream attempts, last
+  upstream status, serving upstream key label, time to first upstream byte,
+  the fail hint (≤ 300 chars), and email/alias snapshots so rows stay
+  labelled after a user or key is deleted. Requests rejected before routing
+  (bad model string, unknown/revoked provider) are now recorded with their
+  4xx status. New session endpoints `GET /api/usage/overview`, `/breakdown`
+  (grouped, paged, sortable, searchable), `/series` (top-N + other),
+  `/requests` (raw log) and `/facets`, with strict parameter validation and
+  per-user scoping; cross-user groupings are superadmin-only.
+- Usage monitoring v2 (admin GUI). The Usage page becomes a tabbed section —
+  Overview, Users, Models, Users × Models, Requests — with user and model
+  drill-down pages, a shared filter bar (range presets, user, provider,
+  model, client key, surface, status) kept in the URL, server-side paginated
+  and sortable tables, and charts for requests/errors, tokens, latency and
+  top-N series. Users and Users × Models are superadmin-only.
 - `/v1/models` entries now carry `context_length` alongside
   `context_window` (same value — different agents read different spellings,
   and a missing field is read as "unknown, assume 128K").

@@ -166,6 +166,9 @@ func TestMCPSearchCallMetersUsage(t *testing.T) {
 	if found.Status != 200 || found.OutputTokens <= 0 || found.UserID == 0 {
 		t.Fatalf("bad usage event: %+v", found)
 	}
+	if found.Surface != "mcp" || found.UserEmail == "" {
+		t.Fatalf("web-tools event missing surface/snapshot: %+v", found)
+	}
 	_ = st
 }
 

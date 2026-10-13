@@ -5,6 +5,7 @@ import (
 	"errors"
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 	"time"
 
@@ -168,8 +169,8 @@ func TestMigrateV4ConvertsBuiltinKiloToPreset(t *testing.T) {
 	}
 
 	var version int64
-	if err := s.db.QueryRow(`SELECT MAX(version) FROM schema_migrations`).Scan(&version); err != nil || version != 5 {
-		t.Fatalf("schema version = %d, %v; want 5", version, err)
+	if err := s.db.QueryRow(`SELECT MAX(version) FROM schema_migrations`).Scan(&version); err != nil || version != 6 {
+		t.Fatalf("schema version = %d, %v; want 6", version, err)
 	}
 }
 
@@ -347,5 +348,164 @@ func TestSettingsCorruptRow(t *testing.T) {
 	}
 	if _, err := st.LoadRuntimeSettings(); err == nil {
 		t.Fatal("expected an error for a corrupt settings row")
+	}
+}
+
+func TestMigrateV6EnrichesExistingUsageRows(t *testing.T) {
+	db, err := sql.Open("sqlite", ":memory:")
+	if err != nil {
+		t.Fatalf("sql.Open: %v", err)
+	}
+	defer db.Close()
+	db.SetMaxOpenConns(1)
+	s := &Store{db: db}
+
+	// a V5 database with one pre-V6 usage row
+	if _, err := s.db.Exec(`CREATE TABLE IF NOT EXISTS schema_migrations (
+		version INTEGER PRIMARY KEY, applied_at INTEGER NOT NULL)`); err != nil {
+		t.Fatalf("create migrations table: %v", err)
+	}
+	for _, mig := range []func() error{s.migrateV1, s.migrateV2, s.migrateV3, s.migrateV4, s.migrateV5} {
+		if err := mig(); err != nil {
+			t.Fatalf("migrate: %v", err)
+		}
+	}
+	const ts = int64(1790000000)
+	if _, err := s.db.Exec(`INSERT INTO usage_events
+		(ts, user_id, client_key_id, provider, model, input_tokens, output_tokens, status, duration_ms)
+		VALUES (?, 42, 7, 'zen', 'old-model', 3, 4, 200, 120)`, ts); err != nil {
+		t.Fatalf("seed pre-V6 row: %v", err)
+	}
+
+	if err := s.Migrate(); err != nil {
+		t.Fatalf("Migrate: %v", err)
+	}
+	var version int64
+	if err := s.db.QueryRow(`SELECT MAX(version) FROM schema_migrations`).Scan(&version); err != nil || version != 6 {
+		t.Fatalf("schema version = %d, %v; want 6", version, err)
+	}
+	for idx, want := range map[string]int{
+		"idx_usage_model_ts":      1,
+		"idx_usage_user_model_ts": 1,
+		"idx_usage_provider_ts":   0, // provider filters ride idx_usage_ts
+	} {
+		var n int
+		if err := s.db.QueryRow(`SELECT COUNT(*) FROM sqlite_master WHERE type='index' AND name=?`, idx).Scan(&n); err != nil || n != want {
+			t.Errorf("index %s: n=%d want %d (err=%v)", idx, n, want, err)
+		}
+	}
+
+	// the old row survives with defaults and gets placeholder labels
+	f := UsageFilter{From: ts - 10, To: ts + 10}
+	rows, total, err := s.UsageRequests(f, "ts", true, 1, 10)
+	if err != nil || total != 1 || len(rows) != 1 {
+		t.Fatalf("requests after V6: total=%d rows=%d err=%v", total, len(rows), err)
+	}
+	old := rows[0]
+	if old.Surface != "" || old.Stream || old.UpstreamStatus != 0 || old.Attempts != 0 || old.TtfbMs != 0 || old.FailReason != "" {
+		t.Errorf("pre-V6 row did not get zero defaults: %+v", old)
+	}
+	if old.Email != "deleted user #42" || old.Alias != "deleted key #7" || old.InputTokens != 3 {
+		t.Errorf("pre-V6 row labels/data wrong: %+v", old)
+	}
+
+	// new rows round-trip every V6 column
+	if err := s.InsertUsageEvents([]UsageEvent{{
+		TS: ts + 1, UserID: 42, ClientKeyID: 7, Provider: "zen", Model: "new-model",
+		Status: 502, DurationMs: 900, Surface: "messages", Stream: true, UpstreamStatus: 429,
+		FailReason: "all keys cooling", UpstreamKey: "key-b", TtfbMs: 0, Attempts: 3,
+		UserEmail: "gone@example.com", KeyAlias: "laptop",
+	}}); err != nil {
+		t.Fatalf("insert V6 row: %v", err)
+	}
+	rows, _, err = s.UsageRequests(f, "ts", true, 1, 10)
+	if err != nil || len(rows) != 2 {
+		t.Fatalf("requests: %d rows err=%v", len(rows), err)
+	}
+	n := rows[0]
+	if n.Surface != "messages" || !n.Stream || n.UpstreamStatus != 429 || n.FailReason != "all keys cooling" ||
+		n.UpstreamKey != "key-b" || n.Attempts != 3 || n.Status != 502 {
+		t.Errorf("V6 columns did not round-trip: %+v", n)
+	}
+	// snapshots label rows whose user/key rows are gone
+	if n.Email != "gone@example.com" || n.Alias != "laptop" {
+		t.Errorf("snapshot labels not used: email=%q alias=%q", n.Email, n.Alias)
+	}
+}
+
+func TestUsageBreakdownRejectsUnknownSQLFragments(t *testing.T) {
+	st := openTestStore(t)
+	f := UsageFilter{From: 0, To: 10}
+	for _, q := range []UsageBreakdownQuery{
+		{Filter: f, GroupBy: "model; DROP TABLE users", Sort: "requests", Page: 1, PageSize: 10},
+		{Filter: f, GroupBy: "model", Sort: "requests DESC; --", Page: 1, PageSize: 10},
+		{Filter: f, GroupBy: "model", Sort: "requests", Page: 0, PageSize: 10},
+	} {
+		if _, _, _, err := st.UsageBreakdown(q); !errors.Is(err, ErrUsageParam) {
+			t.Errorf("UsageBreakdown(%+v) err = %v, want ErrUsageParam", q, err)
+		}
+	}
+	if _, _, err := st.UsageRequests(f, "id; --", true, 1, 10); !errors.Is(err, ErrUsageParam) {
+		t.Errorf("UsageRequests bad sort err = %v", err)
+	}
+	if _, err := st.UsageSeriesByGroup(f, "model", "bogus", 3600, 0, 5); !errors.Is(err, ErrUsageParam) {
+		t.Errorf("UsageSeriesByGroup bad metric err = %v", err)
+	}
+}
+
+// usageBuckets is the last line of defence against hostile ranges: it must
+// refuse oversized spans and never loop on a wrapping cursor.
+func TestUsageBucketsBounded(t *testing.T) {
+	const maxI, minI = int64(^uint64(0) >> 1), -int64(^uint64(0)>>1) - 1
+	for _, tc := range []struct {
+		name     string
+		from, to int64
+	}{
+		{"whole int64 span", 0, maxI},
+		{"negative from", minI, 0},
+		{"inverted", 10, 5},
+		{"just over cap", 0, usageMaxBuckets * 3600},
+	} {
+		if _, err := usageBuckets(tc.from, tc.to, 3600, 0); !errors.Is(err, ErrUsageParam) {
+			t.Errorf("%s: err = %v, want ErrUsageParam", tc.name, err)
+		}
+	}
+	// near MaxInt64 the cursor would wrap; it must stop instead
+	got, err := usageBuckets(maxI-10, maxI, 3600, 3600)
+	if err != nil || len(got) == 0 || len(got) > 2 {
+		t.Fatalf("near-MaxInt64 range: %d buckets, err %v", len(got), err)
+	}
+	got, err = usageBuckets(0, 2*3600, 3600, 0)
+	if err != nil || len(got) != 3 || got[0] != 0 || got[2] != 7200 {
+		t.Fatalf("ordinary range: %v, %v", got, err)
+	}
+}
+
+// The overview's totals and p95 queries must read the ts index, not scan the
+// table.
+func TestUsageOverviewUsesTsIndex(t *testing.T) {
+	s := openTestStore(t)
+	where, args := UsageFilter{From: 1, To: 2}.where()
+	for _, q := range []string{
+		`SELECT COUNT(*), SUM(CASE WHEN e.status < 400 THEN 1 ELSE 0 END) FROM usage_events e WHERE ` + where,
+		`SELECT e.duration_ms FROM usage_events e WHERE ` + where + ` AND e.status < 400 ORDER BY e.duration_ms LIMIT 1 OFFSET 0`,
+	} {
+		rows, err := s.db.Query(`EXPLAIN QUERY PLAN `+q, args...)
+		if err != nil {
+			t.Fatalf("explain: %v", err)
+		}
+		var plan string
+		for rows.Next() {
+			var id, parent, notused int
+			var detail string
+			if err := rows.Scan(&id, &parent, &notused, &detail); err != nil {
+				t.Fatalf("scan: %v", err)
+			}
+			plan += detail + "; "
+		}
+		rows.Close()
+		if !strings.Contains(plan, "idx_usage_ts") {
+			t.Errorf("plan does not use idx_usage_ts: %s", plan)
+		}
 	}
 }

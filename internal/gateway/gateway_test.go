@@ -129,13 +129,17 @@ func TestAuthErrorDisablesKey(t *testing.T) {
 		Kilo: config.KiloProviderConfig{BaseURL: up.URL},
 	}
 	rs := testRuntime()
-	kf := &config.KeyFile{Kilo: []config.KeyFileEntry{{Label: "a", Key: "sk-a"}, {Label: "b", Key: "sk-b"}}}
+	kf := &config.KeyFile{Kilo: []config.KeyFileEntry{{Label: "ops-label-a", Key: "sk-a"}, {Label: "ops-label-b", Key: "sk-b"}}}
 	g := newGateway(cfg, rs, kf)
 	rec := httptest.NewRecorder()
 	g.handleChat(rec, chatReq("kilo", "some-model"))
 	// both keys get disabled -> no healthy keys -> 502
 	if rec.Code != 502 {
 		t.Fatalf("expected 502 when all keys auth-fail, got %d", rec.Code)
+	}
+	// the operator's key labels must never reach the client
+	if body := rec.Body.String(); strings.Contains(body, "ops-label") {
+		t.Fatalf("client error leaks an upstream key label: %s", body)
 	}
 	snap := g.kilo.snapshot()
 	for _, k := range snap {

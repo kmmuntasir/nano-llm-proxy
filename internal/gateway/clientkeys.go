@@ -80,6 +80,7 @@ func withClientKey(r *http.Request, e clientKeyEntry) *http.Request {
 
 type activityEntry struct {
 	TS         int64  `json:"ts"`
+	UserID     int64  `json:"-"` // client-key owner; scopes the dashboard ring
 	KeyAlias   string `json:"keyAlias"`
 	User       string `json:"user"` // email of the client-key owner
 	Provider   string `json:"provider"`
@@ -128,14 +129,24 @@ func (u *usageTracker) addActivity(e activityEntry) {
 
 // recent returns up to n activity entries, newest first.
 func (u *usageTracker) recent(n int) []activityEntry {
+	return u.recentWhere(n, nil)
+}
+
+// recentWhere returns up to n entries matching keep (nil = all), newest
+// first. Filtering happens while walking the ring so a scoped caller gets n
+// of their own entries rather than whatever survives a global top-n cut.
+func (u *usageTracker) recentWhere(n int, keep func(activityEntry) bool) []activityEntry {
 	u.mu.Lock()
 	defer u.mu.Unlock()
-	out := make([]activityEntry, 0, n)
+	out := make([]activityEntry, 0, min(n, activityRingSize))
 	for i := 0; i < activityRingSize && len(out) < n; i++ {
 		idx := (u.ringIdx - 1 - i + activityRingSize) % activityRingSize
 		e := u.ring[idx]
 		if e.TS == 0 {
 			break // never-filled slot; ring is ordered, so we're done
+		}
+		if keep != nil && !keep(e) {
+			continue
 		}
 		out = append(out, e)
 	}

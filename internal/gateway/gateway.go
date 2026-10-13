@@ -275,7 +275,9 @@ func (g *gateway) classify(pool *Pool, k *KeyState, resp *http.Response) verdict
 		// zen occasionally wraps upstream flakes as 401 server_error — only a
 		// genuine auth rejection disables the key; everything else just cools.
 		if strings.Contains(string(body), "AuthError") || strings.Contains(string(body), "Invalid API key") {
-			v.hint = fmt.Sprintf("key %s rejected (401 auth) — disabled", k.Label)
+			// the hint reaches the client and fail_reason: never name the
+			// operator's key there — pool.disable logs the label server-side
+			v.hint = "an upstream key was rejected (401 auth) and disabled"
 			pool.disable(k, "401 auth")
 		} else {
 			v.cooldown = 10 * time.Second
@@ -287,7 +289,7 @@ func (g *gateway) classify(pool *Pool, k *KeyState, resp *http.Response) verdict
 			v.status = http.StatusBadGateway
 			v.hint = freeTierHint
 		} else if strings.Contains(string(body), "AuthError") || strings.Contains(string(body), "auth") {
-			v.hint = fmt.Sprintf("key %s rejected (403 auth) — disabled", k.Label)
+			v.hint = "an upstream key was rejected (403 auth) and disabled"
 			pool.disable(k, "403 auth")
 		} else {
 			v.cooldown = 10 * time.Second
@@ -377,14 +379,19 @@ func (g *gateway) handleChat(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	model, _ := body["model"].(string)
+	traceFrom(r).setStream(bodyStreamFlag(body))
 	parts := strings.SplitN(model, "/", 2)
 	if len(parts) != 2 || parts[0] == "" || parts[1] == "" {
-		writeErr(w, http.StatusBadRequest, `Model must be "<provider>/<id>" (e.g. zen/mimo-...)`)
+		msg := `Model must be "<provider>/<id>" (e.g. zen/mimo-...)`
+		g.recordClientError(r, "", model, start, http.StatusBadRequest, msg)
+		writeErr(w, http.StatusBadRequest, msg)
 		return
 	}
 	ref, ok := g.providerFor(r, parts[0])
 	if !ok {
-		writeErr(w, http.StatusBadRequest, fmt.Sprintf("Unknown provider %q — see GET /v1/models", parts[0]))
+		msg := fmt.Sprintf("Unknown provider %q — see GET /v1/models", parts[0])
+		g.recordClientError(r, parts[0], parts[1], start, http.StatusBadRequest, msg)
+		writeErr(w, http.StatusBadRequest, msg)
 		return
 	}
 	provider, upstreamModel := parts[0], parts[1]
@@ -418,10 +425,17 @@ func (g *gateway) handleChat(w http.ResponseWriter, r *http.Request) {
 // recordActivity files one completed request into the dashboard ring and the
 // persisted usage log (proxies record their own successes with the serving
 // upstream key; callers record failures with the client-facing reason).
+//
+// The per-request trace (attached by clientOnly) contributes the surface,
+// stream flag, attempts, last upstream status/key label and TTFB.
 func (g *gateway) recordActivity(r *http.Request, ref providerRef, model, upstreamHash string, start time.Time, status int, failReason string, tokens tokenUsage) {
+	failReason = truncateReason(failReason)
+	// model and provider can be raw client input (recordClientError)
+	model = truncateRunes(model, maxUsageLabel)
+	providerName := truncateRunes(ref.name, maxUsageLabel)
 	e := activityEntry{
 		TS:         time.Now().Unix(),
-		Provider:   ref.name,
+		Provider:   providerName,
 		Model:      model,
 		KeyHash:    upstreamHash,
 		Status:     status,
@@ -431,19 +445,42 @@ func (g *gateway) recordActivity(r *http.Request, ref providerRef, model, upstre
 	if ck, ok := contextClientKey(r); ok {
 		e.KeyAlias = ck.Alias
 		e.User = ck.UserEmail
+		e.UserID = ck.UserID
 		if g.store != nil {
+			tr := traceFrom(r).snapshot()
+			surface := tr.surface
+			if surface == "" {
+				surface = surfaceForPath(r.URL.Path)
+			}
 			g.usageBuf.add(store.UsageEvent{
-				TS:           e.TS,
-				UserID:       ck.UserID,
-				ClientKeyID:  ck.ID,
-				Provider:     ref.name,
-				Model:        model,
-				InputTokens:  tokens.in,
-				OutputTokens: tokens.out,
-				Status:       status,
-				DurationMs:   e.DurationMs,
+				TS:             e.TS,
+				UserID:         ck.UserID,
+				ClientKeyID:    ck.ID,
+				Provider:       providerName,
+				Model:          model,
+				InputTokens:    tokens.in,
+				OutputTokens:   tokens.out,
+				Status:         status,
+				DurationMs:     e.DurationMs,
+				Surface:        surface,
+				Stream:         tr.stream,
+				UpstreamStatus: tr.upstreamStatus,
+				FailReason:     failReason,
+				UpstreamKey:    tr.upstreamKey,
+				TtfbMs:         tr.ttfbMs,
+				Attempts:       tr.attempts,
+				UserEmail:      ck.UserEmail,
+				KeyAlias:       ck.Alias,
 			})
 		}
 	}
 	g.usage.addActivity(e)
+}
+
+// recordClientError files a request rejected before routing (malformed model
+// string, unknown or revoked provider) so the usage log shows why an
+// authenticated client got nothing. Unauthenticated requests never reach the
+// handlers, so every recorded row has an owner.
+func (g *gateway) recordClientError(r *http.Request, provider, model string, start time.Time, status int, msg string) {
+	g.recordActivity(r, providerRef{name: provider}, model, "", start, status, msg, tokenUsage{})
 }

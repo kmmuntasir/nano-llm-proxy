@@ -74,6 +74,11 @@ func (g *gateway) RegisterRoutes(mux *http.ServeMux, webFS fs.FS) {
 	mux.HandleFunc("GET /api/usage/users", g.requireSession(g.requireSuperadmin(g.handleUsageUsers)))
 	mux.HandleFunc("GET /api/usage/keys", g.requireSession(g.handleUsageKeys))
 	mux.HandleFunc("GET /api/usage/activity", g.requireSession(g.handleUsageActivity))
+	mux.HandleFunc("GET /api/usage/overview", g.requireSession(g.handleUsageOverview))
+	mux.HandleFunc("GET /api/usage/breakdown", g.requireSession(g.handleUsageBreakdown))
+	mux.HandleFunc("GET /api/usage/series", g.requireSession(g.handleUsageSeries))
+	mux.HandleFunc("GET /api/usage/requests", g.requireSession(g.handleUsageRequests))
+	mux.HandleFunc("GET /api/usage/facets", g.requireSession(g.handleUsageFacets))
 
 	// untagged builds pass a nil FS; the caller mounts its own "/" stub
 	if webFS != nil {
@@ -125,7 +130,7 @@ func (g *gateway) clientOnly(next http.HandlerFunc) http.HandlerFunc {
 				return
 			}
 			g.usage.record(ck.ID)
-			next(w, withClientKey(r, ck))
+			next(w, withTrace(withClientKey(r, ck)))
 			return
 		}
 		// legacy path (store==nil tests): static allowlist

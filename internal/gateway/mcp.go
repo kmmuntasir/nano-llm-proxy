@@ -191,6 +191,7 @@ func (g *gateway) meterWebTool(ctx context.Context, model string, status int, ou
 	if ck, ok := clientKeyFromContext(ctx); ok {
 		e.KeyAlias = ck.Alias
 		e.User = ck.UserEmail
+		e.UserID = ck.UserID
 		g.usageBuf.add(store.UsageEvent{
 			TS:           e.TS,
 			UserID:       ck.UserID,
@@ -200,6 +201,10 @@ func (g *gateway) meterWebTool(ctx context.Context, model string, status int, ou
 			OutputTokens: int64(outChars) / 4, // rough chars→tokens for usage views
 			Status:       status,
 			DurationMs:   e.DurationMs,
+			Surface:      "mcp",
+			FailReason:   e.FailReason,
+			UserEmail:    ck.UserEmail,
+			KeyAlias:     ck.Alias,
 		})
 	}
 	g.usage.addActivity(e)

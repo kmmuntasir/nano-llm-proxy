@@ -28,12 +28,14 @@ func (g *gateway) messagesViaAnthropic(ref providerRef, w http.ResponseWriter, r
 	exclude := map[string]bool{}
 	var lastHint string
 
+	tr := traceFrom(r)
 	for attempt := 0; attempt < g.rs().Retry.MaxKeysPerRequest; attempt++ {
 		k := ref.pool.pick(exclude)
 		if k == nil {
 			break
 		}
 		exclude[k.Hash] = true
+		tr.attempt(k.Label)
 		httpReq, err := http.NewRequestWithContext(r.Context(), http.MethodPost,
 			ref.anthropicBaseURL+"/v1/messages", bytes.NewReader(raw))
 		if err != nil {
@@ -43,10 +45,12 @@ func (g *gateway) messagesViaAnthropic(ref providerRef, w http.ResponseWriter, r
 		httpReq.Header.Set("x-api-key", k.Key)
 		resp, err := g.client.Do(httpReq)
 		if err != nil {
+			tr.upstream(0)
 			ref.pool.cooldown(k, 10*time.Second, "network")
 			lastHint = "upstream network error"
 			continue
 		}
+		tr.upstream(resp.StatusCode)
 		if resp.StatusCode != http.StatusOK {
 			v := g.classify(ref.pool, k, resp)
 			resp.Body.Close()

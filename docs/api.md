@@ -259,7 +259,7 @@ Roles: `superadmin` (everything below) and `user` (own keys + dashboard).
 | `GET /api/settings` | superadmin | Effective runtime settings document (rotation, retries, Claude fallback, adapter knobs, model catalog) |
 | `PUT /api/settings` | superadmin | Validate and replace the document; omitted fields fall back to defaults, the models.dev sync status is server-owned and preserved. Validation failures return 400 and change nothing. Applies in-request — pool mode and the `/v1/models` cache refresh before the response |
 | `POST /api/settings/model-meta/sync` | superadmin | Run the models.dev catalog sync now; returns the sync status (200 even when `ok:false` — the error is in the status block) |
-| `GET /api/dashboard` | user | Pool health, per-key counters, recent activity |
+| `GET /api/dashboard` | user | Pool health and recent activity. Superadmins get per-key pool views and the full activity ring; other users get health counts only (`keys: []`) and just their own activity entries, with the upstream `keyHash` blanked |
 | `GET /api/models` | user | The merged, enriched model catalog (same body `/v1/models` serves) — backs the Models page |
 | `GET /api/providers/{id}/models` | superadmin | One provider's live catalog, fetched on demand |
 | `PUT /api/settings/responses-api` | superadmin | Flip the per-model Responses-API flag (`{model, responsesApi}`); sync preserves the flag |
@@ -268,13 +268,94 @@ Roles: `superadmin` (everything below) and `user` (own keys + dashboard).
 | `GET /api/usage/keys?from=&to=` | user | Per-client-key requests/tokens in range (scoped) |
 | `GET /api/usage/users?from=&to=` | superadmin | Per-user requests/tokens in range |
 | `GET /api/usage/activity?limit=` | user | Persisted recent requests with token counts (scoped) |
+| `GET /api/usage/timeseries?from=&to=&bucket=&tz=` | user | Per-bucket requests/tokens (`points`) and per-provider requests (`providers`) for the dashboard charts; `bucket` (seconds) is echoed. `bucket=hour\|day` (default hour when the span is ≤ 48h, else day); `tz` = seconds east of UTC (scoped) |
+| `GET /api/usage/overview` | user | Usage monitoring totals (incl. p95 latency, avg TTFB, distinct users/models) and a zero-filled per-bucket series — see [Usage monitoring](#usage-monitoring-apiusage) |
+| `GET /api/usage/breakdown` | user | Grouped, paged, sortable usage table (`groupBy=user\|user_model\|upstream_key` are superadmin-only) |
+| `GET /api/usage/series` | user | Top-N series per group with the rest folded into `other` (`groupBy=user` is superadmin-only) |
+| `GET /api/usage/requests` | user | Paged raw request log with upstream detail |
+| `GET /api/usage/facets` | user | Distinct users/providers/models/keys/surfaces in the range, for filter dropdowns |
 | `POST /api/me/password` | user | Self-service password reset; requires the current password and wipes all sessions |
 
 Every mutation writes to SQLite and rebuilds the in-memory pools/key cache
 in the same request. Usage ranges are unix seconds, capped to 92 days;
+`to` is clamped to now and negative bounds are a 400;
 token counts come from whatever the upstream reports (0 when it reports
 none). Events persist in the `usage_events` table and are pruned after 90
 days.
+
+### Usage monitoring (`/api/usage/*`)
+
+Each usage event records the client surface (`chat`, `messages`,
+`responses`, `mcp`), whether the client streamed, how many upstream calls
+were made, the last upstream HTTP status (`0` = none or a network error),
+the label of the upstream key that served (or was last tried), the time from
+request start to the first upstream `200`, the client-facing hint on failure
+(≤ 300 characters), and snapshots of the user's email and key alias. Rows
+written before this detail existed carry empty/zero values. Requests rejected
+before routing (malformed model string, unknown or revoked provider, wrong
+surface on `/v1/responses`) are recorded too, with the 4xx status the client
+got and its message as the fail reason.
+
+All five endpoints below are `GET`, need a session, and answer bad
+parameters with `400` in the standard error shape. Non-superadmins are
+always scoped to their own user: passing someone else's `userId`, or a
+superadmin-only grouping, is `403`.
+
+Common filters (overview, breakdown, series, requests):
+
+| Param | Notes |
+| --- | --- |
+| `from`, `to` | unix seconds; default last 24h; negative values are a 400; `to` is clamped to now and the span is capped at 92 days (the effective range is echoed as `range`) |
+| `tz` | seconds east of UTC, -86400..86400; aligns buckets to the viewer's midnight |
+| `userId` | superadmin only (others are forced to themselves) |
+| `keyId` | client key id |
+| `provider`, `model` | exact provider name / upstream model id |
+| `surface` | `chat` \| `messages` \| `responses` \| `mcp` |
+| `status` | `ok` (status < 400) \| `error` |
+| `bucket` | `hour` \| `day`; default hour when the span is ≤ 48h, else day |
+
+User labels prefer the live email, then the request-time snapshot, then
+`deleted user #<id>`; key aliases likewise (`deleted key #<id>`).
+
+**`GET /api/usage/overview`** —
+`{range, bucket, totals: {requests, errors, inputTokens, outputTokens, avgDurationMs, p95DurationMs, avgTtfbMs, users, models}, points: [{ts, requests, errors, inputTokens, outputTokens, avgDurationMs}]}`.
+`avgTtfbMs` averages only rows with a recorded TTFB; `p95DurationMs` is the
+nearest-rank p95 over successful rows; `users`/`models` are distinct counts
+(models keyed on provider + model). `points` covers every bucket in the
+range, zero-filled.
+
+**`GET /api/usage/breakdown`** — `groupBy` = `model` (default, keyed on
+provider + model) \| `provider` \| `key` \| `user` \| `user_model` \|
+`upstream_key` (the last three superadmin-only); `sort` = `requests`
+(default) \| `errors` \| `errorRate` \| `inputTokens` \| `outputTokens` \|
+`totalTokens` \| `avgDurationMs` \| `lastTs` \| `label`; `order` = `desc`
+(default) \| `asc`; `page` (1-based); `pageSize` 1..200 (default 25); `q` =
+case-insensitive substring of the group label (email, `provider/model`,
+alias, ...; `%`/`_` match literally). Returns
+`{range, groupBy, page, pageSize, total, totals: {requests, errors, inputTokens, outputTokens}, rows: [{userId, email, provider, model, keyId, alias, upstreamKey, requests, errors, inputTokens, outputTokens, avgDurationMs, avgTtfbMs, firstTs, lastTs}]}`.
+`total` counts matching groups; `totals` sums every matching group, not just
+the page. Fields outside the grouping are zero/empty (`key` rows also carry
+the owning `userId`/`email`).
+
+**`GET /api/usage/series`** — `groupBy` = `model` (default) \| `provider` \|
+`surface` \| `user` (superadmin-only); `metric` = `requests` (default) \|
+`totalTokens` \| `errors`; `top` 1..10 (default 5). Returns
+`{range, bucket, groupBy, metric, series: [{key, label, points: [{ts, value}]}]}`:
+the top groups by the metric (groups with a zero metric are omitted), then an
+`other` series (label `Other`) folding the rest when there are more groups
+than `top`. Keys: user → `"<userId>"` (label = email), model →
+`"<provider>/<model>"`, provider/surface → the name. All series share the
+same zero-filled bucket timestamps.
+
+**`GET /api/usage/requests`** — `sort` = `ts` (default) \| `durationMs` \|
+`totalTokens`; `order`; `page`; `pageSize` 1..200 (default 50). Returns
+`{range, page, pageSize, total, rows: [{id, ts, userId, email, keyId, alias, provider, model, surface, stream, status, upstreamStatus, failReason, upstreamKey, inputTokens, outputTokens, durationMs, ttfbMs, attempts}]}`.
+`upstreamKey` is blank for non-superadmins.
+
+**`GET /api/usage/facets`** — range params only. Returns
+`{users: [{id, email}], providers: [..], models: [{provider, model}], keys: [{id, alias, userId}], surfaces: [..]}`;
+`users` is empty for non-superadmins, whose other lists cover only their own
+rows.
 
 ## Errors
 

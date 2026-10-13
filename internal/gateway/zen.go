@@ -278,12 +278,14 @@ func (g *gateway) proxyZen(ref providerRef, w http.ResponseWriter, r *http.Reque
 		log.Printf("zen model=%s: renamed developer role to system for upstream", model)
 	}
 
+	tr := traceFrom(r)
 	for attempt := 0; attempt < g.rs().Retry.MaxKeysPerRequest; attempt++ {
 		k := ref.pool.pick(exclude)
 		if k == nil {
 			break
 		}
 		exclude[k.Hash] = true
+		tr.attempt(k.Label)
 
 		upBody := body
 		if surface == "responses" {
@@ -313,10 +315,12 @@ func (g *gateway) proxyZen(ref providerRef, w http.ResponseWriter, r *http.Reque
 
 		resp, err := g.client.Do(req)
 		if err != nil {
+			tr.upstream(0)
 			ref.pool.cooldown(k, 10*time.Second, "network: "+err.Error())
 			lastHint = "upstream network error"
 			continue
 		}
+		tr.upstream(resp.StatusCode)
 		if resp.StatusCode != http.StatusOK {
 			v := g.classify(ref.pool, k, resp)
 			resp.Body.Close()

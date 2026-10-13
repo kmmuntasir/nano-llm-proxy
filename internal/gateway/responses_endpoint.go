@@ -23,16 +23,19 @@ func (g *gateway) handleResponses(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	model, _ := body["model"].(string)
+	traceFrom(r).setStream(bodyStreamFlag(body))
 	parts := strings.SplitN(model, "/", 2)
 	if len(parts) != 2 || parts[0] == "" || parts[1] == "" {
-		writeErr(w, http.StatusBadRequest,
-			`Model must be "zen/<id>"; only zen has a Responses API — use /v1/chat/completions`)
+		msg := `Model must be "zen/<id>"; only zen has a Responses API — use /v1/chat/completions`
+		g.recordClientError(r, "", model, start, http.StatusBadRequest, msg)
+		writeErr(w, http.StatusBadRequest, msg)
 		return
 	}
 	ref, ok := g.providerFor(r, parts[0])
 	if !ok || ref.typ != "opencode" {
-		writeErr(w, http.StatusBadRequest,
-			fmt.Sprintf("store.Provider %q has no Responses API — use /v1/chat/completions", parts[0]))
+		msg := fmt.Sprintf("store.Provider %q has no Responses API — use /v1/chat/completions", parts[0])
+		g.recordClientError(r, parts[0], parts[1], start, http.StatusBadRequest, msg)
+		writeErr(w, http.StatusBadRequest, msg)
 		return
 	}
 	upstreamModel := parts[1]
@@ -43,8 +46,9 @@ func (g *gateway) handleResponses(w http.ResponseWriter, r *http.Request) {
 	}
 	body["model"] = upstreamModel
 	if g.surfaceFor(upstreamModel) != "responses" {
-		writeErr(w, http.StatusBadRequest,
-			fmt.Sprintf("Model %s is served on the chat surface — use /v1/chat/completions", upstreamModel))
+		msg := fmt.Sprintf("Model %s is served on the chat surface — use /v1/chat/completions", upstreamModel)
+		g.recordClientError(r, ref.name, upstreamModel, start, http.StatusBadRequest, msg)
+		writeErr(w, http.StatusBadRequest, msg)
 		return
 	}
 	clientWantsStream := bodyStreamFlag(body)
@@ -84,12 +88,14 @@ func (g *gateway) proxyZenResponses(ref providerRef, w http.ResponseWriter, r *h
 		log.Printf("zen responses model=%s: renamed developer role to system for upstream", model)
 	}
 
+	tr := traceFrom(r)
 	for attempt := 0; attempt < g.rs().Retry.MaxKeysPerRequest; attempt++ {
 		k := ref.pool.pick(exclude)
 		if k == nil {
 			break
 		}
 		exclude[k.Hash] = true
+		tr.attempt(k.Label)
 
 		// fingerprint: stream always on upstream, gate stubs in flat shape
 		body["stream"] = true
@@ -108,10 +114,12 @@ func (g *gateway) proxyZenResponses(ref providerRef, w http.ResponseWriter, r *h
 
 		resp, err := g.client.Do(req)
 		if err != nil {
+			tr.upstream(0)
 			ref.pool.cooldown(k, 10*time.Second, "network: "+err.Error())
 			lastHint = "upstream network error"
 			continue
 		}
+		tr.upstream(resp.StatusCode)
 		if resp.StatusCode != http.StatusOK {
 			v := g.classify(ref.pool, k, resp)
 			resp.Body.Close()

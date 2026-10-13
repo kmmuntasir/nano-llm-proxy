@@ -15,29 +15,36 @@ import (
 const usageMaxRangeDays = 92
 
 // usageRange parses ?from/?to, applies defaults, caps the span, and clamps
-// `to` to now (future ranges would silently hide rows).
+// `to` to now (future ranges would silently hide rows). Negative bounds are
+// refused, and every comparison is written so it cannot overflow: an
+// unchecked `to-from` near MinInt64 would skip the cap and let the bucket
+// fill-in allocate without bound.
 func usageRange(r *http.Request) (from, to int64, ok bool) {
-	to = time.Now().Unix()
+	now := time.Now().Unix()
+	to = now
 	from = to - 24*3600
 	if v := r.URL.Query().Get("to"); v != "" {
-		if n, err := strconv.ParseInt(v, 10, 64); err == nil {
-			to = n
-		} else {
+		n, err := strconv.ParseInt(v, 10, 64)
+		if err != nil || n < 0 {
 			return 0, 0, false
 		}
+		to = min(n, now)
 	}
 	if v := r.URL.Query().Get("from"); v != "" {
-		if n, err := strconv.ParseInt(v, 10, 64); err == nil {
-			from = n
-		} else {
+		n, err := strconv.ParseInt(v, 10, 64)
+		if err != nil || n < 0 {
 			return 0, 0, false
 		}
+		from = n
 	}
 	if from >= to {
 		return 0, 0, false
 	}
-	if to-from > int64(usageMaxRangeDays)*86400 {
-		from = to - int64(usageMaxRangeDays)*86400
+	// to is in [1, now], so to-span cannot overflow; from < to - span is the
+	// overflow-free form of to-from > span.
+	const span = int64(usageMaxRangeDays) * 86400
+	if from < to-span {
+		from = to - span
 	}
 	return from, to, true
 }

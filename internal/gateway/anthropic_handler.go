@@ -31,14 +31,20 @@ func (g *gateway) handleMessages(w http.ResponseWriter, r *http.Request) {
 			model = fallback
 		}
 	}
+	stream, _ := req["stream"].(bool)
+	traceFrom(r).setStream(stream)
 	parts := strings.SplitN(model, "/", 2)
 	if len(parts) != 2 || parts[0] == "" || parts[1] == "" {
-		writeAnthropicErr(w, http.StatusBadRequest, `Model must be "<provider>/<id>" (e.g. zen/mimo-...)`)
+		msg := `Model must be "<provider>/<id>" (e.g. zen/mimo-...)`
+		g.recordClientError(r, "", model, start, http.StatusBadRequest, msg)
+		writeAnthropicErr(w, http.StatusBadRequest, msg)
 		return
 	}
 	ref, ok := g.providerFor(r, parts[0])
 	if !ok {
-		writeAnthropicErr(w, http.StatusBadRequest, fmt.Sprintf("Unknown provider %q — see GET /v1/models", parts[0]))
+		msg := fmt.Sprintf("Unknown provider %q — see GET /v1/models", parts[0])
+		g.recordClientError(r, parts[0], parts[1], start, http.StatusBadRequest, msg)
+		writeAnthropicErr(w, http.StatusBadRequest, msg)
 		return
 	}
 	upstreamModel := parts[1]
@@ -122,18 +128,22 @@ func (g *gateway) messagesViaOpenAI(ref providerRef, w http.ResponseWriter, r *h
 	exclude := map[string]bool{}
 	var lastHint string
 
+	tr := traceFrom(r)
 	for attempt := 0; attempt < g.rs().Retry.MaxKeysPerRequest; attempt++ {
 		k := ref.pool.pick(exclude)
 		if k == nil {
 			break
 		}
 		exclude[k.Hash] = true
+		tr.attempt(k.Label)
 		resp, ok := g.postUpstream(r, ref.baseURL+"/chat/completions", k.Key, raw, false)
 		if !ok {
+			tr.upstream(0)
 			lastHint = "upstream network error"
 			ref.pool.cooldown(k, 10*time.Second, "network")
 			continue
 		}
+		tr.upstream(resp.StatusCode)
 		if resp.StatusCode != http.StatusOK {
 			v := g.classify(ref.pool, k, resp)
 			resp.Body.Close()
@@ -174,12 +184,14 @@ func (g *gateway) messagesViaZen(ref providerRef, w http.ResponseWriter, r *http
 	surface := g.surfaceFor(model)
 	var lastHint string
 
+	tr := traceFrom(r)
 	for attempt := 0; attempt < g.rs().Retry.MaxKeysPerRequest; attempt++ {
 		k := ref.pool.pick(exclude)
 		if k == nil {
 			break
 		}
 		exclude[k.Hash] = true
+		tr.attempt(k.Label)
 
 		upBody := chat
 		path := "/chat/completions"
@@ -197,10 +209,12 @@ func (g *gateway) messagesViaZen(ref providerRef, w http.ResponseWriter, r *http
 
 		resp, ok := g.postUpstream(r, ref.baseURL+path, k.Key, raw, true)
 		if !ok {
+			tr.upstream(0)
 			ref.pool.cooldown(k, 10*time.Second, "network")
 			lastHint = "upstream network error"
 			continue
 		}
+		tr.upstream(resp.StatusCode)
 		if resp.StatusCode != http.StatusOK {
 			v := g.classify(ref.pool, k, resp)
 			resp.Body.Close()
