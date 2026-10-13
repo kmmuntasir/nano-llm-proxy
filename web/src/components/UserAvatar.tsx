@@ -16,8 +16,14 @@ function paletteFor(name: string) {
 
 // Chakra's built-in initials split on single spaces and don't uppercase, so
 // they're computed here: first letters of the first and last word, max 2.
+// Only words that start with a letter or digit count, so punctuation like
+// "(Google)" or "- Ops" never becomes an initial.
 function initialsOf(name: string) {
-  const words = name.trim().split(/\s+/).filter(Boolean)
+  const words = name
+    .trim()
+    .split(/\s+/)
+    .map((w) => w.replace(/^[^\p{L}\p{N}]+/u, ""))
+    .filter(Boolean)
   if (words.length === 0) return ""
   const first = Array.from(words[0])[0] ?? ""
   const last = words.length > 1 ? (Array.from(words[words.length - 1])[0] ?? "") : ""

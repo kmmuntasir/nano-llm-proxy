@@ -2,6 +2,7 @@ import { useState } from "react"
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query"
 import {
   Badge,
+  Box,
   Button,
   Card,
   Code,
@@ -16,7 +17,7 @@ import {
   Text,
   VStack,
 } from "@chakra-ui/react"
-import { KeyRound, Pencil, Plus, Trash2 } from "lucide-react"
+import { KeyRound, Pencil, Plus, ShieldCheck, Trash2 } from "lucide-react"
 import { api, del, patch, post, put, ApiError } from "../api/client"
 import { assignableRoles, canManageAccount, roleLabel } from "../api/roles"
 import type { Role } from "../api/roles"
@@ -31,9 +32,8 @@ import { Dialog } from "@chakra-ui/react"
 import { toaster } from "../components/ui/toaster"
 import { useSession } from "../App"
 
-function fmtTs(ts: number) {
-  return ts ? new Date(ts * 1000).toLocaleDateString() : "—"
-}
+// matches the server's minimum (internal/gateway/api_users.go)
+const MIN_PASSWORD = 10
 
 type Actor = Pick<UserView, "role">
 
@@ -158,7 +158,7 @@ function AddUserModal({
                       onChange={(e) => setPassword(e.target.value)}
                       autoComplete="new-password"
                     />
-                    <Field.HelperText>min 10 chars</Field.HelperText>
+                    <Field.HelperText>min {MIN_PASSWORD} chars</Field.HelperText>
                   </Field.Root>
                   <Field.Root required>
                     <Field.Label>Confirm password <Field.RequiredIndicator /></Field.Label>
@@ -190,110 +190,6 @@ function AddUserModal({
             </Dialog.ActionTrigger>
             <Button type="submit" colorPalette="blue" loading={create.isPending}>
               Create
-            </Button>
-          </Dialog.Footer>
-          <Dialog.CloseTrigger />
-        </Dialog.Content>
-      </Dialog.Positioner>
-    </Dialog.Root>
-  )
-}
-
-// ResetPasswordModal lets an admin set a user a new password.
-function ResetPasswordModal({
-  user,
-  open,
-  onOpenChange,
-}: {
-  user: UserView
-  open: boolean
-  onOpenChange: (o: boolean) => void
-}) {
-  const qc = useQueryClient()
-  const [password, setPassword] = useState("")
-  const [confirm, setConfirm] = useState("")
-  const [error, setError] = useState("")
-
-  const reset = useMutation({
-    mutationFn: () => patch(`/api/users/${user.id}`, { password }),
-    onSuccess: async () => {
-      setPassword("")
-      setConfirm("")
-      setError("")
-      onOpenChange(false)
-      await qc.invalidateQueries({ queryKey: ["users"] })
-      toaster.create({
-        title: `Password reset — ${user.email}'s sessions were logged out`,
-        type: "success",
-      })
-    },
-    onError: (e) => {
-      const msg = e instanceof ApiError ? e.message : "Failed to reset the password"
-      setError(msg)
-      toaster.create({ title: msg, type: "error" })
-    },
-  })
-
-  const submit = () => {
-    setError("")
-    if (password !== confirm) {
-      setError("passwords don't match")
-      return
-    }
-    reset.mutate()
-  }
-
-  return (
-    <Dialog.Root open={open} onOpenChange={(e) => onOpenChange(e.open)}>
-      <Dialog.Backdrop />
-      <Dialog.Positioner>
-        <Dialog.Content
-          as="form"
-          maxW="420px"
-          onSubmit={(e) => {
-            e.preventDefault()
-            submit()
-          }}
-        >
-          <Dialog.Header>
-            <Dialog.Title>Reset password — {user.email}</Dialog.Title>
-          </Dialog.Header>
-          <Dialog.Body>
-            <VStack align="stretch" gap={3}>
-              <Field.Root required>
-                <Field.Label>New password <Field.RequiredIndicator /></Field.Label>
-                <PasswordInput
-                  value={password}
-                  onChange={(e) => setPassword(e.target.value)}
-                  autoComplete="new-password"
-                />
-                <Field.HelperText>
-                  min 10 chars; all their sessions are logged out
-                </Field.HelperText>
-              </Field.Root>
-              <Field.Root required>
-                <Field.Label>Confirm password <Field.RequiredIndicator /></Field.Label>
-                <PasswordInput
-                  value={confirm}
-                  onChange={(e) => setConfirm(e.target.value)}
-                  autoComplete="new-password"
-                />
-              </Field.Root>
-              {error && (
-                <Text color="red.fg" fontSize="sm">
-                  {error}
-                </Text>
-              )}
-            </VStack>
-          </Dialog.Body>
-          <Dialog.Footer>
-            <Dialog.ActionTrigger asChild>
-              <Button type="button" variant="outline">
-                Cancel
-              </Button>
-            </Dialog.ActionTrigger>
-            <Button type="submit" colorPalette="blue" loading={reset.isPending}>
-              Reset password
             </Button>
           </Dialog.Footer>
           <Dialog.CloseTrigger />
@@ -516,8 +412,10 @@ function UserProviderAccessModal({
   )
 }
 
-// EditUserDialog changes a user's name and role, sending only the fields that
-// changed. A Google-linked user's name belongs to Google and is never sent.
+// EditUserDialog edits name, role and (optionally) the password in one
+// form. Only changed fields are sent. The password section appears only
+// while password sign-in is on and the user isn't Google-linked (those sign
+// in with Google); saving a new password signs the user out everywhere.
 function EditUserDialog({
   user,
   actor,
@@ -530,8 +428,12 @@ function EditUserDialog({
   onOpenChange: (o: boolean) => void
 }) {
   const qc = useQueryClient()
+  const credentialLogin = useCredentialLogin()
+  const allowPassword = credentialLogin && !user.googleLinked
   const [name, setName] = useState(user.name)
   const [role, setRole] = useState<Role>(user.role)
+  const [password, setPassword] = useState("")
+  const [confirm, setConfirm] = useState("")
   const [error, setError] = useState("")
 
   // start from the user's current values on every open
@@ -541,24 +443,30 @@ function EditUserDialog({
     if (open) {
       setName(user.name)
       setRole(user.role)
+      setPassword("")
+      setConfirm("")
       setError("")
     }
   }
 
   const trimmed = name.trim()
-  const changes: { name?: string; role?: Role } = {}
+  const changes: { name?: string; role?: Role; password?: string } = {}
   if (!user.googleLinked && trimmed !== user.name) changes.name = trimmed
   if (role !== user.role) changes.role = role
+  if (allowPassword && password !== "") changes.password = password
   const changed = Object.keys(changes).length > 0
   const nameMissing = !user.googleLinked && trimmed === ""
 
   const save = useMutation({
-    mutationFn: (body: { name?: string; role?: Role }) => patch(`/api/users/${user.id}`, body),
-    onSuccess: async () => {
+    mutationFn: (body: typeof changes) => patch(`/api/users/${user.id}`, body),
+    onSuccess: async (_, body) => {
       onOpenChange(false)
       await qc.invalidateQueries({ queryKey: ["users"] })
       await qc.invalidateQueries({ queryKey: ["me"] })
-      toaster.create({ title: "User updated", type: "success" })
+      toaster.create({
+        title: body.password ? "User updated — they were signed out everywhere" : "User updated",
+        type: "success",
+      })
     },
     onError: (e) => {
       const msg = e instanceof ApiError ? e.message : "update failed"
@@ -566,6 +474,22 @@ function EditUserDialog({
       toaster.create({ title: msg, type: "error" })
     },
   })
+
+  const submit = () => {
+    if (!changed || nameMissing) return
+    setError("")
+    if (changes.password !== undefined) {
+      if (password.length < MIN_PASSWORD) {
+        setError(`Password must be at least ${MIN_PASSWORD} characters`)
+        return
+      }
+      if (password !== confirm) {
+        setError("Passwords don't match")
+        return
+      }
+    }
+    save.mutate(changes)
+  }
 
   return (
     <Dialog.Root open={open} onOpenChange={(e) => onOpenChange(e.open)}>
@@ -576,16 +500,19 @@ function EditUserDialog({
           maxW="440px"
           onSubmit={(e) => {
             e.preventDefault()
-            if (!changed || nameMissing) return
-            setError("")
-            save.mutate(changes)
+            submit()
           }}
         >
           <Dialog.Header>
-            <Dialog.Title wordBreak="break-word">Edit user — {user.email}</Dialog.Title>
+            <VStack align="start" gap={0} minW={0}>
+              <Dialog.Title>Edit user</Dialog.Title>
+              <Text fontSize="sm" color="fg.muted" wordBreak="break-word">
+                {user.email}
+              </Text>
+            </VStack>
           </Dialog.Header>
           <Dialog.Body>
-            <VStack align="stretch" gap={3}>
+            <VStack align="stretch" gap={4}>
               <Field.Root required={!user.googleLinked} disabled={user.googleLinked}>
                 <Field.Label>
                   Name {!user.googleLinked && <Field.RequiredIndicator />}
@@ -594,6 +521,39 @@ function EditUserDialog({
                 {user.googleLinked && <Field.HelperText>Comes from Google</Field.HelperText>}
               </Field.Root>
               <RoleField value={role} options={assignableRoles(actor)} onChange={setRole} />
+              {allowPassword && (
+                <VStack align="stretch" gap={3} borderTopWidth="1px" borderColor="border.muted" pt={4}>
+                  <VStack align="start" gap={0}>
+                    <Text fontSize="sm" fontWeight="medium">
+                      New password
+                    </Text>
+                    <Text fontSize="xs" color="fg.muted">
+                      Optional. Leave blank to keep the current one; saving a new one signs them
+                      out everywhere.
+                    </Text>
+                  </VStack>
+                  <Field.Root>
+                    <Field.Label srOnly>New password</Field.Label>
+                    <PasswordInput
+                      value={password}
+                      onChange={(e) => setPassword(e.target.value)}
+                      autoComplete="new-password"
+                      placeholder={`New password (min ${MIN_PASSWORD} chars)`}
+                    />
+                  </Field.Root>
+                  {password !== "" && (
+                    <Field.Root>
+                      <Field.Label srOnly>Confirm password</Field.Label>
+                      <PasswordInput
+                        value={confirm}
+                        onChange={(e) => setConfirm(e.target.value)}
+                        autoComplete="new-password"
+                        placeholder="Confirm new password"
+                      />
+                    </Field.Root>
+                  )}
+                </VStack>
+              )}
               {error && (
                 <Text color="red.fg" fontSize="sm">
                   {error}
@@ -623,17 +583,26 @@ function EditUserDialog({
   )
 }
 
+function fmtJoined(ts: number) {
+  return ts
+    ? new Date(ts * 1000).toLocaleDateString(undefined, { year: "numeric", month: "short", day: "numeric" })
+    : "—"
+}
+
+// UserCard: identity (avatar, name, email) with the activation switch
+// pinned top-right; badges and a one-line meta row below; a footer with the
+// everyday actions on the left and the destructive one isolated far right.
+// A deactivated user mutes only the identity block — actions stay readable.
 function UserCard({ u, actor, isSelf }: { u: UserView; actor: Actor; isSelf: boolean }) {
   const qc = useQueryClient()
   const [toDelete, setToDelete] = useState(false)
   const [managingKeys, setManagingKeys] = useState(false)
   const [managingAccess, setManagingAccess] = useState(false)
-  const [resetting, setResetting] = useState(false)
   const [editing, setEditing] = useState(false)
-  const credentialLogin = useCredentialLogin()
   // admins can view a superadmin's card and keys but change nothing
   const canManage = canManageAccount(actor, u)
   const canChange = !isSelf && canManage
+  const keyCount = u.keyCount ?? 0
 
   // the activation switch only proposes a change; it applies after the
   // confirmation dialog (null = no pending change)
@@ -662,90 +631,103 @@ function UserCard({ u, actor, isSelf }: { u: UserView; actor: Actor; isSelf: boo
       toaster.create({ title: e instanceof ApiError ? e.message : "delete failed", type: "error" }),
   })
 
+  const muted = u.disabled ? 0.55 : 1
+
   return (
-    <Card.Root size="sm" opacity={u.disabled ? 0.5 : 1}>
-      <Card.Body gap={2} px={4} py={3}>
-        <HStack justify="space-between" flexWrap="wrap" gap={2}>
-          <HStack gap={3} align="center" minW={0} flex="1">
-            <UserAvatar name={u.name} avatarUrl={u.avatarUrl} size="sm" />
-            <VStack align="start" gap={0} minW={0}>
-              <HStack gap={2} flexWrap="wrap">
-                <Text fontWeight="medium" wordBreak="break-word">{u.name}</Text>
-                <RoleBadge role={u.role} />
-                {u.googleLinked && (
-                  <Badge variant="outline" colorPalette="gray" title="Name comes from Google">
-                    Google
-                  </Badge>
-                )}
-                {u.disabled && (
-                  <Badge variant="subtle" colorPalette="red">
-                    Deactivated
-                  </Badge>
-                )}
-              </HStack>
-              <Text fontSize="xs" color="fg.muted" wordBreak="break-word">
-                {u.email} · {u.keyCount ?? 0} keys · created {fmtTs(u.createdAt)}
-              </Text>
-            </VStack>
-          </HStack>
-          <HStack gap={2} flexWrap="wrap">
-            {isSelf && (
-              <Text fontSize="xs" color="fg.muted">
-                you
-              </Text>
-            )}
-            {canChange && (
-              <Switch.Root
-                size="sm"
-                checked={!u.disabled}
-                disabled={patchU.isPending}
-                onCheckedChange={(e) => setPendingActive(e.checked)}
-                aria-label={u.disabled ? `activate ${u.name}` : `deactivate ${u.name}`}
-              >
-                <Switch.HiddenInput />
-                <Switch.Control>
-                  <Switch.Thumb />
-                </Switch.Control>
-                <Switch.Label fontSize="xs" color="fg.muted">
-                  {u.disabled ? "Inactive" : "Active"}
-                </Switch.Label>
-              </Switch.Root>
-            )}
-          </HStack>
-        </HStack>
-        <HStack gap={1} flexWrap="wrap">
-          <Button variant="ghost" size="2xs" onClick={() => setManagingKeys(true)}>
-            Keys
-          </Button>
+    <Card.Root size="sm" height="100%">
+      <Card.Body gap={3} px={4} pt={4} pb={3}>
+        <HStack align="start" gap={3}>
+          <Box opacity={muted} flexShrink={0}>
+            <UserAvatar name={u.name} avatarUrl={u.avatarUrl} size="md" />
+          </Box>
+          <VStack align="start" gap={0} minW={0} flex="1" opacity={muted}>
+            <Text fontWeight="semibold" truncate maxW="100%" title={u.name}>
+              {u.name}
+            </Text>
+            <Text fontSize="sm" color="fg.muted" truncate maxW="100%" title={u.email}>
+              {u.email}
+            </Text>
+          </VStack>
           {canChange && (
-            <Button variant="ghost" size="2xs" onClick={() => setEditing(true)}>
+            <Switch.Root
+              size="sm"
+              flexShrink={0}
+              checked={!u.disabled}
+              disabled={patchU.isPending}
+              onCheckedChange={(e) => setPendingActive(e.checked)}
+              aria-label={u.disabled ? `activate ${u.name}` : `deactivate ${u.name}`}
+              title={u.disabled ? "Inactive — click to activate" : "Active — click to deactivate"}
+            >
+              <Switch.HiddenInput />
+              <Switch.Label fontSize="xs" color="fg.muted">
+                Active
+              </Switch.Label>
+              <Switch.Control>
+                <Switch.Thumb />
+              </Switch.Control>
+            </Switch.Root>
+          )}
+        </HStack>
+        <HStack gap={1.5} flexWrap="wrap">
+          <RoleBadge role={u.role} />
+          {isSelf && (
+            <Badge variant="subtle" colorPalette="blue">
+              You
+            </Badge>
+          )}
+          {u.googleLinked && (
+            <Badge variant="outline" colorPalette="gray" title="Signs in with Google; name comes from Google">
+              Google
+            </Badge>
+          )}
+          {u.disabled && (
+            <Badge variant="subtle" colorPalette="red">
+              Deactivated
+            </Badge>
+          )}
+        </HStack>
+        <Text fontSize="xs" color="fg.muted">
+          {keyCount} {keyCount === 1 ? "key" : "keys"} · Joined {fmtJoined(u.createdAt)}
+        </Text>
+      </Card.Body>
+      <Card.Footer
+        px={2}
+        py={1.5}
+        mt="auto"
+        borderTopWidth="1px"
+        borderColor="border.muted"
+        justifyContent="space-between"
+        gap={1}
+      >
+        <HStack gap={0.5} flexWrap="wrap">
+          <Button variant="ghost" size="xs" onClick={() => setManagingKeys(true)}>
+            <KeyRound /> Keys
+          </Button>
+          {/* superadmins and admins always have every provider */}
+          {u.role === "user" && (
+            <Button variant="ghost" size="xs" onClick={() => setManagingAccess(true)}>
+              <ShieldCheck /> Access
+            </Button>
+          )}
+          {canChange && (
+            <Button variant="ghost" size="xs" onClick={() => setEditing(true)}>
               <Pencil /> Edit
             </Button>
           )}
-          {/* superadmins and admins always have every provider */}
-          {u.role === "user" && (
-            <Button variant="ghost" size="2xs" onClick={() => setManagingAccess(true)}>
-              Provider access
-            </Button>
-          )}
-          {canChange && credentialLogin && (
-            <Button variant="ghost" size="2xs" onClick={() => setResetting(true)}>
-              <KeyRound /> Reset password
-            </Button>
-          )}
-          {canChange && (
-            <IconButton
-              variant="ghost"
-              size="2xs"
-              aria-label="delete user"
-              colorPalette="red"
-              onClick={() => setToDelete(true)}
-            >
-              <Trash2 />
-            </IconButton>
-          )}
         </HStack>
-      </Card.Body>
+        {canChange && (
+          <IconButton
+            variant="ghost"
+            size="xs"
+            colorPalette="red"
+            aria-label={`delete ${u.name}`}
+            title="Delete user"
+            onClick={() => setToDelete(true)}
+          >
+            <Trash2 />
+          </IconButton>
+        )}
+      </Card.Footer>
       <UserKeysModal
         userID={u.id}
         readOnly={!canManage}
@@ -754,7 +736,6 @@ function UserCard({ u, actor, isSelf }: { u: UserView; actor: Actor; isSelf: boo
       />
       <EditUserDialog user={u} actor={actor} open={editing} onOpenChange={setEditing} />
       <UserProviderAccessModal user={u} open={managingAccess} onOpenChange={setManagingAccess} />
-      <ResetPasswordModal user={u} open={resetting} onOpenChange={setResetting} />
       <ConfirmDialog
         open={pendingActive !== null}
         onOpenChange={() => setPendingActive(null)}
