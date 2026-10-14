@@ -72,8 +72,9 @@ database for.
   cycle); client-shape problems fail fast with an actionable hint
 - Embedded admin GUI (React, served by the same binary): users and roles,
   per-user client keys (stored hashed, plaintext shown once), provider and
-  upstream-key management, self-service profiles, usage dashboards with
-  charts, and a live recent-activity feed
+  upstream-key management (one at a time or imported from a JSON file),
+  self-service profiles, usage dashboards with charts, and a live
+  recent-activity feed
 - SQLite (WAL) is the source of truth; memory is the hot path — every GUI
   mutation rebuilds the pools in the same request
 - Self-describing model catalog: entries carry context window, max output,

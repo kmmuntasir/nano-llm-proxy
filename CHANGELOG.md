@@ -41,8 +41,31 @@ Release notes are generated from commit prefixes, so `feat:`, `fix:`,
   `127.0.0.1:8899` (needs Python 3.10+ and git). Re-running upgrades;
   `--uninstall [--purge]` removes it. New `nano-llm-proxy local install`,
   `uninstall [--purge]`, `status` and `datadir` subcommands.
+- The local installers also set up obscura (the headless browser
+  `web_read` uses for JavaScript-heavy pages): an `obscura` already on your
+  `PATH` is reused, otherwise the pinned v0.2.4 build is downloaded into the
+  data folder and checked against pinned SHA-256s (obscura publishes no
+  checksums). Its absolute path is saved to Settings without overwriting a
+  path you set. `--no-obscura` (`-NoObscura`) skips it; `nano-llm-proxy
+  local install --obscura PATH` is what the installers call.
+- Import upstream keys from a file: Providers → Import keys takes one JSON
+  object of `"alias": "key"` pairs (file or paste), in rotation order, up
+  to 200 keys. Every key is verified like a single add; valid keys are
+  added and each entry gets a result — added, duplicate, invalid, refused,
+  unverifiable or rejected. Duplicate aliases fail the whole file. Backed by
+  `POST /api/providers/{id}/keys/import`.
 
 ### Fixed
+
+- Settings → Web tools "Test" advice no longer sends local-mode users to
+  the server's root installer: local mode says whether SearXNG isn't set
+  up, isn't answering (with its log path) or answers with every engine
+  blocked, and that obscura is optional. The SearXNG test now tells
+  "not answering" apart from "answering, but no engine returned results",
+  and both the test and `web_search` errors name the engines that failed
+  and why (e.g. `duckduckgo (CAPTCHA)`).
+- `webTools.obscuraPath` may contain spaces (it is run without a shell);
+  macOS keeps local mode's copy under `~/Library/Application Support`.
 
 - Pre-release builds (e.g. `0.3.0-rc.1`) show as `v0.3.0-rc.1` in the
   sidebar, and the About page marks the Unreleased notes as this build;
