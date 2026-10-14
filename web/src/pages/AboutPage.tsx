@@ -36,9 +36,18 @@ function formatBuildDate(value: string): string {
 
 // isThisBuild marks the release the running binary corresponds to: the
 // Unreleased entry when it is ahead of a tag, otherwise the tagged release.
+// A pre-release (0.3.0-rc.1) usually has no changelog section of its own —
+// its notes sit under Unreleased until the final release — so it marks
+// Unreleased unless the changelog does name it.
 function isThisBuild(about: AboutView, release: ReleaseNotesView): boolean {
   if (about.commitsAhead > 0) return release.version === UNRELEASED
-  return about.baseVersion !== "" && release.version === about.baseVersion
+  if (about.baseVersion === "") return false
+  if (release.version === about.baseVersion) return true
+  return (
+    about.prerelease &&
+    release.version === UNRELEASED &&
+    !about.releases.some((r) => r.version === about.baseVersion)
+  )
 }
 
 function InfoRow({ label, children }: { label: string; children: ReactNode }) {
@@ -74,6 +83,11 @@ function HeroCard({ about }: { about: AboutView }) {
             {ahead > 0 && about.baseVersion && (
               <Text as="span" color="fg.muted" ml={2}>
                 based on v{about.baseVersion} + {ahead} {ahead === 1 ? "commit" : "commits"}
+              </Text>
+            )}
+            {ahead === 0 && about.prerelease && (
+              <Text as="span" color="fg.muted" ml={2}>
+                pre-release
               </Text>
             )}
           </InfoRow>

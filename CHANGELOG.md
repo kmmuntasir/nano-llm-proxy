@@ -44,6 +44,10 @@ Release notes are generated from commit prefixes, so `feat:`, `fix:`,
 
 ### Fixed
 
+- Pre-release builds (e.g. `0.3.0-rc.1`) show as `v0.3.0-rc.1` in the
+  sidebar, and the About page marks the Unreleased notes as this build;
+  `GET /api/about` gains `prerelease`. Only plain `x.y.z` versions were
+  recognised before.
 - The Windows release zip shipped `nano-llm-proxy.exe.exe`; it now holds
   `nano-llm-proxy.exe`.
 - The SearXNG settings template never actually trimmed the engine list:

@@ -19,6 +19,10 @@ func TestDescribeVersion(t *testing.T) {
 		{"0.1.0", "v0.1.0", "0.1.0", 0},
 		{"dev", "dev", "", 0},
 		{"9067e49", "9067e49", "", 0},
+		{"0.3.0-rc.1", "v0.3.0-rc.1", "0.3.0-rc.1", 0},
+		{"v0.3.0-rc.1-5-gabc1234", "v0.3.0-rc.1+5", "0.3.0-rc.1", 5},
+		{"v1.0.0-beta-dirty", "v1.0.0-beta", "1.0.0-beta", 0},
+		{"v0.1.1-48", "v0.1.1-48", "", 0}, // numeric suffix is not a pre-release
 	}
 	for _, c := range cases {
 		d, b, a := describeVersion(c.in)
@@ -141,6 +145,15 @@ func TestHandleAbout(t *testing.T) {
 	g.requireSession(g.handleAbout)(rec, httptest.NewRequest("GET", "/api/about", nil))
 	if rec.Code != 401 {
 		t.Fatalf("anonymous: %d", rec.Code)
+	}
+	// a pre-release tag is flagged so the GUI marks Unreleased as this build
+	g.SetAbout("0.3.0-rc.1", "abc", "", "")
+	if !g.about.Prerelease || g.about.DisplayVersion != "v0.3.0-rc.1" || g.about.BaseVersion != "0.3.0-rc.1" {
+		t.Fatalf("pre-release stamp = %+v", g.about)
+	}
+	g.SetAbout("v0.2.0", "abc", "", "")
+	if g.about.Prerelease {
+		t.Fatal("v0.2.0 flagged as a pre-release")
 	}
 	// "none"/"unknown" build stamps (plain go build) become empty fields
 	g.SetAbout("dev", "none", "unknown", "")

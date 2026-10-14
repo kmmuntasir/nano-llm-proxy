@@ -600,6 +600,7 @@ export interface AboutView {
   version: string // raw build version; "dev" for local builds
   displayVersion: string // compact sidebar label, e.g. "v0.1.1+48"
   baseVersion: string // latest release this build is based on; "" when unknown
+  prerelease: boolean // baseVersion is a pre-release tag, e.g. "0.3.0-rc.1"
   commitsAhead: number // commits after baseVersion; 0 = exactly the release
   commit: string // "" when unknown
   buildDate: string // RFC3339; "" when unknown

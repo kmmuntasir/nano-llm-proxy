@@ -39,6 +39,7 @@ type aboutInfo struct {
 	Version        string         `json:"version"`
 	DisplayVersion string         `json:"displayVersion"`
 	BaseVersion    string         `json:"baseVersion"`
+	Prerelease     bool           `json:"prerelease"` // BaseVersion is a pre-release tag (e.g. 0.3.0-rc.1)
 	CommitsAhead   int            `json:"commitsAhead"`
 	Commit         string         `json:"commit"`
 	BuildDate      string         `json:"buildDate"`
@@ -59,7 +60,7 @@ func (g *gateway) SetAbout(version, commit, date, changelog string) {
 	}
 	g.about = &aboutInfo{
 		Name: projectName, Version: version, DisplayVersion: display,
-		BaseVersion: base, CommitsAhead: ahead, Commit: commit, BuildDate: date,
+		BaseVersion: base, Prerelease: strings.Contains(base, "-"), CommitsAhead: ahead, Commit: commit, BuildDate: date,
 		Repository: projectRepository, License: projectLicense,
 		Releases: parseChangelog(changelog),
 	}
@@ -75,12 +76,15 @@ func (g *gateway) handleAbout(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, http.StatusOK, about)
 }
 
-var describeRe = regexp.MustCompile(`^v?(\d+\.\d+\.\d+)(?:-(\d+)-g[0-9a-f]+)?(?:-dirty)?$`)
+// A semver pre-release suffix starts with a letter ("-rc.1", "-beta"), which
+// keeps it apart from git describe's "-<n>-g<hash>".
+var describeRe = regexp.MustCompile(`^v?(\d+\.\d+\.\d+(?:-[A-Za-z][0-9A-Za-z]*(?:\.[0-9A-Za-z]+)*)?)(?:-(\d+)-g[0-9a-f]+)?(?:-dirty)?$`)
 
 // describeVersion turns a `git describe` stamp into a compact label, the
 // release it is based on and how many commits ahead it is:
 // "v0.1.1-48-g9067e49" → ("v0.1.1+48", "0.1.1", 48); "v0.1.1" → ("v0.1.1",
-// "0.1.1", 0). Anything else (a "dev" build) is shown as-is.
+// "0.1.1", 0); a pre-release keeps its suffix: "0.3.0-rc.1" → ("v0.3.0-rc.1",
+// "0.3.0-rc.1", 0). Anything else (a "dev" build) is shown as-is.
 func describeVersion(v string) (display, base string, ahead int) {
 	m := describeRe.FindStringSubmatch(strings.TrimSpace(v))
 	if m == nil {
