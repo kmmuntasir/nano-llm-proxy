@@ -13,7 +13,7 @@ main.go                  # bootstrap wiring only: config → store → gateway �
 webprod.go / webstub.go  # `prod` tag embeds web/dist; untagged builds return no FS (no Node needed for go test)
 internal/config/         # bootstrap env config + .env parser (config.go, dotenv.go)
 internal/settings/       # runtime settings document (JSON in the settings table)
-internal/store/          # SQLite: schema, in-code migrations, all queries (store.go)
+internal/store/          # SQLite: schema, in-code migrations and queries (store.go; usage reporting queries in usage_report.go)
 internal/gateway/        # HTTP runtime: routes.go, auth.go, pool.go, provider adapters, SSE, usage, /api/* handlers (api_*.go), MCP (mcp*.go)
 internal/webtools/       # web_search (SearXNG) / web_read (fetch + obscura), SSRF guard
 scripts/                 # install-web-tools.sh, fixture capture/sanitize
@@ -33,7 +33,7 @@ docs/                    # api.md, configuration.md, deployment.md, architecture
 
 ## Routes & API contract
 
-- Surfaces: `/v1/chat/completions`, `/v1/responses`, `/v1/messages`, `/v1/models`, `POST /mcp` (client-key auth via `clientOnly`); `/health` (open); `/api/*` (GUI backend, session-cookie auth via `requireSession`, admin-only (superadmin + admin) via `requireAdmin`; admins may not change superadmin accounts — see `roles.go`).
+- Surfaces: `/v1/chat/completions`, `/v1/responses`, `/v1/messages`, `/v1/models`, `POST /mcp` (client-key auth via `clientOnly`); `/health` (open); `/api/*` (GUI backend, session-cookie auth via `requireSession` — except the open sign-in routes `/api/auth/login`, `/api/auth/config`, `/api/auth/google` — admin-only (superadmin + admin) via `requireAdmin`; admins may not change superadmin accounts — see `roles.go`).
 - Register with method-prefixed patterns: `mux.HandleFunc("PATCH /api/users/{id}", g.requireSession(...))`. Parse ids with `pathID`.
 - `/api/*` JSON helpers in `api_helpers.go`: `writeJSON`, `readJSON` (1 MiB bounded, writes its own error), `apiErr` → `{"error":{"message":"…"}}`. Do not invent another error shape. `/v1/*` errors follow the shape of the protocol being spoken (OpenAI vs Anthropic) — match the neighboring handler.
 - Mirror shapes exactly in `web/src/api/types.ts` when an `/api/*` response changes. Document public-facing endpoint changes in `docs/api.md`.
@@ -55,7 +55,7 @@ docs/                    # api.md, configuration.md, deployment.md, architecture
 
 - Return errors with context (`fmt.Errorf("…: %w", err)`); no swallowed errors. The few intentional ignores carry a comment (`//nolint:errcheck`-style, as in `writeJSON`).
 - Log with the standard `log` package. Never log client keys, upstream keys, session tokens, passwords, or full request/response bodies — log identifiers/labels (`key=<label>`), status, and timing.
-- Failure classification is a contract: genuine auth failures blacklist a key; rate limits/flakes cool down (honor `Retry-After`); client-shape errors fail fast with a hint; failover stops at the first byte streamed. Preserve these when touching `pool.go` / adapters.
+- Failure classification is a contract: genuine auth failures disable a key (in memory — a pool rebuild or restart re-enables it; the Providers page switch is the persistent disable); rate limits/flakes cool down (honor `Retry-After`); client-shape errors fail fast with a hint; failover stops at the first byte streamed. Preserve these when touching `pool.go` / adapters.
 
 ## Concurrency & streaming
 

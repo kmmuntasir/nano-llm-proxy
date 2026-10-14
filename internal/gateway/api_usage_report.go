@@ -12,7 +12,7 @@ import (
 // Usage monitoring v2 endpoints: /api/usage/overview|breakdown|series|
 // requests|facets. Parameters are validated strictly — an unknown enum value
 // or an out-of-range page is a 400, never silently defaulted — so the GUI
-// learns about contract drift immediately. Non-superadmins are always scoped
+// learns about contract drift immediately. Non-admins are always scoped
 // to themselves; asking for anyone else (or a cross-user grouping) is a 403.
 
 var (
@@ -325,7 +325,7 @@ func (g *gateway) handleUsageRequests(w http.ResponseWriter, r *http.Request) {
 }
 
 // handleUsageFacets serves GET /api/usage/facets — distinct filter values in
-// the range. Only the range is read; non-superadmins are forced to
+// the range. Only the range is read; non-admins are forced to
 // themselves and get no user list.
 func (g *gateway) handleUsageFacets(w http.ResponseWriter, r *http.Request) {
 	from, to, ok := usageRange(r)

@@ -68,9 +68,11 @@ rest, this is the wrong tool.
 proxy, terminate TLS there and add your public host to `NANO_TRUSTED_ORIGINS`
 or the GUI will reject its own mutations on Origin.
 
-**There is no rate limit on the login endpoint by default.** There is per-IP +
-email backoff, which blunts credential stuffing, but if you expose the admin
-port to a wide network, put a rate limiter in front of it.
+**There is no global rate limit on the login endpoints.** There is a per-IP +
+email lockout (5 failures within 15 minutes lock that pair for 15 minutes;
+Google sign-in is limited per IP), which blunts credential stuffing, but if
+you expose the admin port to a wide network, put a rate limiter in front of
+it.
 
 **Google sign-in is optional and verified locally.** With `GOOGLE_CLIENT_ID`
 set, the GUI accepts Google ID tokens: the gateway checks Google's RS256

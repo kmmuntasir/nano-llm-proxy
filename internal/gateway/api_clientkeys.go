@@ -5,8 +5,9 @@ import (
 	"net/http"
 )
 
-// Client API key endpoints. /api/me/keys is self-service for every user;
-// /api/users/{id}/keys is the superadmin equivalent for any target user.
+// Client API key endpoints. /api/me/keys is self-service for every user —
+// the only way keys are created, toggled or deleted; GET /api/users/{id}/keys
+// gives admins a read-only view of anyone's keys.
 
 type clientKeyJSON struct {
 	ID           int64  `json:"id"`

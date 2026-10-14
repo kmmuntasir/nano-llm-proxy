@@ -27,7 +27,7 @@ You receive **one task** at a time: description, acceptance criteria, references
 
 **Config:** bootstrap values via `internal/config` (malformed = fatal); runtime tunables go in the settings JSON (`internal/settings`), edited in the GUI — not new env vars. New env vars: `.env.example` (commented) + `docs/configuration.md`.
 
-**Behavior contracts:** auth failure → blacklist until re-enabled; 429/5xx → cooldown (honor `Retry-After`); client-shape errors fail fast with a hint; failover stops at the first streamed byte. Streaming flushes per event; never buffer a whole upstream body. Bound all outbound I/O (timeouts, `io.LimitReader`).
+**Behavior contracts:** genuine auth failure → key disabled in memory (until the next pool rebuild or restart; the Providers page switch is the persistent disable); 429/5xx → cooldown (honor `Retry-After`); client-shape errors fail fast with a hint; failover stops at the first streamed byte. Streaming flushes per event; never buffer a whole upstream body. Bound all outbound I/O (timeouts, `io.LimitReader`).
 
 **Security:** client keys sha256-hashed, shown once; upstream keys never returned to clients; Origin check on mutating `/api/*`; all `web_read` fetches through the SSRF guard. Never log keys, tokens, passwords, or bodies. Never touch `.env`, `keys.json`, `gateway.db*`, `.secrets.md`.
 

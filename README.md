@@ -64,8 +64,10 @@ database for.
 - Key pools per provider: `priority-daily` (default — stick-with-failover
   whose starting key advances daily), `priority` (stick-with-failover,
   prompt-cache friendly) or `lru` (spread); cooldowns honor `Retry-After`
-- Failure classification: genuine auth failures **blacklist** a key until you
-  re-enable it; rate limits and upstream flakes cool it down briefly (and
+- Failure classification: genuine auth failures **disable** a key in memory
+  (until the next restart or GUI change rebuilds the pools — switch it off on
+  the Providers page to make that permanent); rate limits and upstream flakes
+  cool it down briefly (and
   cooldowns lapse on their own, self-correcting with one probe request per
   cycle); client-shape problems fail fast with an actionable hint
 - Embedded admin GUI (React, served by the same binary): users and roles,
@@ -225,21 +227,23 @@ different spellings), `max_output_tokens`, modalities, `reasoning`,
 models.dev publishes it — what oh-my-pi needs beyond the boolean), and
 `responses_api`. Zen and Z.ai get their limits from models.dev; Kilo's own
 rich catalog stays the authority for its limits and modalities, with only the
-reasoning facts resolved from the catalog. The catalog is scoped per client key when a superadmin
-has revoked providers for the key's owner (Users → Provider access):
+reasoning facts resolved from the catalog. The catalog is scoped per client key when an admin
+has revoked providers for the key's owner (Users → Access):
 revoked providers vanish from the list and route like unknown prefixes.
-Where metadata is available, IDs are advertised in a
-self-describing form so model pickers can show the facts:
+For zen, Kilo and Z.ai, IDs are advertised in a self-describing form so
+model pickers can show the facts:
 
 ```text
 <provider>/<model>-<context>(-txt|-img|-vid|-aud|-pdf)*
 
-myprovider/my-model-128K-txt-img     ← 128K context, text+image input
-myprovider/my-model-1M               ← 1M context, no modality data
+zai/glm-5.3-flash-1M-txt-img-vid-pdf   ← 1M context, text+image+video+pdf input
+zen/big-pickle-200K-txt                ← 200K context, text input
 ```
 
-The suffix is cosmetic — every endpoint strips it before calling upstream,
-and bare IDs are accepted everywhere.
+The suffix is cosmetic — those providers' endpoints strip it before calling
+upstream, and bare IDs are accepted too. Other providers' IDs are passed
+through as the upstream lists them (only Claude Code's `[1m]` marker is
+stripped).
 
 ## Key rotation
 
@@ -257,12 +261,15 @@ Failure handling per request:
 | --- | --- | --- |
 | 429 with `Retry-After` | cooldown for that duration | next key |
 | 429 without | 30 s cooldown — Z.ai coding-plan 429s state the reset in the body, and the key cools until that instant | next key |
-| 401 genuine auth error | blacklisted until re-enabled | next key |
+| 401 genuine auth error | disabled in memory (until the next restart or GUI change; switch it off on the Providers page to make it permanent) | next key |
 | 401 anything else | 10 s cooldown (some providers wrap flakes as 401) | next key |
-| 403 client-shape rejection | none — not the key's fault | fail fast with a hint |
+| 403 `FreeTierError` (zen's client-shape gate) | none — not the key's fault | fail fast with a hint |
+| 403 mentioning auth | disabled in memory, as for 401 | next key |
+| other 403 | 10 s cooldown | next key |
 | 426 upgrade required | none | fail fast: raise the adapter's `userAgent` |
-| 503 endpoint unavailable | none | flip Chat/Responses surface, retry |
-| other 4xx | none | fail fast, upstream body surfaced |
+| 503 endpoint unavailable | none | zen: flip Chat/Responses surface, retry; other providers: next key |
+| 4xx `ModelProtocolUnsupported` (zen) | none | flip Chat/Responses surface, retry |
+| other 4xx | none | fail fast, upstream body surfaced (client gets 400) |
 | 5xx / network error | 10 s cooldown | next key |
 
 Two structural rules:
@@ -382,8 +389,9 @@ tools to every client key — `web_search` (SearXNG) and `web_read` (fast
 native fetch escalating to the obscura headless browser for
 JavaScript-heavy or bot-protected pages). SSRF-protected, metered per user
 on the Usage page, no paid search APIs. The signed-in **Guide** page in the
-GUI generates setup snippets for Claude Code, opencode, Codex CLI, Kilo
-Code, and plain MCP clients with the deployment's own URLs. The backends
+GUI covers Claude Code, Pi and plain MCP clients with the deployment's own
+URLs, and Profile → *Set up MCP web tools* adds snippets for opencode, Kilo,
+Pi and `.mcp.json`. The backends
 are optional companion services installed by an idempotent script — see
 [docs/deployment.md](docs/deployment.md).
 
@@ -406,29 +414,31 @@ Served by the same binary at `/`.
   <img src="docs/screenshots/usage.webp" alt="Usage page: totals, top models and providers, and per-key or per-user breakdowns" width="420">
   <img src="docs/screenshots/settings.webp" alt="Settings page: rotation mode, retry and cooldown knobs, adapter and model-catalog controls" width="420">
 </p>
-<p align="center"><sub>Usage — date-range totals, per-key and per-user. &nbsp;&nbsp; Settings — rotation, cooldowns, adapter knobs, web tools.</sub></p>
+<p align="center"><sub>Usage — date-range totals and breakdowns by model, request, and (for admins) user. &nbsp;&nbsp; Settings — rotation, cooldowns, adapter knobs, web tools.</sub></p>
 
 <p align="center">
-  <img src="docs/screenshots/guide.webp" alt="Guide page: deployment-aware setup instructions for Claude Code, opencode, Codex CLI, Kilo Code, and Pi" width="420">
+  <img src="docs/screenshots/guide.webp" alt="Guide page: deployment-aware setup instructions for Claude Code, Pi, and other OpenAI-compatible clients" width="420">
   <img src="docs/screenshots/profile.webp" alt="Profile page: account info and self-service client key management" width="420">
 </p>
-<p align="center"><sub>Guide — setup for Claude Code, opencode, Codex, Kilo, and Pi, rendered with this deployment's URLs. &nbsp;&nbsp; Profile — keys and account.</sub></p>
+<p align="center"><sub>Guide — setup for Claude Code, Pi, and any OpenAI-compatible client, rendered with this deployment's URLs. &nbsp;&nbsp; Profile — keys and account.</sub></p>
 
 | Page | Who | What |
 | --- | --- | --- |
 | Dashboard | everyone | Uptime, 24h requests/tokens/errors, usage charts (Today / 7d / 30d: requests, tokens, providers, top models), recent requests |
-| Models | everyone | Every live model across providers — the gateway's base URL with a one-click Claude Code `settings.json` env generator (pick opus/sonnet/haiku, copy the env object; `[1m]` is added automatically for 1M-context models) — plus search and filters by provider, context window, reasoning, Responses API, and input modalities; every model shows its exact ID with a copy button |
-| Guide | everyone | User guide rendered with this deployment's URLs: base endpoints, setup for Claude Code / opencode / Codex CLI / Kilo Code / Pi / generic OpenAI-compatible clients, MCP web-tools setup, troubleshooting |
-| Usage | everyone | Date-range usage: totals, top models, providers, per-key (admins also get per-user), recent activity — scoped to the signed-in user |
-| Profile | everyone | Account info, self-service password reset, own client keys (create/disable/delete) plus an MCP web-tools setup dialog |
-| Users | admin | User CRUD, roles, password resets, a read-only view of each user's client keys (only owners create or change keys), per-user provider access for regular users (revoke a provider and it vanishes from that user's model list; their requests to it fail like an unknown provider — superadmins and admins always have every provider). Admins have every admin page but can't change superadmin accounts or grant the superadmin role |
-| Providers | admin | Add providers from a curated preset dropdown (or its Custom Provider option), search/filter the provider card grid, edit base URLs, add/remove/toggle/rename upstream keys, fetch per-key plan usage for Z.ai (5-hour/weekly windows, tier, resets), browse each provider's live model catalog (zen models with the Responses-API flag carry a toggle) New upstream keys are verified against the provider's endpoints before they're saved |
-| Settings | admin | Rotation, retries/cooldowns, daily cap, Claude fallback, adapter knobs, model-catalog sync (zen + zai, models.dev), web tools (SearXNG URL, reader mode, obscura knobs, live backend tests) |
+| Models | everyone | Every live model across providers — the gateway's base URL with a one-click Claude Code `settings.json` env generator (pick opus/sonnet/haiku, copy the env object; `[1m]` is added automatically for 1M-context models) — plus search and filters by provider, context window, reasoning, Responses API, benchmarks, and input modalities; benchmark scores (Artificial Analysis Intelligence/Coding/Agentic, from OpenRouter) on each card, sort by score or context window, a details dialog with every published score, and a side-by-side compare of up to three models; every model shows its exact ID with a copy button |
+| Guide | everyone | User guide rendered with this deployment's URLs: base endpoints, setup for Claude Code / Pi / any OpenAI-compatible client, MCP web-tools setup, accounts & keys, usage & caching, troubleshooting |
+| Usage | everyone | Tabs — Overview, Models and Requests for everyone, plus Users and Users × Models for admins — with date-range filters and drill-down pages per model and per user; regular users see only their own usage, admins see everyone's |
+| Profile | everyone | Account info and avatar, self-service name change and password reset (password users only — Google-linked accounts take both from Google), own client keys (create/disable/delete) plus an MCP web-tools setup dialog |
+| Users | admin | User CRUD with roles (superadmin / admin / user), an Edit dialog (name — locked for Google-linked users — role, and an optional new password), activate/deactivate with confirmation (deactivating ends sessions and turns the user's client keys off), a read-only view of each user's client keys (only owners create or change keys), per-user provider access for regular users (revoke a provider and it vanishes from that user's model list; their requests to it fail like an unknown provider — superadmins and admins always have every provider). Admins have every admin page but can't change superadmin accounts or grant the superadmin role |
+| Providers | admin | Add providers from a curated preset dropdown (or its Custom Provider option), search/filter the provider card grid, edit base URLs, add/remove/toggle/rename upstream keys, fetch per-key plan usage for Z.ai (5-hour/weekly windows, tier, resets), browse each provider's live model catalog (zen models with the Responses-API flag carry a toggle) — new upstream keys are verified against the provider's endpoints before they're saved (an invalid or refused key is rejected with the provider's reason; duplicates are refused), and switching a provider off or on asks for confirmation |
+| Settings | admin | Sign-in (password sign-in switch when Google sign-in is configured), default providers for new users, rotation, retries/cooldowns, daily cap, Claude fallback, adapter knobs, model-catalog and benchmark sync (models.dev + OpenRouter), web tools (SearXNG URL, reader mode, obscura knobs, live backend tests); Save shows what changed and asks for confirmation |
 
 First boot requires `ADMIN_EMAIL` and `ADMIN_PASSWORD` (environment variables
-or an env file); the superadmin is created once and never overwritten.
-Forgot the password? Run `./nano-llm-proxy -reset-admin-password` with
-`ADMIN_PASSWORD` set, then restart.
+or an env file); they seed the first superadmin only while the database has
+no users, and are ignored after that. Forgot the password? Run
+`./nano-llm-proxy -reset-admin-password` with `ADMIN_EMAIL` and
+`ADMIN_PASSWORD` (at least 10 characters) set — it resets the account whose
+email is `ADMIN_EMAIL` and ends its sessions — then restart.
 
 ## Security model
 
@@ -489,8 +499,9 @@ operator who has the binary running does not need the repository checked out.
 `sudo ./deploy.sh` does the whole setup on a systemd host: it requires a
 `.env`, builds GUI + binary, installs to `/opt/nano-llm-proxy`, and installs
 a hardened unit. No Docker, no container runtime, no database server — the
-`StateDirectory` the unit sets is the only persistent state, holding
-`gateway.db`. Optional MCP web-tool backends (SearXNG + obscura) are a
+only persistent state lives in `/opt/nano-llm-proxy` (`gateway.db` and the
+`.env`; note that every run reinstalls the repo's `.env` over the deployed
+one). Optional MCP web-tool backends (SearXNG + obscura) are a
 separate, idempotent installer — `sudo ./scripts/install-web-tools.sh` —
 documented in [docs/deployment.md](docs/deployment.md). Hand-rolled
 equivalent (full walkthrough in

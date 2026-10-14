@@ -9,7 +9,7 @@ import (
 )
 
 // handleGetSettings serves the effective runtime settings document
-// (superadmin only — the same audience as the GUI Settings page). Read from
+// (admins only — the same audience as the GUI Settings page). Read from
 // the store, not the in-memory snapshot: the background modelMeta sync writes
 // the DB directly between admin requests.
 func (g *gateway) handleGetSettings(w http.ResponseWriter, r *http.Request) {

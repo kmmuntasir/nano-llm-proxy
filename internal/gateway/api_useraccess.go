@@ -4,9 +4,9 @@ import (
 	"net/http"
 )
 
-// Per-user provider access (superadmin only): which providers a user's
+// Per-user provider access (admins only): which providers a user's
 // client keys may route to. Everything is allowed by default — a user only
-// loses access to a provider when a superadmin revokes it here, and the
+// loses access to a provider when an admin revokes it here, and the
 // revoked provider then behaves as if it does not exist for them (absent
 // from their /v1/models, unknown prefix when routed). Superadmins and admins
 // always have every provider — they could re-grant it to themselves anyway.

@@ -58,8 +58,11 @@ post-deploy check. The GUI lives on the same port.
 
 ## Updating a running deployment
 
-Re-running `sudo ./deploy.sh` is always safe: it rebuilds, replaces the
-binary, and restarts the service. The database and `.env` are untouched.
+Re-running `sudo ./deploy.sh` is safe: it rebuilds, replaces the binary,
+and restarts the service. The database (`/opt/nano-llm-proxy/gateway.db`) is
+untouched, but the deployed `.env` is **replaced by the repo copy** on every
+run — keep the repo's `.env` current, or edit
+`/opt/nano-llm-proxy/.env` and use the remote-update flow below instead.
 
 To update a remote host from a build machine (backup-first swap):
 

@@ -10,7 +10,7 @@ import SeriesCard from "./SeriesCard"
 import { OverviewStats, RangeNotice } from "./UsageParts"
 import { filterSearch, useUsageFilters } from "./urlState"
 
-// Superadmin only (route-gated): one user's usage. The user comes from the
+// Admins only (route-gated): one user's usage. The user comes from the
 // path; the other filters still apply. Each table keeps its own URL state
 // (m. / k. / r. prefixes).
 export default function UserDetailPage() {

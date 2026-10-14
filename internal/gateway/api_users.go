@@ -11,7 +11,8 @@ import (
 	"golang.org/x/crypto/bcrypt"
 )
 
-// store.User management endpoints (superadmin only). JSON views never include
+// store.User management endpoints (admins only; roles.go limits what an
+// admin may do to a superadmin account). JSON views never include
 // password hashes or key material.
 
 type userJSON struct {

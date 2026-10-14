@@ -14,9 +14,13 @@ web/src/
     App.tsx             # session gate (useSession → /api/auth/me) + the whole route tree; admin-only routes (superadmin + admin)
     api/client.ts       # fetch wrapper: api/post/put/patch/del, ApiError, 401 → setUnauthorizedHandler
     api/types.ts        # *View / request / response types mirroring the Go JSON exactly
+    api/roles.ts        # isAdminRole, canManageAccount, roleLabel, assignableRoles (mirror of roles.go)
+    api/usage.ts        # usage-monitoring query helpers
+    api/useAuthConfig.ts # useAuthConfig / useCredentialLogin (GET /api/auth/config)
     components/         # AppLayout, DataTable, ModelCard, UsageCharts, setup dialogs, StatusBadge, ...
     components/ui/      # Chakra snippets (provider, toaster, dialog, color-mode, password-input, close-button)
-    pages/              # one route container per page: Dashboard, Models, Usage, Providers, Users, Settings, Profile, MyKeys, Docs, Login
+    pages/              # one route container per page: Dashboard, Models, Providers, Users, Settings, Profile (embeds MyKeys), Docs, Login
+    pages/usage/        # the Usage section: UsageSection + its tabs and drill-down pages (nested routes)
     assets/             # logo files
 web/public/             # static files (favicon)
 ```
@@ -41,7 +45,7 @@ web/public/             # static files (favicon)
 
 - One route tree in `App.tsx`. Unauthenticated → only `/login`; authenticated → `AppLayout` + routes; `users`/`providers`/`settings` render only for admins (`isAdminRole(role)` — superadmin or admin). Unknown paths redirect to `/`.
 - UI gating is convenience; the Go handlers (`requireSession`, `requireAdmin`) are the boundary. A new admin page needs the backend check first.
-- Pages are statically imported; no lazy loading ad hoc (bundle ships inside the binary).
+- Pages are statically imported; the one exception is the Usage section (`UsageSection`, `React.lazy` in `App.tsx`, it carries the chart code). No new lazy loading ad hoc (the bundle ships inside the binary).
 
 ## API Layer
 

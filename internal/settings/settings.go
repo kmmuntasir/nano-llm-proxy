@@ -252,7 +252,7 @@ func DefaultRuntimeSettings() *RuntimeSettings {
 }
 
 // ApplyDefaults normalizes a document that was just unmarshalled from the
-// store or a PUT body: a MISSING rotation falls back to priority (invalid
+// store or a PUT body: a MISSING rotation falls back to priority-daily (invalid
 // values are left in place for Validate to reject, not silently normalized),
 // a missing maxKeysPerRequest to 3, and nil collections to empty ones.
 // CooldownSeconds is NOT coerced — 0 is meaningful (no default cooldown,

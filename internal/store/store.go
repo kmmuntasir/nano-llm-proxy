@@ -339,7 +339,7 @@ func (s *Store) migrateV4() error {
 }
 
 // migrateV5 adds per-user provider access. Absence of a row means "allowed"
-// — existing users keep full access unless a superadmin restricts them. Only
+// — existing users keep full access unless an admin restricts them. Only
 // disabled pairs are stored (enable = delete the row).
 func (s *Store) migrateV5() error {
 	tx, err := s.db.Begin()
@@ -557,7 +557,7 @@ func (s *Store) SetUserProviderAccess(userID, providerID int64, disabled bool) e
 }
 
 // ClearUserProviderAccess removes every revocation for a user — run on
-// promotion to superadmin so old revocations can't resurface on a later
+// promotion to admin or superadmin so old revocations can't resurface on a later
 // demotion.
 func (s *Store) ClearUserProviderAccess(userID int64) error {
 	_, err := s.db.Exec(`DELETE FROM user_provider_access WHERE user_id=?`, userID)
@@ -622,7 +622,8 @@ func (s *Store) Bootstrap(cfg *config.Config, kf *config.KeyFile, adminEmail, ad
 	defer tx.Rollback()
 	now := time.Now().Unix()
 
-	// 1. superadmin (create-if-absent; env never overwrites an existing user)
+	// 1. superadmin — only into an empty users table; once any user exists the
+	//    env credentials are ignored (never overwrite or add accounts)
 	var nUsers int
 	if err := tx.QueryRow(`SELECT COUNT(*) FROM users`).Scan(&nUsers); err != nil {
 		return err
@@ -1527,7 +1528,7 @@ type UsageActivityRow struct {
 }
 
 // usageScope builds the WHERE clause + args for a ts range with an optional
-// per-user filter (nil = all users, superadmin views).
+// per-user filter (nil = all users, admin views).
 func usageScope(from, to int64, userID *int64) (string, []any) {
 	where := "ts BETWEEN ? AND ?"
 	args := []any{from, to}

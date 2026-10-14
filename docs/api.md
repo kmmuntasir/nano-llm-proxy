@@ -9,7 +9,7 @@ Authorization: Bearer fg-...
 x-api-key: fg-...          (also accepted)
 ```
 
-Client keys are created in the admin GUI (Profile → My API Keys, or per-user under Users),
+Client keys are created by their owner in the GUI (Profile → My API Keys — nobody, not even a superadmin, creates keys for someone else),
 stored sha256-hashed server-side, and cached in memory — revocation applies
 to the very next request. `GET /health` is open.
 
@@ -39,7 +39,9 @@ transcripts intact both ways.
 
 ## POST /v1/responses
 
-Native OpenAI Responses API passthrough for models served on that surface:
+Native OpenAI Responses API passthrough for models served on that surface.
+Only zen has a Responses API: any other provider prefix (or a bare model
+name) is a 400 — use `/v1/chat/completions` for those.
 
 ```bash
 curl http://localhost:8787/v1/responses \
@@ -89,9 +91,10 @@ curl http://localhost:8787/v1/messages \
 Model resolution order: a literal `claude-*` name (no explicit
 `provider/` prefix) routes to the configured fallback target
 (Settings → Anthropic fallback) — the safety net for the background calls
-clients self-issue; anything else (including suffixed IDs like
-`myprovider/my-model-128K`) routes directly. A `[1m]` suffix is stripped
-before the upstream call.
+clients self-issue; anything else routes directly. Zen, Kilo and Z.ai IDs
+may carry the cosmetic context/modality suffix (`zai/glm-5.3-flash-1M-txt-img-vid-pdf`),
+which is stripped for those providers; a `[1m]` suffix is stripped for
+every provider before the upstream call.
 
 When the routed provider has an Anthropic-compatible endpoint
 (`anthropicBaseUrl`), the request is forwarded to it natively — none of
@@ -108,16 +111,19 @@ entry. With per-user provider access (Admin API below) the catalog is
 scoped per client key: entries from a provider revoked for the key's owner
 are left out, so clients only ever see routable models:
 
+A Kilo entry (Kilo's catalog is the richest; zen and Z.ai entries carry the
+same limit/modality/reasoning fields, plus `responses_api` and `free` for
+zen; custom providers pass through only what their upstream lists):
+
 ```json
 {
-  "id": "myprovider/my-model-128K-txt-img",
+  "id": "kilo/inclusionai/ling-3.1-flash-262K-txt",
   "object": "model",
-  "context_window": 131072,
-  "context_length": 131072,
+  "context_window": 262144,
+  "context_length": 262144,
   "max_output_tokens": 32768,
-  "input_modalities": ["text", "image"],
-  "reasoning": false,
-  "responses_api": false,
+  "input_modalities": ["text"],
+  "reasoning": true,
   "supported_parameters": ["tools", "temperature"]
 }
 ```
@@ -241,10 +247,11 @@ authenticated request.
 
 Setup for clients: `claude mcp add -s user -t http nano-web
 https://<gateway>/mcp --header "Authorization: Bearer fg-…"` — the GUI's
-My Keys → "Set up MCP web tools" dialog generates this plus opencode/Kilo/Pi
-configs, and the Guide page renders full per-agent setup (including Pi,
-which needs the pi-openai-compat extension for the gateway and
-pi-mcp-adapter for MCP). Backends are installed with
+Profile → My API Keys → "Set up MCP web tools" dialog generates this plus
+opencode/Kilo/Pi configs, and the Guide page renders full per-agent setup
+(Pi supports custom OpenAI-compatible endpoints natively via
+`~/.pi/agent/models.json` and has built-in MCP via `pi mcp add`, so no
+extension packages are needed). Backends are installed with
 `scripts/install-web-tools.sh` (see `docs/deployment.md`).
 
 ## Admin API (`/api/*`)
@@ -252,7 +259,8 @@ pi-mcp-adapter for MCP). Backends are installed with
 Used by the embedded GUI; session-cookie authenticated with bcrypt-backed
 logins, per-IP+email backoff, and Origin checks on state-changing requests.
 Roles: `superadmin` and `admin` (everything below — "admin" in the table
-means either) and `user` (own keys + dashboard). The one difference between
+means either) and `user` (own keys, profile, dashboard, models, usage and
+guide). The one difference between
 the two admin roles: an admin can't change a superadmin account in any way
 (deactivate, delete, rename, change role, reset password) and can't grant the
 `superadmin` role. Superadmins can
@@ -264,21 +272,21 @@ change other superadmins. Nobody can deactivate or delete their own account
 | `POST /api/auth/login`, `POST /api/auth/logout`, `GET /api/auth/me` | — | Session lifecycle. Login answers 403 when password sign-in is disabled (`auth.credentialLogin`) |
 | User objects | — | Every user payload (`/api/auth/me`, `/api/users`, login, `PATCH /api/me`) carries `googleLinked` (has signed in with Google — name is Google-owned and refreshed on each Google sign-in; admins can't rename it either) and, for Google users with a photo, `avatarUrl` (an `https://*.googleusercontent.com` URL refreshed on each Google sign-in) |
 | `GET /api/auth/config` | — (open) | Sign-in methods for the login page: `{"credentialLogin": bool, "google": {"clientId", "domain"?}}`; `google` is omitted when Google sign-in isn't configured |
-| `POST /api/auth/google` | — | Google sign-in: body `{"credential": "<Google ID token>"}`; verifies the token (signature, issuer, audience, expiry, verified email, Workspace domain) and starts the same session as password login. Origin-checked and backoff-limited. 404 when not configured, 401 bad token, 403 outside the domain / no account with this email (Google sign-in never creates accounts — add the user on the Users page) / disabled account |
+| `POST /api/auth/google` | — | Google sign-in: body `{"credential": "<Google ID token>"}`; verifies the token (signature, issuer, audience, expiry, verified email, Workspace domain) and starts the same session as password login. Origin-checked and backoff-limited. 400 no credential, 401 bad token, 403 outside the domain / no account with this email (Google sign-in never creates accounts — add the user on the Users page) / disabled account / cross-origin, 404 when not configured, 429 too many failed attempts from this IP, 503 Google's signing keys unreachable |
 | `GET/POST /api/me/keys`, `PATCH/DELETE /api/me/keys/{keyId}` | user | Own client keys |
-| `GET/POST /api/users`, `PATCH/DELETE /api/users/{id}` | admin | User management. `POST` requires a password (min 10 characters) only while password sign-in is on; with it off, users are created without one and sign in with Google. A new `user`-role account starts with the providers listed in the `newUsers.disabledProviderIds` runtime setting revoked (written atomically with the user; ids of deleted providers are skipped); `admin`/`superadmin` accounts get no revocations. `PATCH {"disabled": true}` deactivates a user: their sessions end and their client keys stop authenticating until reactivated (the last superadmin can't be deactivated) |
+| `GET/POST /api/users`, `PATCH/DELETE /api/users/{id}` | admin | User management. `POST` requires a password (min 10 characters) only while password sign-in is on; with it off, users are created without one and sign in with Google. A new `user`-role account starts with the providers listed in the `newUsers.disabledProviderIds` runtime setting revoked (written atomically with the user; ids of deleted providers are skipped); `admin`/`superadmin` accounts get no revocations. `PATCH` takes any of `name`, `email`, `role`, `password` (min 10 characters; ends that user's sessions) and `disabled`. `PATCH {"disabled": true}` deactivates a user: their sessions end and their client keys stop authenticating until reactivated. Demoting, deactivating or deleting the last active superadmin is 409; deactivating or deleting yourself is 409; renaming a Google-linked user is 400; an admin changing a superadmin account, or granting the superadmin role, is 403 |
 | `GET /api/users/{id}/keys` | admin | Read-only view of a user's client keys. Nobody — not even a superadmin — creates, toggles or deletes another user's keys; owners manage their own via `/api/me/keys`, and deactivating a user turns all of theirs off |
 | `GET /api/users/{id}/providers`, `PUT /api/users/{id}/providers/{providerId}/access` | admin | Per-user provider access. The listing annotates each provider with `disabledForUser`; the PUT takes `{disabled: bool}` and answers 409 for an admin or superadmin target — they always have every provider (stray revocations for them are ignored, and promotion clears a user's revocations). Access is allow-by-default: a revoked provider vanishes from that user's `/v1/models` and their requests to it fail exactly like an unknown provider |
 | `GET/POST /api/providers`, `PATCH/DELETE /api/providers/{id}` | admin | Providers (generic CRUD; `baseUrl` and/or `anthropicBaseUrl`, at least one required; built-ins cannot be deleted). Create takes `keys` as `{key, label}` objects — every upstream key needs a label (1-64 characters). It also accepts a `preset` id: unknown presets are 400, the name defaults to the preset id, endpoint roots default from the registry, and the preset is immutable afterwards. Multiple providers per preset are allowed; only `zen` is reserved and undeletable |
 | `GET /api/providers/presets` | admin | The curated preset registry (id, label, endpoint roots) behind the GUI's Add Provider dropdown |
-| `POST /api/providers/{id}/keys`, `PATCH/DELETE /api/providers/{id}/keys/{keyId}` | admin | Upstream keys; POST requires a label, PATCH may rename a key but never blank its label. Every new key — added here or among the initial keys of `POST /api/providers` — is verified against each endpoint the provider has (OpenAI: `GET /models` plus a one-token call for a nonexistent model; Anthropic: `GET /v1/models` plus the same via `/v1/messages`) before anything is saved: an upstream 401/403 → 400 naming the key's label; an unreachable or 5xx upstream → 503, nothing saved. The fake model id means no inference runs and no quota is spent. A key already on the provider is a 409 (checked before any probe), the same key twice in one create is a 400 |
-| `GET /api/providers/{id}/keys/{keyId}/usage` | admin | Per-key quota/usage from the provider's preset usage endpoint, fetched on demand (Z.ai coding plans: plan tier, 5-hour and weekly windows, MCP). The upstream `data` object passes through verbatim; presets without a usage endpoint answer 400 |
+| `POST /api/providers/{id}/keys`, `PATCH/DELETE /api/providers/{id}/keys/{keyId}` | admin | Upstream keys; POST requires a label, PATCH may rename a key but never blank its label. Every new key — added here or among the initial keys of `POST /api/providers` — is verified against each endpoint the provider has (OpenAI: `GET /models` plus a one-token call for a nonexistent model; Anthropic: `GET /v1/models` plus the same via `/v1/messages`; OpenRouter additionally `GET /api/v1/key`) before anything is saved. Per probe: 401, or a 400 whose message says the key is wrong (xAI answers a wrong key that way) → 400 `Key "<label>" is invalid — …`; 403 (except zen's `FreeTierError`) → 400 `Key "<label>" was refused — …` (the key may be genuine, but this server can't use it: region, IP allowlist, permissions, a blocked account or budget); unreachable, timeout or 5xx → 503, nothing saved; anything else (2xx, other 4xx including 402/429) means the key authenticated. The fake model id means no inference runs and no quota is spent; upstream text is shown with the key redacted. A key already on the provider is a 409 (checked before any probe), the same key twice in one create is a 400 |
+| `GET /api/providers/{id}/keys/{keyId}/usage` | admin | Per-key quota/usage from the provider's preset usage endpoint, fetched on demand (Z.ai coding plans: plan tier, 5-hour and weekly windows, MCP). The upstream `data` object passes through verbatim; presets without a usage endpoint answer 400; an unreachable or failing upstream answers 503 |
 | `GET /api/settings` | admin | Effective runtime settings document (rotation, retries, Claude fallback, adapter knobs, model catalog, new-user defaults). `newUsers` is `{"disabledProviderIds": [<provider id>, ...]}` — always a list (`[]` = new users get every provider), ids of deleted providers omitted |
-| `PUT /api/settings` | admin | Validate and replace the document; omitted fields fall back to defaults, the models.dev sync status is server-owned and preserved. Validation failures return 400 and change nothing. `newUsers.disabledProviderIds` is de-duplicated and sorted; a non-positive id is a 400, an id of a provider that doesn't exist is dropped silently. Changing it affects only users created afterwards. Applies in-request — pool mode and the `/v1/models` cache refresh before the response |
+| `PUT /api/settings` | admin | Validate and replace the document; omitted fields fall back to defaults, the models.dev sync status is server-owned and preserved. Validation failures return 400 and change nothing. Turning `auth.credentialLogin` off is a 400 when Google sign-in isn't configured, or when the acting admin is outside `GOOGLE_WORKSPACE_DOMAIN` (they couldn't sign back in). `newUsers.disabledProviderIds` is de-duplicated and sorted; a non-positive id is a 400, an id of a provider that doesn't exist is dropped silently. Changing it affects only users created afterwards. Applies in-request — pool mode and the `/v1/models` cache refresh before the response |
 | `POST /api/settings/model-meta/sync` | admin | Run the models.dev catalog sync and the benchmark fetch now; returns the sync status and `benchmarks_status` (200 even when `ok:false` — the errors are in the status blocks; neither sync depends on the other) |
 | `GET /api/dashboard` | user | Pool health and recent activity. Admins get per-key pool views and the full activity ring; other users get health counts only (`keys: []`) and just their own activity entries, with the upstream `keyHash` blanked |
 | `GET /api/models` | user | The merged, enriched model catalog `/v1/models` serves, plus benchmark scores — backs the Models page. Entries the benchmark source knows carry `benchmarks` (`source_id`, `source_name`, optional `intelligence_index`/`coding_index`/`agentic_index`, optional `design_arena` list of `{arena, category, elo, win_rate, rank}`); the body adds `benchmarks_status` (`fetched_at`, `count`, optional `error`). `/v1/models` never carries benchmarks |
-| `GET /api/providers/{id}/models` | admin | One provider's live catalog, fetched on demand |
+| `GET /api/providers/{id}/models` | admin | One provider's live catalog, fetched on demand; 503 when the upstream can't be reached |
 | `PUT /api/settings/responses-api` | admin | Flip the per-model Responses-API flag (`{model, responsesApi}`); sync preserves the flag |
 | `POST /api/webtools/test` | admin | Live-probe a web-tools backend: `{target: "searxng" \| "obscura", deep?: bool}`. Runs one real search / `obscura --version` (deep adds an example.com fetch); returns `{ok, latencyMs, version?, detail, nextStep}` |
 | `GET /api/usage/summary?from=&to=` | user | Requests/errors/tokens totals, top models, per-provider (scoped to own user; admins see all) |
@@ -388,11 +396,25 @@ rows.
 | --- | --- |
 | 400 | Unknown provider prefix, malformed request, or the upstream refused the request as sent (`upstream 4xx: …` — bad model id, unsupported parameter) |
 | 401 | Missing/invalid client key |
-| 503 | All keys cooling/disabled ("no healthy keys"), an upstream outage, or an upstream client-shape/version rejection — the body carries an actionable hint (e.g. raise the Zen user agent in Settings); retryable |
+| 503 | All keys cooling/disabled ("no healthy keys"), an upstream outage, or an upstream client-shape/version rejection — the body carries an actionable hint (e.g. raise the Zen user agent in Settings); retryable. `/v1/models` also answers 503 when every provider's catalog fetch fails |
 
-The gateway never answers 502: Cloudflare (or a similar proxy) in front of a
-deployment replaces an origin's 502/504 body with its own page, which would
-hide the hint.
+The gateway never answers 502 (this applies to `/api/*` too): Cloudflare
+(or a similar proxy) in front of a deployment replaces an origin's 502/504
+body with its own page, which would hide the hint.
+
+Error bodies follow the protocol being spoken:
+
+```json
+{"error": {"message": "No healthy zen keys available — every key is cooling or disabled"}}
+```
+
+on `/v1/chat/completions`, `/v1/responses`, `/v1/models` and `/api/*`, and
+
+```json
+{"type": "error", "error": {"type": "invalid_request_error", "message": "…"}}
+```
+
+on `/v1/messages` (`invalid_request_error` for a 400, `api_error` otherwise).
 
 Failover across keys happens until the first response byte reaches the
 client; after that, upstream failures propagate rather than corrupting a

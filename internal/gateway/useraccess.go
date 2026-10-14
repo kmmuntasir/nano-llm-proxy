@@ -8,10 +8,11 @@ import (
 	"github.com/kmmuntasir/nano-llm-proxy/internal/store"
 )
 
-// Per-user provider access. A superadmin can disable any provider for any
-// user (Users page); a disabled provider then disappears from that user's
+// Per-user provider access. An admin can disable any provider for any
+// regular user (Users page; superadmins and admins always have every
+// provider); a disabled provider then disappears from that user's
 // /v1/models and routes like an unknown prefix. Absence of a restriction
-// means allowed — nobody loses access until a superadmin acts.
+// means allowed — nobody loses access until an admin acts.
 
 // userAccessCache maps userID -> set of disabled provider ids. Reloaded
 // wholesale by rebuildPools (so every GUI mutation keeps it fresh); lookups

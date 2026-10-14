@@ -4,7 +4,7 @@ import { BreakdownTable } from "./BreakdownTable"
 import SeriesCard from "./SeriesCard"
 import { filterSearch, useUsageFilters } from "./urlState"
 
-// Superadmin only (route-gated): usage per user, row → user detail.
+// Admins only (route-gated): usage per user, row → user detail.
 export default function UsersTab() {
   const { filters, isAdmin, searchParams } = useUsageFilters()
   const navigate = useNavigate()

@@ -63,7 +63,7 @@ For each newly-answered question, record the decision under `## Locked Decisions
 List the unknowns you still need to scope complete deliverables. For each that the **codebase** can settle, spawn an `analyst` (batch related unknowns into one analyst call; run several in parallel when independent) and record the resolved fact under `## Codebase Facts` in `state.md`.
 
 - **Codebase-answerable** (don't ask the user): current SQLite schema (`internal/store`), existing auth/session flow, current GUI page/route structure (`web/src`), existing conventions, what an endpoint returns today, whether a feature already exists.
-- **Product-owner-only** (ask): behavior policy ("should a revoked provider also hide its models from `/v1/models`"), soft-delete vs hard-delete, nav/IA naming, role model (superadmin vs user), retention windows, whether a change is worth a new dependency, scope deferrals.
+- **Product-owner-only** (ask): behavior policy ("should a revoked provider also hide its models from `/v1/models`"), soft-delete vs hard-delete, nav/IA naming, role model (superadmin / admin / user), retention windows, whether a change is worth a new dependency, scope deferrals.
 
 ### 4. Decide: ask more, or write deliverables?
 

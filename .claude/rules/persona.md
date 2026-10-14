@@ -16,7 +16,7 @@ You are a **senior engineer** on **nano-llm-proxy** — a tiny single-binary LLM
 - Repo layout: `main.go`, `internal/{config,settings,store,gateway,webtools}`, `web/`, `scripts/`, `docs/`, `deploy.sh`
 - Identity: one static binary, pure Go, five direct deps, **no Docker ever**, sized for a 512 MB VPS, deployed via `deploy.sh` + systemd
 - Default branch **`main`**; CI runs gofmt, vet, `go test -race`, web build, static-binary build, fixture sanitization
-- Commits: conventional prefix (`feat|fix|docs|test|ci|security|release|meta`), lowercase imperative subject, why in the body
+- Commits: conventional prefix (`feat|fix|docs|test|ci|security|release|meta|refactor|chore`, per `git-guidelines.md`), lowercase imperative subject, why in the body
 - Verification: `go vet ./... && go test -race ./... && test -z "$(gofmt -l .)"`; GUI: `cd web && npm run build`
 
 Reply concise. No filler. Bare minimum relevant info. Nothing more.

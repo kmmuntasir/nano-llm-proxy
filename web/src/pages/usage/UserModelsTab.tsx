@@ -11,7 +11,7 @@ import { filterSearch, useUsageFilters } from "./urlState"
 const TOP_PAIRS = 10
 const SEARCH_DEBOUNCE_MS = 300
 
-// Superadmin only (route-gated): who uses which model. The search box
+// Admins only (route-gated): who uses which model. The search box
 // filters the table server-side (?q=, substring on the group label).
 export default function UserModelsTab() {
   const { filters, isAdmin, searchParams } = useUsageFilters()

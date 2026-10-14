@@ -23,7 +23,7 @@ func LoadDotEnv(path string) error {
 	raw, err := os.ReadFile(path)
 	if err != nil {
 		if os.IsNotExist(err) {
-			return nil // .env is optional; plain env / systemd / docker -e all work
+			return nil // .env is optional; plain env and systemd EnvironmentFile= both work
 		}
 		return err
 	}

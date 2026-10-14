@@ -14,7 +14,7 @@ import JsonBlock from "./JsonBlock"
 
 // McpSetupDialog generates the client-side config for the gateway's /mcp
 // web tools (web_search + web_read): a one-liner for Claude Code, plus
-// .mcp.json / opencode / Kilo snippets. Everything stays client-side — the
+// .mcp.json / opencode / Kilo / Pi snippets. Everything stays client-side — the
 // key is only embedded in the copied text, never sent anywhere.
 
 export default function McpSetupDialog({
@@ -54,10 +54,26 @@ export default function McpSetupDialog({
     [name, url, key],
   )
 
-  // Pi reads the standard shared global config via pi-mcp-adapter.
+  // Pi has built-in MCP (no pi-mcp-adapter — installing it replaces the
+  // built-in support): one `pi mcp add`, or the same entry in
+  // ~/.pi/agent/mcp.json. Matches the Guide's Pi section.
+  const piCmd = `pi mcp add ${name} --url ${url} --header "Authorization=Bearer ${key}" --exposure direct --description "Web search and page reading"`
   const piJson = useMemo(
     () =>
-      JSON.stringify({ mcpServers: { [name]: { type: "http", url, headers: { Authorization: `Bearer ${key}` } } } }, null, 2),
+      JSON.stringify(
+        {
+          mcpServers: {
+            [name]: {
+              url,
+              headers: { Authorization: `Bearer ${key}` },
+              exposure: "direct",
+              description: "Web search and page reading",
+            },
+          },
+        },
+        null,
+        2,
+      ),
     [name, url, key],
   )
 
@@ -102,7 +118,8 @@ export default function McpSetupDialog({
             <JsonBlock code={mcpJson} title=".mcp.json / Claude Desktop" copyLabel="copy .mcp.json" />
             <JsonBlock code={opencodeJson} title="opencode.json" copyLabel="copy opencode config" />
             <JsonBlock code={kiloJson} title="kilo.jsonc (mcpServers)" copyLabel="copy kilo config" />
-            <JsonBlock code={piJson} title="~/.config/mcp/mcp.json — Pi (pi-mcp-adapter)" copyLabel="copy pi config" />
+            <JsonBlock code={piCmd} title="Pi (built-in MCP)" copyLabel="copy pi command" />
+            <JsonBlock code={piJson} title="…or ~/.pi/agent/mcp.json — Pi" copyLabel="copy pi config" />
           </VStack>
         </DialogBody>
         <DialogFooter>

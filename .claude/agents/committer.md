@@ -23,7 +23,7 @@ You act only when explicitly invoked with: (a) a task description, (b) the list 
    - Read the branch name: `git branch --show-current`. If the project derives a ticket/ID from the branch, include it per convention.
 2. **Stage** the provided paths explicitly.
 3. **Verify** the staged set matches the task (see constraints).
-4. **Commit** with a single-line message in the discovered convention, derived from the task description. Prefer single-line unless the repo's convention clearly uses a body.
+4. **Commit** with a message in the discovered convention, derived from the task description: a `<type>: <subject>` line, plus a body explaining *why* when the change isn't self-evident (HEREDOC; see `.claude/rules/git-guidelines.md`).
 5. **Report** the result: commit hash, commit message, and the committed file list (from `git show --stat --oneline HEAD`). Do not dump diffs.
 
 ## If something is off

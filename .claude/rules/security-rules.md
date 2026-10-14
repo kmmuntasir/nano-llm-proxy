@@ -17,7 +17,7 @@ Source of truth for the public posture is `SECURITY.md`; these rules keep code c
 ## Authentication & authorization
 
 - **Client keys** (`fg-…`): stored **sha256-hashed**; plaintext is shown exactly once at creation. Accepted as `Authorization: Bearer` or `x-api-key` on `/v1/*` and `/mcp` via `clientOnly`. Never store, log, or re-display plaintext.
-- **GUI sessions:** cookie-based, bcrypt-verified passwords, `requireSession` on every `/api/*` route except login. Admin routes (superadmin + admin) also wrap `requireAdmin`. Mutating `/api/*` requests are Origin-checked — never loosen it to fix a local problem.
+- **GUI sessions:** cookie-based, bcrypt-verified passwords, `requireSession` on every `/api/*` route except the sign-in routes (`POST /api/auth/login`, `GET /api/auth/config`, `POST /api/auth/google` — Google ID tokens are verified locally in `googleid.go`). Admin routes (superadmin + admin) also wrap `requireAdmin`. Mutating `/api/*` requests are Origin-checked — never loosen it to fix a local problem.
 - Login has per-IP + email backoff; don't remove it. Password hashes only (bcrypt via `golang.org/x/crypto`).
 - Authorization is scoped by principal: users reach only their own keys/profile/usage; per-user provider revocation hides providers from the catalog and routes them like unknown prefixes. Cross-user access → 403/404.
 - UI gating (`isAdminRole(role)` from `web/src/api/roles.ts`) is convenience; the Go middleware is the boundary. A new admin endpoint without `requireAdmin` is a bug.

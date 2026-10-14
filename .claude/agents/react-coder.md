@@ -21,7 +21,7 @@ You receive **one task** at a time: description, acceptance criteria, references
 
 **Data:** all HTTP through `src/api/client.ts` (`api`, `post`, `put`, `patch`, `del`; `ApiError`). Reads: `useQuery` with a stable array `queryKey`. Writes: `useMutation` then `queryClient.invalidateQueries`. No raw `fetch`, no hardcoded hosts. Types live in `src/api/types.ts` and mirror backend JSON exactly — never invent fields. 401 handling is centralized (`setUnauthorizedHandler`); don't add token refresh.
 
-**Routing/auth:** one tree in `App.tsx`; session from `useSession()`; `users`/`providers`/`settings` are superadmin-only. UI gating is convenience — the Go middleware is the boundary, so a new admin page needs its backend check first.
+**Routing/auth:** one tree in `App.tsx`; session from `useSession()`; `users`/`providers`/`settings` are admin-only (superadmin + admin, `isAdminRole` from `api/roles.ts`). UI gating is convenience — the Go middleware is the boundary, so a new admin page needs its backend check first.
 
 **UI:** Chakra components + style props + semantic tokens; light and dark must both work; narrow (mobile) widths must not overflow. Reuse `components/` (`DataTable`, `ConfirmDialog`, `CopyButton`, `JsonBlock`, `StatusBadge`, `KeyRevealDialog`, …) and `components/ui/` snippets. Toasts via `toaster.create({ title, type })`. Destructive actions go through `ConfirmDialog`. Client keys are shown once — keep the reveal flow.
 

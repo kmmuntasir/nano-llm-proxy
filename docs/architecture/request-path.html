@@ -5190,11 +5190,11 @@ OTHER DEALINGS IN THE FONT SOFTWARE.
         <text data-detail="fine" x="173.5" y="188" class="t-dim" font-size="7">OpenAI- and Anthropic-compatible routes (/v1/responses, /v1/messages) share this path</text>
         </g>
 
-        <g data-edge-from="gateway" data-edge-to="store" data-edge-label="load provider config + key" data-edge-key="1" data-edge-id="load-config">
+        <g data-edge-from="gateway" data-edge-to="store" data-edge-label="pick key from in-memory pool" data-edge-key="1" data-edge-id="load-config">
           <path data-composition-edge-from="gateway" data-composition-edge-to="store" data-composition-edge-id="load-config" data-composition-points="385.83333333333337,210;596.1666666666667,210" d="M 385.83333333333337 210 L 596.1666666666667 210" class="a-default" stroke-width="1.4" marker-end="url(#arrowhead)"/>
         <g data-detail="context">
           <rect x="417.40000000000003" y="190" width="147.20000000000002" height="16" rx="3" class="c-mask"/>
-          <text x="491.00000000000006" y="200" class="t-backend" font-size="9" text-anchor="middle">load provider config + key</text>
+          <text x="491.00000000000006" y="200" class="t-backend" font-size="9" text-anchor="middle">pick key from in-memory pool</text>
         </g>
         </g>
 
@@ -5237,7 +5237,7 @@ OTHER DEALINGS IN THE FONT SOFTWARE.
           <rect x="453.80000000000007" y="368" width="74.4" height="16" rx="3" class="c-mask"/>
           <text x="491.00000000000006" y="378" class="t-messagebus" font-size="9" text-anchor="middle">record usage</text>
         </g>
-        <text data-detail="fine" x="397.83333333333337" y="406" class="t-dim" font-size="7">Per-request usage lands in gateway.db for the dashboard</text>
+        <text data-detail="fine" x="397.83333333333337" y="406" class="t-dim" font-size="7">Per-request usage is buffered, then flushed to gateway.db every 30 s</text>
         </g>
 
         <!-- Segment Labels -->
@@ -5255,8 +5255,8 @@ OTHER DEALINGS IN THE FONT SOFTWARE.
         </g>
 
         <!-- Participants -->
-        <g id="node-gui" data-node-id="gui" data-node-label="Admin GUI" tabindex="0" role="button" aria-label="Focus Admin GUI, React · embedded, Sequence participant, React" aria-pressed="false" data-node-kind="frontend" data-node-sublabel="React · embedded" data-node-context="Sequence participant" data-node-brand="React" data-node-brand-id="react" data-node-brand-status="preset" data-node-brand-source="https://github.com/facebook/create-react-app/blob/282c03f9525fdf8061ffa1ec50dce89296d916bd/test/fixtures/relative-paths/src/logo.svg">
-          <title>Admin GUI · React · embedded · Sequence participant · React</title>
+        <g id="node-gui" data-node-id="gui" data-node-label="LLM client" tabindex="0" role="button" aria-label="Focus LLM client, Claude Code · Pi · SDKs, Sequence participant, React" aria-pressed="false" data-node-kind="frontend" data-node-sublabel="Claude Code · Pi · SDKs" data-node-context="Sequence participant" data-node-brand="React" data-node-brand-id="react" data-node-brand-status="preset" data-node-brand-source="https://github.com/facebook/create-react-app/blob/282c03f9525fdf8061ffa1ec50dce89296d916bd/test/fixtures/relative-paths/src/logo.svg">
+          <title>LLM client · Claude Code · Pi · SDKs · Sequence participant · React</title>
           <rect x="62" y="72" width="185" height="54" rx="6" class="c-mask"/>
           <rect x="62" y="72" width="185" height="54" rx="6" class="c-frontend" stroke-width="1.5"/>
           <g aria-hidden="true" data-semantic-sigil="frontend" class="semantic-sigil s-frontend" transform="translate(68 78) scale(0.6875)">
@@ -5270,8 +5270,8 @@ OTHER DEALINGS IN THE FONT SOFTWARE.
             <path d="M14.23 12.004a2.236 2.236 0 0 1-2.235 2.236 2.236 2.236 0 0 1-2.236-2.236 2.236 2.236 0 0 1 2.235-2.236 2.236 2.236 0 0 1 2.236 2.236zm2.648-10.69c-1.346 0-3.107.96-4.888 2.622-1.78-1.653-3.542-2.602-4.887-2.602-.41 0-.783.093-1.106.278-1.375.793-1.683 3.264-.973 6.365C1.98 8.917 0 10.42 0 12.004c0 1.59 1.99 3.097 5.043 4.03-.704 3.113-.39 5.588.988 6.38.32.187.69.275 1.102.275 1.345 0 3.107-.96 4.888-2.624 1.78 1.654 3.542 2.603 4.887 2.603.41 0 .783-.09 1.106-.275 1.374-.792 1.683-3.263.973-6.365C22.02 15.096 24 13.59 24 12.004c0-1.59-1.99-3.097-5.043-4.032.704-3.11.39-5.587-.988-6.38-.318-.184-.688-.277-1.092-.278zm-.005 1.09v.006c.225 0 .406.044.558.127.666.382.955 1.835.73 3.704-.054.46-.142.945-.25 1.44-.96-.236-2.006-.417-3.107-.534-.66-.905-1.345-1.727-2.035-2.447 1.592-1.48 3.087-2.292 4.105-2.295zm-9.77.02c1.012 0 2.514.808 4.11 2.28-.686.72-1.37 1.537-2.02 2.442-1.107.117-2.154.298-3.113.538-.112-.49-.195-.964-.254-1.42-.23-1.868.054-3.32.714-3.707.19-.09.4-.127.563-.132zm4.882 3.05c.455.468.91.992 1.36 1.564-.44-.02-.89-.034-1.345-.034-.46 0-.915.01-1.36.034.44-.572.895-1.096 1.345-1.565zM12 8.1c.74 0 1.477.034 2.202.093.406.582.802 1.203 1.183 1.86.372.64.71 1.29 1.018 1.946-.308.655-.646 1.31-1.013 1.95-.38.66-.773 1.288-1.18 1.87-.728.063-1.466.098-2.21.098-.74 0-1.477-.035-2.202-.093-.406-.582-.802-1.204-1.183-1.86-.372-.64-.71-1.29-1.018-1.946.303-.657.646-1.313 1.013-1.954.38-.66.773-1.286 1.18-1.868.728-.064 1.466-.098 2.21-.098zm-3.635.254c-.24.377-.48.763-.704 1.16-.225.39-.435.782-.635 1.174-.265-.656-.49-1.31-.676-1.947.64-.15 1.315-.283 2.015-.386zm7.26 0c.695.103 1.365.23 2.006.387-.18.632-.405 1.282-.66 1.933-.2-.39-.41-.783-.64-1.174-.225-.392-.465-.774-.705-1.146zm3.063.675c.484.15.944.317 1.375.498 1.732.74 2.852 1.708 2.852 2.476-.005.768-1.125 1.74-2.857 2.475-.42.18-.88.342-1.355.493-.28-.958-.646-1.956-1.1-2.98.45-1.017.81-2.01 1.085-2.964zm-13.395.004c.278.96.645 1.957 1.1 2.98-.45 1.017-.812 2.01-1.086 2.964-.484-.15-.944-.318-1.37-.5-1.732-.737-2.852-1.706-2.852-2.474 0-.768 1.12-1.742 2.852-2.476.42-.18.88-.342 1.356-.494zm11.678 4.28c.265.657.49 1.312.676 1.948-.64.157-1.316.29-2.016.39.24-.375.48-.762.705-1.158.225-.39.435-.788.636-1.18zm-9.945.02c.2.392.41.783.64 1.175.23.39.465.772.705 1.143-.695-.102-1.365-.23-2.006-.386.18-.63.406-1.282.66-1.933zM17.92 16.32c.112.493.2.968.254 1.423.23 1.868-.054 3.32-.714 3.708-.147.09-.338.128-.563.128-1.012 0-2.514-.807-4.11-2.28.686-.72 1.37-1.536 2.02-2.44 1.107-.118 2.154-.3 3.113-.54zm-11.83.01c.96.234 2.006.415 3.107.532.66.905 1.345 1.727 2.035 2.446-1.595 1.483-3.092 2.295-4.11 2.295-.22-.005-.406-.05-.553-.132-.666-.38-.955-1.834-.73-3.703.054-.46.142-.944.25-1.438zm4.56.64c.44.02.89.034 1.345.034.46 0 .915-.01 1.36-.034-.44.572-.895 1.095-1.345 1.565-.455-.47-.91-.993-1.36-1.565z" transform="translate(3 3) scale(0.4166666666666667)" fill="#61DAFB"/>
             <rect width="16" height="16" rx="4" class="brand-mark-frame"/>
           </g>
-          <text data-node-label="" data-detail-anchor="" x="154.5" y="94" class="t-primary" font-size="11" font-weight="600" text-anchor="middle">Admin GUI</text>
-          <text data-detail="context" x="154.5" y="111" class="t-muted" font-size="7" text-anchor="middle">React · embedded</text>
+          <text data-node-label="" data-detail-anchor="" x="154.5" y="94" class="t-primary" font-size="11" font-weight="600" text-anchor="middle">LLM client</text>
+          <text data-detail="context" x="154.5" y="111" class="t-muted" font-size="7" text-anchor="middle">Claude Code · Pi · SDKs</text>
         </g>
 
         <g id="node-gateway" data-node-id="gateway" data-node-label="Go API Server" tabindex="0" role="button" aria-label="Focus Go API Server, nano-llm-proxy, Sequence participant" aria-pressed="false" data-node-kind="backend" data-node-sublabel="nano-llm-proxy" data-node-context="Sequence participant">
@@ -5285,8 +5285,8 @@ OTHER DEALINGS IN THE FONT SOFTWARE.
           <text data-detail="context" x="378.83333333333337" y="111" class="t-muted" font-size="7" text-anchor="middle">nano-llm-proxy</text>
         </g>
 
-        <g id="node-store" data-node-id="store" data-node-label="SQLite" tabindex="0" role="button" aria-label="Focus SQLite, gateway.db, Sequence participant, SQLite" aria-pressed="false" data-node-kind="database" data-node-sublabel="gateway.db" data-node-context="Sequence participant" data-node-brand="SQLite" data-node-brand-id="sqlite" data-node-brand-status="preset" data-node-brand-source="https://github.com/sqlite/sqlite/blob/43e862723ec680542ca6f608f9963c0993dd7324/art/sqlite370.eps">
-          <title>SQLite · gateway.db · Sequence participant · SQLite</title>
+        <g id="node-store" data-node-id="store" data-node-label="Pools + SQLite" tabindex="0" role="button" aria-label="Focus Pools + SQLite, memory · gateway.db, Sequence participant, SQLite" aria-pressed="false" data-node-kind="database" data-node-sublabel="gateway.db" data-node-context="Sequence participant" data-node-brand="SQLite" data-node-brand-id="sqlite" data-node-brand-status="preset" data-node-brand-source="https://github.com/sqlite/sqlite/blob/43e862723ec680542ca6f608f9963c0993dd7324/art/sqlite370.eps">
+          <title>Pools + SQLite · memory · gateway.db · Sequence participant · SQLite</title>
           <rect x="510.66666666666674" y="72" width="185" height="54" rx="6" class="c-mask"/>
           <rect x="510.66666666666674" y="72" width="185" height="54" rx="6" class="c-database" stroke-width="1.5"/>
           <g aria-hidden="true" data-semantic-sigil="database" class="semantic-sigil s-database" transform="translate(516.6666666666667 78) scale(0.6875)">
@@ -5298,8 +5298,8 @@ OTHER DEALINGS IN THE FONT SOFTWARE.
             <path d="M21.678.521c-1.032-.92-2.28-.55-3.513.544a8.71 8.71 0 0 0-.547.535c-2.109 2.237-4.066 6.38-4.674 9.544.237.48.422 1.093.544 1.561a13.044 13.044 0 0 1 .164.703s-.019-.071-.096-.296l-.05-.146a1.689 1.689 0 0 0-.033-.08c-.138-.32-.518-.995-.686-1.289-.143.423-.27.818-.376 1.176.484.884.778 2.4.778 2.4s-.025-.099-.147-.442c-.107-.303-.644-1.244-.772-1.464-.217.804-.304 1.346-.226 1.478.152.256.296.698.422 1.186.286 1.1.485 2.44.485 2.44l.017.224a22.41 22.41 0 0 0 .056 2.748c.095 1.146.273 2.13.5 2.657l.155-.084c-.334-1.038-.47-2.399-.41-3.967.09-2.398.642-5.29 1.661-8.304 1.723-4.55 4.113-8.201 6.3-9.945-1.993 1.8-4.692 7.63-5.5 9.788-.904 2.416-1.545 4.684-1.931 6.857.666-2.037 2.821-2.912 2.821-2.912s1.057-1.304 2.292-3.166c-.74.169-1.955.458-2.362.629-.6.251-.762.337-.762.337s1.945-1.184 3.613-1.72C21.695 7.9 24.195 2.767 21.678.521m-18.573.543A1.842 1.842 0 0 0 1.27 2.9v16.608a1.84 1.84 0 0 0 1.835 1.834h9.418a22.953 22.953 0 0 1-.052-2.707c-.006-.062-.011-.141-.016-.2a27.01 27.01 0 0 0-.473-2.378c-.121-.47-.275-.898-.369-1.057-.116-.197-.098-.31-.097-.432 0-.12.015-.245.037-.386a9.98 9.98 0 0 1 .234-1.045l.217-.028c-.017-.035-.014-.065-.031-.097l-.041-.381a32.8 32.8 0 0 1 .382-1.194l.2-.019c-.008-.016-.01-.038-.018-.053l-.043-.316c.63-3.28 2.587-7.443 4.8-9.791.066-.069.133-.128.198-.194Z" transform="translate(3 3) scale(0.4166666666666667)" fill="#003B57"/>
             <rect width="16" height="16" rx="4" class="brand-mark-frame"/>
           </g>
-          <text data-node-label="" data-detail-anchor="" x="603.1666666666667" y="94" class="t-primary" font-size="11" font-weight="600" text-anchor="middle">SQLite</text>
-          <text data-detail="context" x="603.1666666666667" y="111" class="t-muted" font-size="7" text-anchor="middle">gateway.db</text>
+          <text data-node-label="" data-detail-anchor="" x="603.1666666666667" y="94" class="t-primary" font-size="11" font-weight="600" text-anchor="middle">Pools + SQLite</text>
+          <text data-detail="context" x="603.1666666666667" y="111" class="t-muted" font-size="7" text-anchor="middle">memory · gateway.db</text>
         </g>
 
         <g id="node-provider" data-node-id="provider" data-node-label="Upstream Provider" tabindex="0" role="button" aria-label="Focus Upstream Provider, LLM API, Sequence participant" aria-pressed="false" data-node-kind="external" data-node-sublabel="LLM API" data-node-context="Sequence participant">
@@ -5527,7 +5527,7 @@ OTHER DEALINGS IN THE FONT SOFTWARE.
         </div>
         <ul>
           <li>&bull; A chat call enters the Go API server on an /v1 route</li>
-          <li>&bull; Provider endpoint and key are resolved from SQLite (gateway.db)</li>
+          <li>&bull; Provider endpoint and key come from the in-memory pools (rebuilt from gateway.db on every GUI change)</li>
           <li>&bull; The rewritten request is forwarded to the configured upstream</li>
         </ul>
       </div>
@@ -5538,7 +5538,7 @@ OTHER DEALINGS IN THE FONT SOFTWARE.
           <h3>Streaming</h3>
         </div>
         <ul>
-          <li>&bull; Upstream SSE chunks are relayed to the GUI as they arrive</li>
+          <li>&bull; Upstream SSE chunks are relayed to the client as they arrive</li>
           <li>&bull; The caller sees a single OpenAI/Anthropic-compatible stream</li>
           <li>&bull; No polling — response tokens render incrementally</li>
         </ul>
@@ -5550,7 +5550,7 @@ OTHER DEALINGS IN THE FONT SOFTWARE.
           <h3>Side Effects</h3>
         </div>
         <ul>
-          <li>&bull; Usage for the request is recorded in gateway.db</li>
+          <li>&bull; Usage is buffered in memory and flushed to gateway.db every 30 s</li>
           <li>&bull; Recording is dashed: it never blocks the stream</li>
         </ul>
       </div>

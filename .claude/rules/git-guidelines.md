@@ -51,13 +51,13 @@ security: redact operator machine details from captured agent fixtures
 
 ## .gitignore Discipline
 
-Never commit (all already in `.gitignore` — don't fight it, and never use `git add -f`):
+Never commit (all but the last are already in `.gitignore` — don't fight it, and never use `git add -f`):
 - `.env`, `keys.json`, `.secrets.md`, `temporary.md`
 - `gateway.db`, `gateway.db-wal`, `gateway.db-shm`, `*.bak`
 - built binaries (`nano-llm-proxy`, `nano-llm-proxy-linux`, `*.exe`)
 - `web/node_modules/`, `web/dist/`, `web/tsconfig.tsbuildinfo`
 - `docs/ai-generated/*` (except `.gitkeep`)
-- captured fixtures that haven't passed `scripts/sanitize-fixtures.py --check`
+- captured fixtures that haven't passed `scripts/sanitize-fixtures.py --check` (not a `.gitignore` rule — CI enforces it)
 
 ## Out of Scope
 

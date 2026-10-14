@@ -15,17 +15,17 @@
 `.env` is parsed by the binary itself: `KEY=VALUE` per line, `#` comments,
 optional quotes, and it **never overrides variables already present in the
 real environment**. Precedence: built-in defaults < `.env` < process
-environment (so `systemd EnvironmentFile=` and `docker -e` work unchanged).
+environment (so `systemd EnvironmentFile=` and exported variables work unchanged).
 
 | Variable | Default | Meaning |
 | --- | --- | --- |
-| `ADMIN_EMAIL` / `ADMIN_PASSWORD` | — | First superadmin's credentials. Required at first boot (bootstrap fails fast without them), create-if-absent on later boots; also used by `-reset-admin-password` |
+| `ADMIN_EMAIL` / `ADMIN_PASSWORD` | — | First superadmin's credentials. Required at first boot (bootstrap fails fast without them); they seed the superadmin only while the database has no users and are ignored after that — changing them later creates nothing. Also used by `-reset-admin-password` |
 | `NANO_PORT` | 8787 | HTTP listen port (1–65535) |
 | `NANO_BIND` | `127.0.0.1` | Listen address. Use `0.0.0.0` in a VM |
 | `NANO_DB_PATH` | `gateway.db` | SQLite database (created and migrated at boot, 0600) |
 | `NANO_COOKIE_SECURE` | true | `Secure` flag on GUI session cookies. Set false only for plain-HTTP local use |
 | `NANO_TRUSTED_ORIGINS` | empty | Comma-separated extra Origin hosts accepted on state-changing `/api` requests. Same-host is always allowed. Set your public host here when serving the GUI behind a reverse proxy |
-| `GOOGLE_CLIENT_ID` | empty | Enables Google sign-in on the GUI login page (OAuth 2.0 *Web* client id). The GUI's public origin must be listed under the client's *Authorized JavaScript origins*. No client secret is used — the gateway verifies Google's signed ID token itself. Google sign-in only signs in users a superadmin added on the Users page (matched by email); it never creates accounts |
+| `GOOGLE_CLIENT_ID` | empty | Enables Google sign-in on the GUI login page (OAuth 2.0 *Web* client id). The GUI's public origin must be listed under the client's *Authorized JavaScript origins*. No client secret is used — the gateway verifies Google's signed ID token itself. Google sign-in only signs in users an admin added on the Users page (matched by email); it never creates accounts |
 | `GOOGLE_WORKSPACE_DOMAIN` | empty | Restricts Google sign-in to one Workspace domain (bare domain, e.g. `example.com`; requires `GOOGLE_CLIENT_ID`). Set: only accounts in that domain can sign in with Google (they still need a user added on the Users page). Unset: any Google account whose email matches an existing user |
 
 Malformed values are fatal at boot (`invalid NANO_PORT "…"`), never silently
@@ -46,7 +46,7 @@ block is server-owned).
 | `retry.cooldownSeconds` | 30 | Default 429 cooldown (0 = only honor `Retry-After`) |
 | `retry.respectRetryAfter` | true | Prefer the upstream `Retry-After` duration |
 | `retry.maxRequestsPerKeyPerDay` | 0 (off) | Optional per-key daily cap; an exhausted key cools until midnight |
-| `anthropic.fallbackModel` | empty | Target for literal `claude-*` requests (background tasks clients self-issue) on `/v1/messages`; empty = pass through untouched |
+| `anthropic.fallbackModel` | empty | Target for literal `claude-*` requests (background tasks clients self-issue) on `/v1/messages`; empty = a bare `claude-*` model name is rejected (400 — it has no `provider/` prefix) |
 | `zen.userAgent` | `opencode/latest/2.0.29/cli` | Client user agent, `opencode/X.Y.Z` or `opencode/<channel>/X.Y.Z/<client>`; must satisfy the upstream's 1.18.0 floor. Validated on save (HTTP 400) and at boot (fatal) |
 | `zen.injectTools` | true | Append the client-shape tool stubs to every zen request |
 | `zen.responsesModels` | — | *Removed.* Responses support is a per-model flag on `modelMeta` entries; toggle it per model on the Providers page (zen models). Sync preserves the flag across catalog refreshes |
@@ -141,7 +141,7 @@ and the same daily `modelMetaAutoSync` (retried hourly after a failure).
 ## CLI
 
 ```text
-nano-llm-proxy [keys.json] [-reset-admin-password]
+nano-llm-proxy [keys.json] [-reset-admin-password] [-version]
 ```
 
 - `keys.json` is a legacy first-boot seeding source
@@ -150,8 +150,12 @@ nano-llm-proxy [keys.json] [-reset-admin-password]
   from the GUI; existing databases keep their kilo keys through the
   migration). Once a database exists the file is ignored — new deployments
   manage upstream keys in the GUI.
-- `-reset-admin-password` resets the superadmin's password from
-  `ADMIN_PASSWORD` and exits; restart the service afterwards.
+- `-reset-admin-password` sets the password of the account whose email is
+  `ADMIN_EMAIL` to `ADMIN_PASSWORD` (both required; the password needs at
+  least 10 characters), ends that account's sessions, and exits; restart the
+  service afterwards.
+- `-version` (or `--version`) prints the version, commit and build date and
+  exits.
 
 ## Resetting settings
 
@@ -260,8 +264,10 @@ Serve over TLS and keep `NANO_COOKIE_SECURE=true` in production.
   default.
 - **Re-enable / disable an upstream key:** GUI → Providers → key switch;
   effective immediately (pools rebuild in-request).
-- **Cooldowns, daily-cap state, and pool counters are in-memory:** a restart
-  clears them. Users, keys, providers, and settings persist in SQLite;
+- **Cooldowns, daily-cap state, pool counters, and auth-failure disables are
+  in-memory:** a restart (or any GUI change, which rebuilds the pools) clears
+  them — a key disabled after a genuine 401 comes back on the next rebuild;
+  switch it off on the Providers page to make that permanent. Users, keys, providers, and settings persist in SQLite;
   startup takes about two seconds.
 - **Health:** `GET /health` is open and reports uptime and per-provider
   healthy-key counts.

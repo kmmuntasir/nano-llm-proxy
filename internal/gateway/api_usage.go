@@ -9,7 +9,7 @@ import (
 
 // Usage reporting endpoints. Date ranges are unix seconds (?from=&to=);
 // defaults cover the last 24h and ranges are capped to 92 days so a stray
-// client cannot request the whole table. Non-superadmin sessions are scoped
+// client cannot request the whole table. Non-admin sessions are scoped
 // to their own user_id everywhere.
 
 const usageMaxRangeDays = 92

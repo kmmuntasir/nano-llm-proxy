@@ -11,91 +11,58 @@ Release notes are generated from commit prefixes, so `feat:`, `fix:`,
 
 ### Added
 
-- New upstream keys are verified before they are saved. Each key — added to
-  a provider or among a new provider's initial keys — is probed against
-  every endpoint the provider has (OpenAI and/or Anthropic): the model list
-  plus a one-token call for a nonexistent model, so no inference runs and no
-  quota is spent. An upstream 401/403 refuses the key with a 400 naming its
-  label; an unreachable upstream refuses it with a 503. Pasted keys are
-  trimmed of surrounding whitespace.
-
-### Fixed
-
-- The same upstream key can no longer be added to a provider twice (409),
-  nor appear twice among a new provider's initial keys (400). Nothing
-  enforced it before, despite the existing "already on this provider"
-  message; a duplicate got double weight in key rotation.
-- zen free models work again (2026-10-14). Zen's free-tier gate now
-  requires opencode 2.0.29's inference path and real tool schemas: requests
-  to `/zen/v1`, or whose `shell`/`read` tools carry empty parameter schemas,
-  drew `403 FreeTierError` ("free tier can only be used from within
-  OpenCode"). The built-in zen provider moves to
-  `https://opencode.ai/inference/v1` (migration V10 updates it only if it
-  still holds the old default), the injected gate tools carry opencode
-  2.0.29's real parameter schemas, and the default zen user agent is
-  `opencode/latest/2.0.29/cli`.
-- Z.ai models work from Pi again: Pi sends the `developer` instruction role
-  for reasoning models, which Z.ai rejects (`1214 Incorrect role
-  information`). The OpenAI passthrough now renames it to `system` for every
-  upstream except OpenAI, as the zen adapter already did.
-
-### Changed
-
-- Upstream failures are no longer answered with 502, which Cloudflare
-  replaces with its own "Bad gateway" page (hiding the reason). A request
-  the upstream refused as sent is a 400 (`upstream 4xx: …`); key exhaustion,
-  outages and gate rejections are a 503 with the gateway's hint.
-
-- zen free models work again. Since 2026-10-12 zen validates the
-  `x-opencode-session` header as a real opencode identifier, and the
-  gateway's random `ses_` ids drew `403 FreeTierError` on every request. The
-  gateway now mints opencode-encoded session ids and sends the full opencode
-  2.x fingerprint (`x-opencode-client`, `x-opencode-project`, the session id
-  under all four session headers, `traceparent`/`b3`).
-- Key cooldown logs show the upstream status (`HTTP 429`) instead of
-  `HTTP 0`.
-- Untagged builds (`go build` without `-tags prod`) no longer panic at
-  startup on a duplicate `/` route; they serve the GUI-not-built stub.
-- `/api/dashboard` no longer shows every user's recent requests to every
-  logged-in user. Non-superadmins now get only their own activity entries
-  (upstream key hash blanked) and pool health counts without per-key views.
-- Client-facing errors for a rejected upstream key no longer include the
-  key's label.
-- Usage date ranges reject negative bounds and clamp `to` to now; extreme
-  values could previously hang or exhaust memory in the bucketed endpoints.
-
-### Changed
-
-- Translated `/v1/messages` responses report usage in Anthropic semantics:
-  `input_tokens` excludes cache hits, `cache_read_input_tokens` carries them
-  and `cache_creation_input_tokens` is 0, so clients summing the three get
-  the upstream's total prompt. `message_delta` now carries the full usage
-  block (previously only `output_tokens`). Chat responses translated from
-  Responses or Anthropic upstreams gain
-  `prompt_tokens_details.cached_tokens` (and `total_tokens`).
-- Default `zen.userAgent` is now `opencode/latest/2.0.27/cli`; the 1.18.0
-  floor check accepts both the 1.x `opencode/X.Y.Z` and the 2.x
-  `opencode/<channel>/X.Y.Z/<client>` shapes.
-- The zen gate tool stubs are now `shell`/`read`/`edit`, matching the
-  opencode 2.x tool set (1.x called the shell tool `bash`).
-
-- zen models fronted by a strict role validator (e.g. `fledge-alpha-free`)
-  no longer 502 for pi / oh-my-pi. Those clients send the instruction message
-  as `role: "developer"` whenever the catalog says the model reasons — which
-  our own `/v1/models` does — and the upstream answers
-  `[airlock_error] invalid request: unknown variant 'developer', expected one
-  of system, user, assistant, tool`. The zen adapter now renames the role to
-  `system` on the way upstream (chat `messages` and Responses `input` alike):
-  the older spelling of the same message, accepted everywhere, with content
-  and message order untouched. opencode never sends the role, which is why
-  the model worked there and failed here.
-
-### Added
-
+- Admin role. Roles are now `superadmin`, `admin` and `user`. Admins have
+  every admin page and capability; the one difference is that they can't
+  change a superadmin account in any way (deactivate, delete, rename, change
+  role, reset password) and can't grant the `superadmin` role. Superadmins
+  can change other superadmins; nobody can deactivate or delete their own
+  account. Migration V9 rebuilds the `users` table to widen its role
+  constraint (keeping the id high-water mark, so deleted users' ids are never
+  reused).
+- Google sign-in for the GUI (`GOOGLE_CLIENT_ID`, optionally limited by
+  `GOOGLE_WORKSPACE_DOMAIN`). The browser gets a Google-signed ID token and
+  the gateway verifies it locally (RS256 against Google's keys, issuer,
+  audience, expiry, verified email, Workspace domain) — no client secret.
+  Google sign-in never creates accounts: only users an admin added on the
+  Users page can use it. New endpoints `GET /api/auth/config` (open) and
+  `POST /api/auth/google`. Password sign-in becomes a runtime setting
+  (`auth.credentialLogin`, default on) that can only be turned off when
+  Google is configured and by an admin who could sign back in with Google.
+- Self-service profile: `PATCH /api/me` renames a password user. Accounts
+  that have signed in with Google are Google-owned (`googleLinked`): their
+  name and profile picture (`avatarUrl`, Google-hosted only) refresh on every
+  Google sign-in, can't be edited by anyone, and they can't change a
+  password. Migration V8 adds both columns. Avatars (or initials) show in
+  the sidebar, the profile page and the users list.
+- Model benchmarks on the Models page: Artificial Analysis Intelligence /
+  Coding / Agentic indexes and Design Arena results from OpenRouter's public
+  catalog, fetched with the models.dev sync and joined to catalog entries by
+  a normalized model slug. `/api/models` entries gain `benchmarks` and the
+  response `benchmarks_status`; `/v1/models` is unchanged. The page gains a
+  details dialog, a compare view for up to three models, sorting by score or
+  context window, and a "has benchmarks" filter.
+- `priority-daily` rotation (now the default): priority's stick-with-failover
+  from a starting key that advances one position per day, per provider.
 - Default providers for new users: the `newUsers.disabledProviderIds`
   runtime setting lists providers a newly created `user`-role account starts
   without (written as per-user revocations together with the account).
-  Admins get every provider as before; existing users are not affected.
+  Existing users are not affected.
+- Upstream key verification before save. Every new key — added to a
+  provider or among a new provider's initial keys — is probed against each
+  endpoint the provider has (the model list plus a one-token call for a
+  nonexistent model; OpenRouter also `GET /api/v1/key`), so no inference
+  runs and no quota is spent. A 401, or a 400 that says the key is wrong
+  (xAI's answer), rejects it as invalid; a 403 (except zen's
+  `FreeTierError`) rejects it as refused — possibly genuine, but unusable
+  from this server (region, IP allowlist, permissions, blocked account or
+  budget); an unreachable upstream rejects it with a 503. Upstream text is
+  shown with the key redacted; pasted keys are trimmed.
+- Users page: an Edit dialog (name — locked for Google-linked users — role,
+  and an optional new password, replacing the separate reset dialog), role
+  badges, and a redesigned card. Activating/deactivating a user, activating/
+  deactivating a provider, and saving settings now ask for confirmation (the
+  settings dialog lists which sections changed and warns before password
+  sign-in is turned off). Every modal has a blurred backdrop.
 - Cached-input-token tracking. Every adapter now taps the cache-hit count
   upstreams report (chat `prompt_tokens_details.cached_tokens`, Responses
   `input_tokens_details.cached_tokens`, Anthropic `cache_read_input_tokens`)
@@ -107,7 +74,6 @@ Release notes are generated from commit prefixes, so `feat:`, `fix:`,
   `cachedTokens`; breakdown and requests accept `sort=cachedTokens`, series
   accepts `metric=cachedTokens`. The v1 `/api/usage/summary` family is
   unchanged.
-
 - Usage monitoring v2 (backend). `usage_events` gains per-request detail
   (migration V6): client surface, stream flag, upstream attempts, last
   upstream status, serving upstream key label, time to first upstream byte,
@@ -117,13 +83,13 @@ Release notes are generated from commit prefixes, so `feat:`, `fix:`,
   4xx status. New session endpoints `GET /api/usage/overview`, `/breakdown`
   (grouped, paged, sortable, searchable), `/series` (top-N + other),
   `/requests` (raw log) and `/facets`, with strict parameter validation and
-  per-user scoping; cross-user groupings are superadmin-only.
+  per-user scoping; cross-user groupings are admin-only.
 - Usage monitoring v2 (admin GUI). The Usage page becomes a tabbed section —
   Overview, Users, Models, Users × Models, Requests — with user and model
   drill-down pages, a shared filter bar (range presets, user, provider,
   model, client key, surface, status) kept in the URL, server-side paginated
   and sortable tables, and charts for requests/errors, tokens, latency and
-  top-N series. Users and Users × Models are superadmin-only.
+  top-N series. Users and Users × Models are admin-only.
 - `/v1/models` entries now carry `context_length` alongside
   `context_window` (same value — different agents read different spellings,
   and a missing field is read as "unknown, assume 128K").
@@ -141,13 +107,6 @@ Release notes are generated from commit prefixes, so `feat:`, `fix:`,
   Upstream's context/output limits, modalities and `supported_parameters`
   still win — only the reasoning facts are resolved. Models models.dev
   doesn't document keep both fields absent instead of an unverified `false`.
-- Image input works on every path: the chat → Responses retyping now unwraps
-  chat's nested `{"image_url":{"url":…}}` into the string the Responses API
-  wants (muse-spark and friends used to reject the message with
-  `input[0].content did not match any supported type`), and Anthropic image
-  blocks on `/v1/messages` (how Claude Code sends pictures) become chat
-  `image_url` parts instead of being dropped silently — the model used to
-  answer about a picture it had never seen.
 - Catalog entries now also publish their input modalities as `input` (what
   pi-openai-compat, i.e. pi/oh-my-pi, reads) and
   `architecture.input_modalities` (what pi's opencode provider loader reads)
@@ -163,6 +122,77 @@ Release notes are generated from commit prefixes, so `feat:`, `fix:`,
   numbers come from the same enriched values as `context_window` and
   `max_output_tokens`; entries with no advertised output limit omit the
   object instead of claiming zero.
+
+### Changed
+
+- **Breaking:** admins can no longer create, toggle or delete another
+  user's client keys — `POST /api/users/{id}/keys` and
+  `PATCH/DELETE /api/users/{id}/keys/{keyId}` are gone. Keys are managed by
+  their owner only (`/api/me/keys`); admins get a read-only view
+  (`GET /api/users/{id}/keys`), and deactivating a user turns all of their
+  keys off.
+- Superadmins and admins always have every provider: per-user provider
+  access applies to regular users only (stray revocations for admins are
+  ignored, and promotion clears a user's revocations).
+- The gateway never answers 502. Cloudflare in front of a deployment
+  replaces an origin's 502 body with its own "Bad gateway" page, hiding the
+  reason. A request the upstream refused as sent is now a 400
+  (`upstream 4xx: …`); key exhaustion, outages and gate rejections — and a
+  catalog with every provider down, Google unreachable, or a per-key usage
+  or per-provider catalog fetch failing — are a 503 with the gateway's hint.
+  Error bodies on `/v1/messages` use `invalid_request_error` for a 400.
+- The built-in zen provider uses opencode's `https://opencode.ai/inference/v1`
+  (migration V10 moves it only if it still holds the old default), and the
+  default `zen.userAgent` is `opencode/latest/2.0.29/cli`; the 1.18.0 floor
+  check accepts both the 1.x `opencode/X.Y.Z` and the 2.x
+  `opencode/<channel>/X.Y.Z/<client>` shapes. The zen gate tool stubs are
+  `shell`/`read`/`edit` (the opencode 2.x names) and carry opencode's real
+  parameter schemas.
+- Translated `/v1/messages` responses report usage in Anthropic semantics:
+  `input_tokens` excludes cache hits, `cache_read_input_tokens` carries them
+  and `cache_creation_input_tokens` is 0, so clients summing the three get
+  the upstream's total prompt. `message_delta` now carries the full usage
+  block (previously only `output_tokens`). Chat responses translated from
+  Responses or Anthropic upstreams gain
+  `prompt_tokens_details.cached_tokens` (and `total_tokens`).
+
+### Fixed
+
+- zen free models work again. Zen's free-tier gate tightened twice: since
+  2026-10-12 it validates `x-opencode-session` as a real opencode
+  identifier (the gateway now mints opencode-encoded session ids and sends
+  the full opencode 2.x fingerprint — `x-opencode-client`,
+  `x-opencode-project`, the session id under all four session headers,
+  `traceparent`/`b3`), and since 2026-10-14 it requires `shell`/`read`
+  tools with non-empty parameter schemas (the stubs now carry opencode
+  2.0.29's real ones). Both drew `403 FreeTierError` on every request.
+- The `developer` instruction role is renamed to `system` for every
+  upstream except OpenAI. pi / oh-my-pi send it for reasoning models; zen
+  models behind a strict validator answered `unknown variant 'developer'`
+  and Z.ai answers `1214 Incorrect role information`.
+- Image input works on every path: the chat → Responses retyping now unwraps
+  chat's nested `{"image_url":{"url":…}}` into the string the Responses API
+  wants (muse-spark and friends used to reject the message with
+  `input[0].content did not match any supported type`), and Anthropic image
+  blocks on `/v1/messages` (how Claude Code sends pictures) become chat
+  `image_url` parts instead of being dropped silently — the model used to
+  answer about a picture it had never seen.
+- Deactivating a user now also turns their client keys off on `/v1/*`;
+  previously only their GUI sessions were blocked.
+- The same upstream key can no longer be added to a provider twice (409),
+  nor appear twice among a new provider's initial keys (400); a duplicate
+  got double weight in key rotation.
+- Key cooldown logs show the upstream status (`HTTP 429`) instead of
+  `HTTP 0`.
+- Untagged builds (`go build` without `-tags prod`) no longer panic at
+  startup on a duplicate `/` route; they serve the GUI-not-built stub.
+- `/api/dashboard` no longer shows every user's recent requests to every
+  logged-in user. Non-admins now get only their own activity entries
+  (upstream key hash blanked) and pool health counts without per-key views.
+- Client-facing errors for a rejected upstream key no longer include the
+  key's label.
+- Usage date ranges reject negative bounds and clamp `to` to now; extreme
+  values could previously hang or exhaust memory in the bucketed endpoints.
 
 ## [0.1.1] — 2026-09-27
 

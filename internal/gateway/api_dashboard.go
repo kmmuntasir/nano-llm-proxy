@@ -9,7 +9,7 @@ import (
 // needs in one shot: uptime, per-provider pool health with live key views,
 // and the recent-activity ring (newest first).
 //
-// Superadmins see everything. Other users get pool health counts only (no
+// Admins (superadmin or admin) see everything. Other users get pool health counts only (no
 // per-key views) and just their own activity entries, with the upstream key
 // hash stripped — the ring is global and otherwise leaks other users'
 // emails, aliases and fail reasons.

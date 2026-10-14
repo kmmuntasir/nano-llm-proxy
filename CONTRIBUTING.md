@@ -68,9 +68,10 @@ gaps, update that section. If it doesn't, don't quietly delete it.
 ## Commit and PR style
 
 The history uses conventional-commit prefixes — `feat:`, `fix:`, `docs:`,
-`test:`, `ci:`, `security:` — because the release changelog is generated from
-them. Match the surrounding style and explain *why* in the body; the diff
-already shows what changed.
+`test:`, `ci:`, `security:`, `release:`, `meta:`, `refactor:`, `chore:` —
+because the release changelog is generated from them (`feat`, `fix`,
+`security`, `ci`, `docs` and `test` show up in it). Match the surrounding style
+and explain *why* in the body; the diff already shows what changed.
 
 Keep a PR to one concern. A refactor riding along with a feature is harder to
 review and harder to revert.
@@ -81,8 +82,9 @@ review and harder to revert.
 - A transcript for a provider that has a non-standard catalog, so its
   metadata mapping can be worked on offline
 - Documentation for a deployment shape not yet covered in `docs/`
-- A test for a path that currently has none — the SSRF guard, the failure
-  classifier, and the cooldown math are the interesting ones
+- A test for an edge the existing suites miss — another provider's error
+  shapes for key verification (`keycheck_test.go`) or failure classification
+  are good candidates
 
 ## Reporting security issues
 

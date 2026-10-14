@@ -1,6 +1,6 @@
 # .context Structure + Findings Cache
 
-`.context/` is committed working state for the agentic pipeline. Structure:
+`.context/` is committed working state for the agentic pipeline. It is created on first use by the pipeline skills (it may not exist yet). Structure:
 
 ```
 .context/
