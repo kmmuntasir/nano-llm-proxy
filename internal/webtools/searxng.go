@@ -35,6 +35,33 @@ type searxResponse struct {
 	Results   []searxResult `json:"results"`
 	Answers   []any         `json:"answers"`
 	NumberAge json.Number   `json:"number_of_results"`
+	// Unresponsive lists the engines that failed this query as
+	// [name, reason] pairs ("CAPTCHA", "too many requests", "timeout").
+	Unresponsive [][]string `json:"unresponsive_engines"`
+}
+
+// Search failures callers tell apart: SearXNG isn't answering at all, or it
+// answers but no engine returned anything (usually CAPTCHA / rate limits on
+// this machine's IP). The error text says which engines failed and why; the
+// next step depends on the deployment, so it is left to the caller.
+var (
+	ErrSearxngUnreachable = errors.New("SearXNG is not answering")
+	ErrSearxngNoResults   = errors.New("SearXNG answered, but no search engine returned results")
+)
+
+// describeUnresponsive renders "duckduckgo (CAPTCHA), brave (too many
+// requests)" from SearXNG's unresponsive_engines list.
+func describeUnresponsive(list [][]string) string {
+	parts := make([]string, 0, len(list))
+	for _, e := range list {
+		switch {
+		case len(e) >= 2 && e[1] != "":
+			parts = append(parts, e[0]+" ("+e[1]+")")
+		case len(e) >= 1:
+			parts = append(parts, e[0])
+		}
+	}
+	return strings.Join(parts, ", ")
 }
 
 // searchQueries SearXNG and renders a numbered markdown result list.
@@ -74,7 +101,7 @@ func searchQuery(ctx context.Context, cfg settings.WebToolsSettings, client *htt
 
 	resp, err := client.Do(req)
 	if err != nil {
-		return "", fmt.Errorf("SearXNG unreachable at %s — is it installed and running? (scripts/install-web-tools.sh --check): %w", cfg.SearXNGURL, err)
+		return "", fmt.Errorf("%w at %s: %w", ErrSearxngUnreachable, cfg.SearXNGURL, err)
 	}
 	defer resp.Body.Close()
 	body, err := io.ReadAll(io.LimitReader(resp.Body, 4<<20))
@@ -107,7 +134,10 @@ func searchQuery(ctx context.Context, cfg settings.WebToolsSettings, client *htt
 		}
 	}
 	if len(list) == 0 {
-		return "", fmt.Errorf("SearXNG returned no results for %q — if every query comes back empty, the instance's engines are likely CAPTCHA-blocked; see docs/deployment.md (engine trimming)", q)
+		if failed := describeUnresponsive(sr.Unresponsive); failed != "" {
+			return "", fmt.Errorf("%w for %q — engines that failed: %s", ErrSearxngNoResults, q, failed)
+		}
+		return "", fmt.Errorf("%w for %q", ErrSearxngNoResults, q)
 	}
 
 	var b strings.Builder

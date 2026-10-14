@@ -57,7 +57,8 @@ func (s *Service) transport() http.RoundTripper {
 
 // TestSearxng runs one real query; used by the admin diagnostics endpoint.
 func (s *Service) TestSearxng(ctx context.Context) (string, error) {
-	return searchQuery(ctx, s.cfg(), s.search, "searxng health check", 1)
+	// an everyday query: an odd one can legitimately find nothing
+	return searchQuery(ctx, s.cfg(), s.search, "open source software", 1)
 }
 
 // TestObscura reports `obscura --version`; with deep, also fetch example.com.

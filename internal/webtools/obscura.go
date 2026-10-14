@@ -118,7 +118,7 @@ func (o *obscuraRunner) fetch(ctx context.Context, cfg settings.WebToolsSettings
 		if exitErr, ok := errors.AsType[*exec.ExitError](err); ok {
 			return "", fmt.Errorf("obscura exited with status %d", exitErr.ExitCode())
 		}
-		return "", fmt.Errorf("obscura could not be started (path %q): %w — run scripts/install-web-tools.sh --check", cfg.ObscuraPath, err)
+		return "", fmt.Errorf("obscura could not be started (path %q): %w", cfg.ObscuraPath, err)
 	}
 	if len(out) == 0 {
 		return "", errors.New("obscura returned no content")
@@ -132,7 +132,7 @@ func (o *obscuraRunner) version(ctx context.Context, path string) (string, error
 	defer cancel()
 	out, err := exec.CommandContext(cctx, path, "--version").Output()
 	if err != nil {
-		return "", fmt.Errorf("obscura not runnable at %q: %w — run scripts/install-web-tools.sh --check", path, err)
+		return "", fmt.Errorf("obscura not runnable at %q: %w", path, err)
 	}
 	return firstLine(string(out)), nil
 }

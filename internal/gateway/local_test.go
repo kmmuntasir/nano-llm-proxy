@@ -373,3 +373,51 @@ func TestServerModeHasNoLocalRoutes(t *testing.T) {
 		t.Fatalf("auth config: %s", rec.Body.String())
 	}
 }
+
+func TestWebToolsTestNextSteps(t *testing.T) {
+	pointAtNothing := func(g *gateway) {
+		rs := g.rs().Clone()
+		rs.WebTools.SearXNGURL = "http://127.0.0.1:1"
+		rs.WebTools.ObscuraPath = "/nonexistent/obscura"
+		g.rsPtr.Store(rs)
+	}
+	test := func(t *testing.T, h http.Handler, r *http.Request) webToolsTestResult {
+		t.Helper()
+		var res webToolsTestResult
+		rec := serve(h, r)
+		if err := json.Unmarshal(rec.Body.Bytes(), &res); err != nil || rec.Code != 200 || res.OK {
+			t.Fatalf("%d %s", rec.Code, rec.Body.String())
+		}
+		return res
+	}
+
+	// local mode never sends people to the server's root installer
+	g, h, _, _ := testLocalGateway(t)
+	pointAtNothing(g)
+	searx := func() webToolsTestResult {
+		return test(t, h, localReq("POST", "/api/webtools/test", `{"target":"searxng"}`))
+	}
+	if s := searx().NextStep; !strings.Contains(s, "isn't set up on this computer") || strings.Contains(s, "sudo") {
+		t.Fatalf("local, no SearXNG: %q", s)
+	}
+	os.MkdirAll(filepath.Join(g.conf().DataDir, "searxng", "venv"), 0o700) //nolint:errcheck
+	if s := searx().NextStep; !strings.Contains(s, "installed but not answering") || !strings.Contains(s, "searxng.log") {
+		t.Fatalf("local, SearXNG down: %q", s)
+	}
+	ob := test(t, h, localReq("POST", "/api/webtools/test", `{"target":"obscura"}`))
+	if !strings.Contains(ob.NextStep, "optional") || strings.Contains(ob.NextStep, "sudo") {
+		t.Fatalf("local obscura: %q", ob.NextStep)
+	}
+
+	// server mode keeps the root-installer advice
+	sg, _ := testStoreGateway(t, "http://127.0.0.1:1")
+	pointAtNothing(sg)
+	mux := http.NewServeMux()
+	sg.RegisterRoutes(mux, nil)
+	cookie := loginAs(t, sg, "admin@example.com", "super-secret-pass")
+	r := httptest.NewRequest("POST", "/api/webtools/test", strings.NewReader(`{"target":"searxng"}`))
+	r.AddCookie(cookie)
+	if s := test(t, mux, r).NextStep; !strings.Contains(s, "sudo ./scripts/install-web-tools.sh") {
+		t.Fatalf("server: %q", s)
+	}
+}

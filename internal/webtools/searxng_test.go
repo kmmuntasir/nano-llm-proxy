@@ -3,6 +3,7 @@ package webtools
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"net/http"
 	"net/http/httptest"
 	"strings"
@@ -55,8 +56,8 @@ func TestSearchQueryErrors(t *testing.T) {
 
 	t.Run("server down", func(t *testing.T) {
 		_, err := searchQuery(context.Background(), testCfg("http://127.0.0.1:1"), nil, "q", 0)
-		if err == nil || !strings.Contains(err.Error(), "unreachable") {
-			t.Fatalf("want unreachable error, got %v", err)
+		if !errors.Is(err, ErrSearxngUnreachable) || !strings.Contains(err.Error(), "127.0.0.1:1") {
+			t.Fatalf("want unreachable error naming the URL, got %v", err)
 		}
 	})
 
@@ -88,8 +89,20 @@ func TestSearchQueryErrors(t *testing.T) {
 		}))
 		defer srv.Close()
 		_, err := searchQuery(context.Background(), testCfg(srv.URL), srv.Client(), "q", 0)
-		if err == nil || !strings.Contains(err.Error(), "no results") {
+		if !errors.Is(err, ErrSearxngNoResults) || errors.Is(err, ErrSearxngUnreachable) {
 			t.Fatalf("want no-results error, got %v", err)
+		}
+	})
+
+	t.Run("empty results names the failing engines", func(t *testing.T) {
+		srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+			w.Write([]byte(`{"results": [], "unresponsive_engines": [["duckduckgo", "CAPTCHA"], ["brave", "too many requests"], ["qwant"]]}`))
+		}))
+		defer srv.Close()
+		_, err := searchQuery(context.Background(), testCfg(srv.URL), srv.Client(), "q", 0)
+		if !errors.Is(err, ErrSearxngNoResults) ||
+			!strings.Contains(err.Error(), "duckduckgo (CAPTCHA), brave (too many requests), qwant") {
+			t.Fatalf("want failing engines listed, got %v", err)
 		}
 	})
 
