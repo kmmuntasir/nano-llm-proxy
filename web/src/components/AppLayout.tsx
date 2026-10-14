@@ -3,6 +3,7 @@ import { Link as RouterLink, NavLink, useNavigate } from "react-router-dom"
 import type { ComponentProps, ComponentType, ReactNode } from "react"
 import { useMutation, useQueryClient } from "@tanstack/react-query"
 import {
+  Badge,
   Box,
   Drawer,
   Flex,
@@ -34,6 +35,7 @@ import { useTheme } from "next-themes"
 import { post } from "../api/client"
 import { isAdminRole } from "../api/roles"
 import { useAbout } from "../api/useAbout"
+import { useIsLocal } from "../api/useAuthConfig"
 import { toaster } from "./ui/toaster"
 import UserAvatar from "./UserAvatar"
 import { useSession } from "../App"
@@ -44,6 +46,8 @@ interface NavItem {
   label: string
   icon: ComponentType
   adminOnly?: boolean
+  /** hidden in local mode (single owner, no other accounts) */
+  serverOnly?: boolean
 }
 
 const navItems: NavItem[] = [
@@ -52,7 +56,7 @@ const navItems: NavItem[] = [
   { to: "/docs", label: "Guide", icon: BookOpen },
   { to: "/usage", label: "Usage", icon: BarChart3 },
   { to: "/profile", label: "Profile", icon: User },
-  { to: "/users", label: "Users", icon: Users, adminOnly: true },
+  { to: "/users", label: "Users", icon: Users, adminOnly: true, serverOnly: true },
   { to: "/providers", label: "Providers", icon: Server, adminOnly: true },
   { to: "/settings", label: "Settings", icon: Settings, adminOnly: true },
 ]
@@ -93,7 +97,17 @@ function ColorModeMenu() {
 //
 // Sized so it never widens the 220px rail: the logo never shrinks and the
 // wordmark truncates rather than wrapping or pushing the layout.
-function Brand({ size = "sm" }: { size?: ComponentProps<typeof Heading>["size"] }) {
+//
+// inlineBadge=false leaves the "Local" badge to the caller: the rail is too
+// narrow to fit it beside the wordmark without truncating the name.
+function Brand({
+  size = "sm",
+  inlineBadge = true,
+}: {
+  size?: ComponentProps<typeof Heading>["size"]
+  inlineBadge?: boolean
+}) {
+  const isLocal = useIsLocal()
   return (
     <HStack gap={2} align="center" minW={0} overflow="hidden">
       <img
@@ -106,7 +120,23 @@ function Brand({ size = "sm" }: { size?: ComponentProps<typeof Heading>["size"] 
       <Heading size={size} minW={0} truncate>
         Nano LLM Proxy
       </Heading>
+      {isLocal && inlineBadge && <LocalBadge />}
     </HStack>
+  )
+}
+
+// LocalBadge marks a gateway running in local mode (`nano-llm-proxy local`).
+function LocalBadge() {
+  return (
+    <Badge
+      variant="subtle"
+      colorPalette="teal"
+      size="sm"
+      flexShrink={0}
+      title="Running on this computer"
+    >
+      Local
+    </Badge>
   )
 }
 
@@ -121,11 +151,17 @@ function SidebarContent({
   showBrand?: boolean
   onNavigate?: () => void
 }) {
+  const isLocal = useIsLocal()
   return (
     <>
       {showBrand && (
         <Box mb={6} px={2} minW={0} overflow="hidden">
-          <Brand size="md" />
+          <Brand size="md" inlineBadge={false} />
+          {isLocal && (
+            <Box mt={1} pl={8}>
+              <LocalBadge />
+            </Box>
+          )}
         </Box>
       )}
       <VStack align="stretch" gap={1}>
@@ -195,6 +231,8 @@ function SidebarFooter({ onNavigate }: { onNavigate?: () => void }) {
   const { data } = useSession()
   const navigate = useNavigate()
   const qc = useQueryClient()
+  // local mode has no sign-in, so nothing to log out of
+  const isLocal = useIsLocal()
   const logout = useMutation({
     mutationFn: () => post("/api/auth/logout"),
     onSuccess: () => {
@@ -223,15 +261,17 @@ function SidebarFooter({ onNavigate }: { onNavigate?: () => void }) {
       )}
       <HStack px={1} minW={0}>
         <ColorModeMenu />
-        <IconButton
-          variant="ghost"
-          size="sm"
-          aria-label="log out"
-          title="log out"
-          onClick={() => logout.mutate()}
-        >
-          <LogOut />
-        </IconButton>
+        {!isLocal && (
+          <IconButton
+            variant="ghost"
+            size="sm"
+            aria-label="log out"
+            title="log out"
+            onClick={() => logout.mutate()}
+          >
+            <LogOut />
+          </IconButton>
+        )}
         <VersionLabel onNavigate={onNavigate} />
       </HStack>
     </VStack>
@@ -249,13 +289,19 @@ function MobileSidebar({
   open: boolean
   onOpenChange: (o: boolean) => void
 }) {
+  const isLocal = useIsLocal()
   return (
     <Drawer.Root open={open} onOpenChange={(e) => onOpenChange(e.open)}>
       <Drawer.Backdrop />
       <Drawer.Positioner>
         <Drawer.Content maxW="260px" bg="bg" minH="100vh">
           <Drawer.Header pt={5}>
-            <Heading size="md">Nano LLM Proxy</Heading>
+            <HStack gap={2} minW={0}>
+              <Heading size="md" minW={0} truncate>
+                Nano LLM Proxy
+              </Heading>
+              {isLocal && <LocalBadge />}
+            </HStack>
           </Drawer.Header>
           <Drawer.Body flex={1}>
             <VStack align="stretch" gap={1}>
@@ -301,8 +347,11 @@ export default function AppLayout({ children }: { children: ReactNode }) {
   const { data } = useSession()
   const [mobileOpen, setMobileOpen] = useState(false)
 
+  const isLocal = useIsLocal()
   const isAdmin = isAdminRole(data?.user.role)
-  const items = navItems.filter((i) => !i.adminOnly || isAdmin)
+  const items = navItems.filter(
+    (i) => (!i.adminOnly || isAdmin) && !(i.serverOnly && isLocal),
+  )
 
   return (
     <Flex minH="100vh">

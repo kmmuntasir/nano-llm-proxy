@@ -12,6 +12,8 @@ import (
 // RuntimeSettings (settings.go), stored in the DB and managed via the admin
 // GUI.
 type Config struct {
+	Mode           string   // ModeServer (default) or ModeLocal — see LoadLocalConfig
+	DataDir        string   // local mode: the per-user data directory ("" in server mode)
 	Port           int      // listen port (default 8787)
 	Bind           string   // listen host (default "127.0.0.1")
 	DBPath         string   // SQLite source of truth (default "gateway.db")
@@ -37,6 +39,16 @@ type KiloProviderConfig struct {
 	BaseURL string
 }
 
+// Run modes. Server mode is the multi-user deployment; local mode is one
+// person's machine: no login, loopback only, data in a per-user directory.
+const (
+	ModeServer = "server"
+	ModeLocal  = "local"
+)
+
+// IsLocal reports whether the gateway runs in local mode.
+func (c *Config) IsLocal() bool { return c.Mode == ModeLocal }
+
 // secureCookies reports whether session cookies get the Secure flag
 // (default true; set NANO_COOKIE_SECURE=false for plain-http local GUI dev).
 func (c *Config) SecureCookies() bool {
@@ -60,6 +72,9 @@ type KeyFile struct {
 
 // applyDefaults fills anything the environment left unset.
 func (c *Config) applyDefaults() *Config {
+	if c.Mode == "" {
+		c.Mode = ModeServer
+	}
 	if c.Port == 0 {
 		c.Port = 8787
 	}

@@ -78,7 +78,7 @@ function FilterSelect({
 // from and written to the URL. `locked` filters are fixed by the page (e.g.
 // the model on the model detail page) — they are hidden and survive "clear".
 export default function UsageFilterBar({ locked = [] }: { locked?: FilterKey[] }) {
-  const { filters, preset, isAdmin, searchParams, setFilters } = useUsageFilters()
+  const { filters, preset, showUsers, searchParams, setFilters } = useUsageFilters()
   const facets = useUsageFacets(filters.from, filters.to, filters.tz)
   const f = facets.data
   const show = (k: FilterKey) => !locked.includes(k)
@@ -121,7 +121,7 @@ export default function UsageFilterBar({ locked = [] }: { locked?: FilterKey[] }
       .filter((k) => !filters.userId || k.userId === filters.userId)
       .map((k) => {
         const name = k.alias || `#${k.id}`
-        const owner = isAdmin ? emailById.get(k.userId) : undefined
+        const owner = showUsers ? emailById.get(k.userId) : undefined
         return { value: String(k.id), label: owner ? `${name} (${owner})` : name }
       }),
     filters.keyId ? String(filters.keyId) : undefined,
@@ -135,7 +135,7 @@ export default function UsageFilterBar({ locked = [] }: { locked?: FilterKey[] }
   )
 
   const selects: ReactNode[] = []
-  if (isAdmin && show("userId")) {
+  if (showUsers && show("userId")) {
     selects.push(
       <FilterSelect
         key="user"
@@ -219,7 +219,7 @@ export default function UsageFilterBar({ locked = [] }: { locked?: FilterKey[] }
     )
   }
 
-  const clearable = hasSelectFilters(searchParams, isAdmin ? locked : [...locked, "userId"])
+  const clearable = hasSelectFilters(searchParams, showUsers ? locked : [...locked, "userId"])
   const clear = () => {
     const patch: FilterPatch = {}
     for (const k of ["userId", "keyId", "provider", "model", "surface", "status"] as const) {

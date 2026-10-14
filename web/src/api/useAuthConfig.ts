@@ -18,3 +18,10 @@ export function useAuthConfig() {
 export function useCredentialLogin(): boolean {
   return useAuthConfig().data?.credentialLogin ?? true
 }
+
+// useIsLocal reports whether the gateway runs in local mode (one owner on
+// this computer: no sign-in, no other users). Unknown or absent counts as
+// server mode, so nothing is hidden on a slow or failed config fetch.
+export function useIsLocal(): boolean {
+  return useAuthConfig().data?.mode === "local"
+}

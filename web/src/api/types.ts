@@ -28,6 +28,9 @@ export interface GoogleAuthConfigView {
 export interface AuthConfigView {
   credentialLogin: boolean
   google?: GoogleAuthConfigView
+  // "local" when the binary runs as `nano-llm-proxy local`; absent on older
+  // servers (treat as "server")
+  mode?: "server" | "local"
 }
 
 export interface ClientKeyView {
@@ -493,6 +496,57 @@ export interface RuntimeSettingsView {
   webTools: WebToolsSettingsView
   // always sent by current servers; absent on older ones (treat as [])
   newUsers?: NewUsersSettingsView
+  // absent on servers without local mode (treat as { requireApiKey: false })
+  local?: LocalSettingsView
+}
+
+// Local mode: requireApiKey=false lets agents call /v1/* and /mcp without a
+// client key (keyless requests are attributed to the implicit local key).
+export interface LocalSettingsView {
+  requireApiKey: boolean
+}
+
+// GET /api/local (local mode only; 404 in server mode). Also the response of
+// PUT /api/local/autostart.
+export interface LocalAutostartView {
+  supported: boolean
+  enabled: boolean
+  running: boolean
+  error?: string
+}
+
+export interface LocalSearxngView {
+  installed: boolean
+  running: boolean
+  url: string
+}
+
+export interface LocalInfoView {
+  platform: string // runtime.GOOS of the gateway: "linux" | "darwin" | "windows" | …
+  port: number
+  dataDir: string
+  logFile: string
+  binary: string
+  autostart: LocalAutostartView
+  searxng: LocalSearxngView
+}
+
+// PUT /api/local/autostart request body.
+export interface LocalAutostartRequest {
+  enabled: boolean
+}
+
+// PUT /api/local/port request body (1024–65535).
+export interface LocalPortRequest {
+  port: number
+}
+
+// PUT /api/local/port response. restarting=true: the gateway restarts on the
+// new port and answers at url shortly; false: message says to restart by hand.
+export interface LocalPortResponse {
+  restarting: boolean
+  url: string
+  message?: string
 }
 
 // POST /api/webtools/test response (admin diagnostics).

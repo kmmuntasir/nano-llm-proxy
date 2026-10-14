@@ -194,6 +194,29 @@ type RuntimeSettings struct {
 	WebTools  WebToolsSettings  `json:"webTools"`
 	Auth      AuthSettings      `json:"auth"`
 	NewUsers  NewUserSettings   `json:"newUsers"`
+	Local     LocalSettings     `json:"local"`
+}
+
+// LocalSettings only matter in local mode (one person's machine, no login).
+// RequireAPIKey off (the default) lets any local program call /v1 and /mcp
+// with no key or a placeholder; on, agents need a real client key exactly as
+// in server mode. Server mode ignores the section.
+type LocalSettings struct {
+	RequireAPIKey bool `json:"requireApiKey"`
+}
+
+// LocalSearXNGURL is where the local-mode installer runs its per-user
+// SearXNG (8899 rather than SearXNG's usual 8888, which Jupyter and the
+// server install already claim on many machines).
+const LocalSearXNGURL = "http://127.0.0.1:8899"
+
+// DefaultLocalRuntimeSettings seeds a fresh local-mode database: the same
+// defaults, with web tools on and pointed at the installer's SearXNG.
+func DefaultLocalRuntimeSettings() *RuntimeSettings {
+	rs := DefaultRuntimeSettings()
+	rs.WebTools.Enabled = true
+	rs.WebTools.SearXNGURL = LocalSearXNGURL
+	return rs
 }
 
 // NewUserSettings holds the defaults applied once, when an admin creates an

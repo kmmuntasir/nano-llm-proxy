@@ -743,3 +743,67 @@ func TestMigrateV10MovesBuiltinZenToInference(t *testing.T) {
 		t.Fatalf("operator-edited URL changed: %s", got)
 	}
 }
+
+func TestBootstrapLocal(t *testing.T) {
+	st := openTestStore(t)
+	id, err := st.BootstrapLocal(testCfg())
+	if err != nil {
+		t.Fatal(err)
+	}
+	owner, err := st.User(id.OwnerID)
+	if err != nil || owner == nil || owner.Email != LocalOwnerEmail || owner.Name != LocalOwnerName || owner.Role != "superadmin" {
+		t.Fatalf("owner = %+v %v", owner, err)
+	}
+	if k, err := st.ClientKey(id.KeyID); err != nil || k == nil || k.UserID != id.OwnerID || k.Alias != LocalKeyAlias {
+		t.Fatalf("implicit key = %+v %v", k, err)
+	}
+	rs, err := st.LoadRuntimeSettings()
+	if err != nil || !rs.WebTools.Enabled || rs.WebTools.SearXNGURL != "http://127.0.0.1:8899" || rs.Local.RequireAPIKey {
+		t.Fatalf("fresh local settings = %+v %v", rs.WebTools, err)
+	}
+	provs, _, err := st.ListProvidersWithKeys()
+	if err != nil || len(provs) != 1 || provs[0].Name != "zen" {
+		t.Fatalf("providers = %+v %v", provs, err)
+	}
+
+	// a second boot is a no-op: same owner, same key, settings untouched
+	rs.WebTools.Enabled = false
+	if err := st.SaveRuntimeSettings(rs); err != nil {
+		t.Fatal(err)
+	}
+	again, err := st.BootstrapLocal(testCfg())
+	if err != nil || again != id {
+		t.Fatalf("second boot = %+v %v, want %+v", again, err, id)
+	}
+	if rs, _ := st.LoadRuntimeSettings(); rs.WebTools.Enabled {
+		t.Fatal("second boot overwrote saved settings")
+	}
+
+	// a deleted implicit key comes back on the next boot
+	if err := st.DeleteClientKey(id.KeyID); err != nil {
+		t.Fatal(err)
+	}
+	again, err = st.BootstrapLocal(testCfg())
+	if err != nil || again.OwnerID != id.OwnerID || again.KeyID == id.KeyID || again.KeyID == 0 {
+		t.Fatalf("after delete = %+v %v", again, err)
+	}
+}
+
+func TestBootstrapLocalKeepsServerDatabase(t *testing.T) {
+	// a server database opened in local mode keeps its accounts and settings
+	st := openTestStore(t)
+	if err := st.Bootstrap(testCfg(), testKeyFile(), "admin@example.com", "super-secret-pass"); err != nil {
+		t.Fatal(err)
+	}
+	id, err := st.BootstrapLocal(testCfg())
+	if err != nil {
+		t.Fatal(err)
+	}
+	owner, _ := st.User(id.OwnerID)
+	if owner.Email != "admin@example.com" || owner.Name != "admin" {
+		t.Fatalf("owner = %+v", owner)
+	}
+	if rs, _ := st.LoadRuntimeSettings(); rs.WebTools.Enabled {
+		t.Fatal("existing database got local settings defaults")
+	}
+}

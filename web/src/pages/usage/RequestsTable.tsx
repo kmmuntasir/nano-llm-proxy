@@ -60,11 +60,11 @@ function RequestDetails({ row, isAdmin }: { row: UsageRequestRow; isAdmin: boole
   )
 }
 
-function columns(isAdmin: boolean): Col[] {
+function columns(showUsers: boolean): Col[] {
   const cols: Col[] = [
     { id: "ts", header: "Time", sortKey: "ts", nowrap: true, render: (r) => fmtShortDateTime(r.ts) },
   ]
-  if (isAdmin) {
+  if (showUsers) {
     cols.push({ id: "user", header: "User", render: (r) => userLabel(r) })
   }
   cols.push(
@@ -120,12 +120,15 @@ export function RequestsTable({
   filters,
   prefix = "",
   isAdmin,
+  showUsers = isAdmin,
   defaultPageSize = 50,
   showRangeNotice = false,
 }: {
   filters: UsageFilters
   prefix?: string
   isAdmin: boolean
+  /** the User column; defaults to isAdmin (off in local mode) */
+  showUsers?: boolean
   defaultPageSize?: number
   /** surface the server's capped-range echo above the table */
   showRangeNotice?: boolean
@@ -143,7 +146,7 @@ export function RequestsTable({
     <VStack align="stretch" gap={2}>
       {showRangeNotice && <RangeNotice filters={filters} range={data?.range} />}
       <PaginatedTable
-        columns={columns(isAdmin)}
+        columns={columns(showUsers)}
         rows={data?.rows ?? []}
         rowKey={(r) => String(r.id)}
         total={data?.total ?? 0}

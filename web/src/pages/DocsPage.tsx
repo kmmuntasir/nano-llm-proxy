@@ -1,6 +1,7 @@
 import { useMemo } from "react"
 import { Link as RouterLink } from "react-router-dom"
 import {
+  Alert,
   Badge,
   Card,
   Code,
@@ -11,6 +12,7 @@ import {
   Text,
   VStack,
 } from "@chakra-ui/react"
+import { useIsLocal } from "../api/useAuthConfig"
 import JsonBlock from "../components/JsonBlock"
 import { DataTable } from "../components/DataTable"
 
@@ -114,6 +116,7 @@ function PageLink({ to, children }: { to: string; children: React.ReactNode }) {
 
 export default function DocsPage() {
   const origin = window.location.origin
+  const isLocal = useIsLocal()
 
   const snippets = useMemo(
     () => ({
@@ -190,6 +193,20 @@ export default function DocsPage() {
         from <PageLink to="/profile">Profile → My API Keys</PageLink> and paste
         it wherever a snippet says <Code fontFamily="mono">{FG_PLACEHOLDER}</Code>.
       </Text>
+      {isLocal && (
+        <Alert.Root status="info" size="sm">
+          <Alert.Indicator />
+          <Alert.Content>
+            <Alert.Description>
+              Running locally — no API key needed unless you turn on “Require an API key”
+              in <PageLink to="/settings">Settings</PageLink>; use any placeholder key
+              like <Code fontFamily="mono">local</Code>. OpenAI base URL{" "}
+              <Code fontFamily="mono" wordBreak="break-all">{origin}/v1</Code>, Anthropic base
+              URL <Code fontFamily="mono" wordBreak="break-all">{origin}</Code>.
+            </Alert.Description>
+          </Alert.Content>
+        </Alert.Root>
+      )}
 
       <Section title="What this is">
         <Text fontSize="sm">

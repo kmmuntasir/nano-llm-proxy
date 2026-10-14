@@ -4,6 +4,7 @@ import (
 	"context"
 	"crypto/subtle"
 	"errors"
+	"github.com/kmmuntasir/nano-llm-proxy/internal/config"
 	"github.com/kmmuntasir/nano-llm-proxy/internal/store"
 	"log"
 	"net"
@@ -32,6 +33,10 @@ var ctxUserKey ctxUserKeyType
 // check (CSRF).
 func (g *gateway) requireSession(next http.HandlerFunc) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
+		if g.isLocal() {
+			g.localSession(next, w, r)
+			return
+		}
 		if r.Method != http.MethodGet && r.Method != http.MethodHead && !g.originAllowed(r) {
 			writeJSON(w, http.StatusForbidden, map[string]any{"error": map[string]string{"message": "origin not allowed"}})
 			return
@@ -54,8 +59,12 @@ func (g *gateway) requireSession(next http.HandlerFunc) http.HandlerFunc {
 		if time.Since(time.Unix(sess.LastSeen, 0)) > touchInterval {
 			g.store.TouchSession(hash, sessionTTL) //nolint:errcheck
 		}
-		next(w, r.WithContext(context.WithValue(r.Context(), ctxUserKey, user)))
+		next(w, r.WithContext(withUser(r.Context(), user)))
 	}
+}
+
+func withUser(ctx context.Context, u *store.User) context.Context {
+	return context.WithValue(ctx, ctxUserKey, u)
 }
 
 // requireAdmin admits superadmins and admins — they share every admin
@@ -92,6 +101,9 @@ func (g *gateway) originAllowed(r *http.Request) bool {
 	}
 	if subtle.ConstantTimeCompare([]byte(u.Host), []byte(r.Host)) == 1 {
 		return true
+	}
+	if g.isLocal() {
+		return false // no session to ride on: only the page's own origin
 	}
 	for _, trusted := range g.conf().TrustedOrigins {
 		if strings.EqualFold(u.Host, trusted) || strings.EqualFold(origin, "https://"+trusted) {
@@ -172,6 +184,10 @@ func (b *loginBackoff) reset(key string) {
 // --- auth handlers ---
 
 func (g *gateway) handleLogin(w http.ResponseWriter, r *http.Request) {
+	if g.isLocal() {
+		apiErr(w, http.StatusNotFound, "Local mode has no sign-in")
+		return
+	}
 	var req struct {
 		Email    string `json:"email"`
 		Password string `json:"password"`
@@ -236,7 +252,12 @@ func (g *gateway) credentialLoginEnabled() bool {
 // sign-in methods the login page should offer. The client id is public by
 // design — Google Identity Services needs it in the browser.
 func (g *gateway) handleAuthConfig(w http.ResponseWriter, r *http.Request) {
-	out := map[string]any{"credentialLogin": g.credentialLoginEnabled()}
+	out := map[string]any{"credentialLogin": g.credentialLoginEnabled(), "mode": config.ModeServer}
+	if g.isLocal() {
+		out["mode"] = config.ModeLocal
+		writeJSON(w, http.StatusOK, out)
+		return
+	}
 	if c := g.conf(); c.GoogleEnabled() {
 		google := map[string]string{"clientId": c.GoogleClientID}
 		if c.GoogleWorkspaceDomain != "" {
@@ -253,7 +274,7 @@ func (g *gateway) handleAuthConfig(w http.ResponseWriter, r *http.Request) {
 // so no Google account can mint itself access to the upstream keys. A
 // configured Workspace domain is an additional restriction.
 func (g *gateway) handleGoogleLogin(w http.ResponseWriter, r *http.Request) {
-	if g.google == nil {
+	if g.google == nil || g.isLocal() {
 		apiErr(w, http.StatusNotFound, "Google sign-in is not configured")
 		return
 	}
@@ -322,6 +343,10 @@ func (g *gateway) handleGoogleLogin(w http.ResponseWriter, r *http.Request) {
 }
 
 func (g *gateway) handleLogout(w http.ResponseWriter, r *http.Request) {
+	if g.isLocal() {
+		writeJSON(w, http.StatusOK, map[string]any{"ok": true}) // nothing to sign out of
+		return
+	}
 	if c, err := r.Cookie(sessionCookie); err == nil && c.Value != "" {
 		g.store.DeleteSession(store.HashSecret(c.Value)) //nolint:errcheck
 	}

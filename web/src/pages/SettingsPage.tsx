@@ -21,12 +21,13 @@ import {
 import { Info, RefreshCw } from "lucide-react"
 import { Link as RouterLink } from "react-router-dom"
 import { api, post, put, ApiError } from "../api/client"
-import { useAuthConfig } from "../api/useAuthConfig"
+import { useAuthConfig, useIsLocal } from "../api/useAuthConfig"
 import type {
   AuthConfigView,
   AuthSettingsView,
   BenchmarksStatusView,
   CatalogModelsView,
+  LocalSettingsView,
   ModelMetaSyncStatusView,
   ModelMetaView,
   ProviderView,
@@ -37,6 +38,7 @@ import type {
 import { toaster } from "../components/ui/toaster"
 import ComboSelect from "../components/ComboSelect"
 import ConfirmDialog from "../components/ConfirmDialog"
+import ThisComputerCard from "../components/ThisComputerCard"
 
 // Editing form for the runtime settings document. The Zen model catalog is
 // sync-managed (models.dev) and browsable on the Models page; the Responses
@@ -99,6 +101,8 @@ interface SettingsForm {
   webTools: WebToolsSettingsView
   /** providers new regular users start without — kept sorted for diffing */
   newUserDisabledProviderIds: number[]
+  /** local mode only in the GUI; always saved back so a save never resets it */
+  local: LocalSettingsView
 }
 
 function sortedIds(ids: number[]): number[] {
@@ -124,6 +128,8 @@ function hydrate(s: RuntimeSettingsView): SettingsForm {
     webTools: { ...s.webTools },
     // older servers don't send newUsers — nothing disabled
     newUserDisabledProviderIds: sortedIds(s.newUsers?.disabledProviderIds ?? []),
+    // servers without local mode don't send it — keys stay required there
+    local: { requireApiKey: s.local?.requireApiKey ?? false },
   }
 }
 
@@ -133,6 +139,7 @@ function hydrate(s: RuntimeSettingsView): SettingsForm {
 function changedSections(saved: SettingsForm, f: SettingsForm): string[] {
   const differs = (a: unknown, b: unknown) => JSON.stringify(a) !== JSON.stringify(b)
   const sections: [string, unknown, unknown][] = [
+    ["This computer", saved.local, f.local],
     ["Sign-in", saved.auth, f.auth],
     ["Routing", saved.rotation, f.rotation],
     ["Retries & cooldowns", saved.retry, f.retry],
@@ -176,6 +183,7 @@ function buildPayload(
       zai: { modelMeta: f.zaiModelMeta },
       webTools: f.webTools,
       newUsers: { disabledProviderIds: f.newUserDisabledProviderIds },
+      local: { ...f.local },
     },
   }
 }
@@ -706,6 +714,7 @@ export default function SettingsPage() {
     staleTime: 5 * 60_000,
   })
   const authConfig = useAuthConfig()
+  const isLocal = useIsLocal()
   const googleConfigured = authConfig.data ? authConfig.data.google !== undefined : undefined
   const [form, setForm] = useState<SettingsForm | null>(null)
   const [saveError, setSaveError] = useState("")
@@ -757,23 +766,41 @@ export default function SettingsPage() {
       <Heading size="lg">Settings</Heading>
       <Text fontSize="sm" color="fg.muted">
         Runtime settings live in the database and apply without a restart.
-        Bootstrap values (port, bind, db path) come from the environment — see{" "}
-        <code>.env.example</code>.
+        {!isLocal && (
+          <>
+            {" "}
+            Bootstrap values (port, bind, db path) come from the environment — see{" "}
+            <code>.env.example</code>.
+          </>
+        )}
       </Text>
       {isLoading && <Text>Loading…</Text>}
 
+      {isLocal && (
+        <ThisComputerCard
+          requireApiKey={form.local.requireApiKey}
+          onRequireApiKeyChange={(v) => set({ local: { requireApiKey: v } })}
+        />
+      )}
+
       <SyncCard status={data?.settings.zen.modelMetaSyncStatus} />
 
-      <SignInCard
-        value={form.auth}
-        onChange={(patch) => set({ auth: { ...form.auth, ...patch } })}
-        config={authConfig.data}
-      />
+      {/* local mode: no sign-in and a single owner — no sign-in methods or
+          new-user defaults to configure */}
+      {!isLocal && (
+        <SignInCard
+          value={form.auth}
+          onChange={(patch) => set({ auth: { ...form.auth, ...patch } })}
+          config={authConfig.data}
+        />
+      )}
 
-      <NewUserProvidersCard
-        disabledIds={form.newUserDisabledProviderIds}
-        onChange={(ids) => set({ newUserDisabledProviderIds: sortedIds(ids) })}
-      />
+      {!isLocal && (
+        <NewUserProvidersCard
+          disabledIds={form.newUserDisabledProviderIds}
+          onChange={(ids) => set({ newUserDisabledProviderIds: sortedIds(ids) })}
+        />
+      )}
 
       {/* routing */}
       <Card.Root>

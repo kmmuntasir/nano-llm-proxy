@@ -3,6 +3,7 @@ package config
 import (
 	"fmt"
 	"os"
+	"path/filepath"
 	"strconv"
 	"strings"
 )
@@ -62,6 +63,55 @@ func LoadDotEnv(path string) error {
 // variables (after LoadDotEnv has run). Anything it cannot parse is fatal —
 // a typo must not silently launch the gateway on surprise defaults.
 func LoadEnvConfig() (*Config, error) {
+	cfg, err := fromEnv()
+	if err != nil {
+		return nil, err
+	}
+	return cfg.applyDefaults(), nil
+}
+
+// ParseMode validates NANO_MODE: "" and "server" mean server mode, "local"
+// local mode; anything else is an error (fatal at boot like every other
+// malformed bootstrap value).
+func ParseMode(v string) (string, error) {
+	switch strings.ToLower(strings.TrimSpace(v)) {
+	case "", ModeServer:
+		return ModeServer, nil
+	case ModeLocal:
+		return ModeLocal, nil
+	}
+	return "", fmt.Errorf("invalid NANO_MODE %q (use server or local)", v)
+}
+
+// LoadLocalConfig is LoadEnvConfig for local mode: the database defaults to
+// <dataDir>/gateway.db, session cookies drop the Secure flag (the GUI is
+// plain http://localhost), and the bind address must be loopback — local
+// mode has no login, so it must never be reachable from another machine.
+// NANO_DB_PATH and NANO_COOKIE_SECURE still override.
+func LoadLocalConfig(dataDir string) (*Config, error) {
+	cfg, err := fromEnv()
+	if err != nil {
+		return nil, err
+	}
+	cfg.Mode, cfg.DataDir = ModeLocal, dataDir
+	if cfg.DBPath == "" {
+		cfg.DBPath = filepath.Join(dataDir, "gateway.db")
+	}
+	if cfg.CookieSecure == nil {
+		insecure := false
+		cfg.CookieSecure = &insecure
+	}
+	switch cfg.Bind {
+	case "", "127.0.0.1", "localhost", "::1":
+	default:
+		return nil, fmt.Errorf("NANO_BIND %q: local mode only listens on this computer (use 127.0.0.1, localhost or ::1)", cfg.Bind)
+	}
+	return cfg.applyDefaults(), nil
+}
+
+// fromEnv parses the NANO_* variables without applying defaults, so the
+// callers can tell "unset" from "set to the default".
+func fromEnv() (*Config, error) {
 	cfg := &Config{}
 	if v := os.Getenv("NANO_PORT"); v != "" {
 		port, err := strconv.Atoi(v)
@@ -100,5 +150,36 @@ func LoadEnvConfig() (*Config, error) {
 		}
 		cfg.GoogleWorkspaceDomain = strings.ToLower(v)
 	}
-	return cfg.applyDefaults(), nil
+	return cfg, nil
+}
+
+// SetDotEnv sets KEY=value in a .env file, replacing an existing assignment
+// of KEY (including an "export KEY=" one) and keeping every other line
+// as-is; a missing file is created. Written 0600 — .env files hold secrets.
+func SetDotEnv(path, key, value string) error {
+	raw, err := os.ReadFile(path)
+	if err != nil && !os.IsNotExist(err) {
+		return err
+	}
+	line := key + "=" + value
+	var out []string
+	found := false
+	text := strings.TrimRight(string(raw), "\n")
+	if text != "" {
+		for _, l := range strings.Split(text, "\n") {
+			t := strings.TrimPrefix(strings.TrimSpace(l), "export ")
+			if k, _, ok := strings.Cut(t, "="); ok && strings.TrimSpace(k) == key {
+				if !found {
+					out = append(out, line)
+				}
+				found = true
+				continue
+			}
+			out = append(out, l)
+		}
+	}
+	if !found {
+		out = append(out, line)
+	}
+	return os.WriteFile(path, []byte(strings.Join(out, "\n")+"\n"), 0o600)
 }

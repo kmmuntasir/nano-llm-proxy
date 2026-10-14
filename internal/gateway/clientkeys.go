@@ -58,6 +58,21 @@ func (c *clientKeyCache) lookup(raw string) (clientKeyEntry, bool) {
 	return e, true
 }
 
+// byID finds a key by id (local mode's implicit key). Disabled keys are not
+// found. A linear scan: local mode has a handful of keys.
+func (c *clientKeyCache) byID(id int64) (clientKeyEntry, bool) {
+	m := c.v.Load()
+	if m == nil {
+		return clientKeyEntry{}, false
+	}
+	for _, e := range *m {
+		if e.ID == id && !e.Disabled {
+			return e, true
+		}
+	}
+	return clientKeyEntry{}, false
+}
+
 // clientKeyFromContext returns the authenticated client key, if the
 // middleware put one on the context (store mode only). Works for SDK tool
 // handlers too, which receive a context derived from the HTTP request.

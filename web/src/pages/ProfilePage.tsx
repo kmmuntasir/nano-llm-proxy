@@ -14,7 +14,7 @@ import {
 import { useNavigate } from "react-router-dom"
 import { KeyRound } from "lucide-react"
 import { patch, post, ApiError } from "../api/client"
-import { useCredentialLogin } from "../api/useAuthConfig"
+import { useCredentialLogin, useIsLocal } from "../api/useAuthConfig"
 import type { UserView } from "../api/types"
 import { PasswordInput } from "../components/ui/password-input"
 import { toaster } from "../components/ui/toaster"
@@ -211,7 +211,9 @@ export default function ProfilePage() {
   // a password is useless while password sign-in is off, and Google-linked
   // accounts sign in with Google
   const credentialLogin = useCredentialLogin()
-  const canChangePassword = credentialLogin && !data?.user.googleLinked
+  // local mode has no sign-in (no password) and a single owner (no roles)
+  const isLocal = useIsLocal()
+  const canChangePassword = !isLocal && credentialLogin && !data?.user.googleLinked
 
   return (
     <VStack align="stretch" gap={6}>
@@ -248,14 +250,16 @@ export default function ProfilePage() {
             </HStack>
           )}
           {data && <NameField key={data.user.id} user={data.user} />}
-          <HStack gap={6} flexWrap="wrap">
-            <VStack align="start" gap={0}>
-              <Text fontSize="xs" color="fg.muted">
-                Role
-              </Text>
-              {data && <RoleBadge role={data.user.role} />}
-            </VStack>
-          </HStack>
+          {!isLocal && (
+            <HStack gap={6} flexWrap="wrap">
+              <VStack align="start" gap={0}>
+                <Text fontSize="xs" color="fg.muted">
+                  Role
+                </Text>
+                {data && <RoleBadge role={data.user.role} />}
+              </VStack>
+            </HStack>
+          )}
         </Card.Body>
       </Card.Root>
 

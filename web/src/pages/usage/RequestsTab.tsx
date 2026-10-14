@@ -3,7 +3,7 @@ import { RequestsTable } from "./RequestsTable"
 import { useUsageFilters } from "./urlState"
 
 export default function RequestsTab() {
-  const { filters, isAdmin } = useUsageFilters()
+  const { filters, isAdmin, showUsers } = useUsageFilters()
 
   return (
     <VStack align="stretch" gap={4}>
@@ -15,7 +15,7 @@ export default function RequestsTab() {
           </Text>
         </Card.Header>
         <Card.Body pt={3}>
-          <RequestsTable filters={filters} isAdmin={isAdmin} showRangeNotice />
+          <RequestsTable filters={filters} isAdmin={isAdmin} showUsers={showUsers} showRangeNotice />
         </Card.Body>
       </Card.Root>
     </VStack>

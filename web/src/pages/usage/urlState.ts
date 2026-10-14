@@ -7,6 +7,7 @@ import { useMemo } from "react"
 import { useSearchParams } from "react-router-dom"
 import { useSession } from "../../App"
 import { isAdminRole } from "../../api/roles"
+import { useIsLocal } from "../../api/useAuthConfig"
 import { browserTz } from "../../api/usage"
 import type { UsageFilters } from "../../api/usage"
 import type { SortOrder, UsageStatusFilter, UsageSurface } from "../../api/types"
@@ -241,16 +242,21 @@ export function useIsAdmin(): boolean {
 export function useUsageFilters() {
   const [sp, setSp] = useSearchParams()
   const isAdmin = useIsAdmin()
+  const isLocal = useIsLocal()
+  // Per-user views (Users tabs, user filter, user columns) are admin-only,
+  // and hidden in local mode: there's a single owner, nobody else to compare.
+  const showUsers = isAdmin && !isLocal
   const now = nowMinute()
   const tz = browserTz()
   const key = sp.toString()
   const parsed = useMemo(
-    () => parseFilters(new URLSearchParams(key), { isAdmin, now, tz }),
-    [key, isAdmin, now, tz],
+    () => parseFilters(new URLSearchParams(key), { isAdmin: showUsers, now, tz }),
+    [key, showUsers, now, tz],
   )
   return {
     ...parsed,
     isAdmin,
+    showUsers,
     searchParams: sp,
     setFilters: (patch: FilterPatch) => setSp((prev) => applyFilterPatch(prev, patch)),
   }

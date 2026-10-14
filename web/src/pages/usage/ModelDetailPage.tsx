@@ -13,7 +13,7 @@ import { filterSearch, useUsageFilters } from "./urlState"
 // "/"), i.e. it is just the regular filter pair pinned by this page. The
 // by-user parts are admin only.
 export default function ModelDetailPage() {
-  const { filters, isAdmin, searchParams } = useUsageFilters()
+  const { filters, isAdmin, showUsers, searchParams } = useUsageFilters()
   const navigate = useNavigate()
   const hasModel = !!filters.model
   const overview = useUsageOverview(filters, undefined, { enabled: hasModel })
@@ -40,12 +40,12 @@ export default function ModelDetailPage() {
         </Heading>
       </HStack>
       <RangeNotice filters={filters} range={overview.data?.range} />
-      <OverviewStats totals={overview.data?.totals} loading={overview.isPending} showUsers={isAdmin} />
-      <SimpleGrid columns={{ base: 1, xl: isAdmin ? 2 : 1 }} gap={4}>
-        {isAdmin && <SeriesCard filters={filters} groupBy="user" />}
+      <OverviewStats totals={overview.data?.totals} loading={overview.isPending} showUsers={showUsers} />
+      <SimpleGrid columns={{ base: 1, xl: showUsers ? 2 : 1 }} gap={4}>
+        {showUsers && <SeriesCard filters={filters} groupBy="user" />}
         <LatencyCard filters={filters} />
       </SimpleGrid>
-      {isAdmin && (
+      {showUsers && (
         <Card.Root>
           <Card.Header>
             <Heading size="sm">By user</Heading>
@@ -69,7 +69,7 @@ export default function ModelDetailPage() {
           <Heading size="sm">Recent requests</Heading>
         </Card.Header>
         <Card.Body pt={3}>
-          <RequestsTable filters={filters} prefix="r." defaultPageSize={25} isAdmin={isAdmin} />
+          <RequestsTable filters={filters} prefix="r." defaultPageSize={25} isAdmin={isAdmin} showUsers={showUsers} />
         </Card.Body>
       </Card.Root>
     </VStack>

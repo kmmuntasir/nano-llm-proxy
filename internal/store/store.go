@@ -693,6 +693,72 @@ func (s *Store) Bootstrap(cfg *config.Config, kf *config.KeyFile, adminEmail, ad
 	return tx.Commit()
 }
 
+// Local mode has exactly one implicit account and one implicit client key
+// (see BootstrapLocal). They are ordinary rows, so a local database is a
+// normal database — it could move to a server unchanged.
+const (
+	LocalOwnerName  = "Local owner"
+	LocalOwnerEmail = "owner@localhost"
+	LocalKeyAlias   = "local (no key)"
+)
+
+// LocalIdentity is who keyless local-mode traffic and the login-free GUI act
+// as.
+type LocalIdentity struct {
+	OwnerID int64 // the superadmin the GUI runs as
+	KeyID   int64 // the client key keyless /v1 and /mcp requests are billed to
+}
+
+// BootstrapLocal is Bootstrap for local mode, run before the runtime
+// settings are loaded. A fresh database gets the local settings defaults
+// (web tools on, local SearXNG) and the implicit owner — a superadmin with a
+// random password nobody knows, since local mode has no login. Every boot
+// makes sure the owner's implicit client key exists (recreating it if it was
+// deleted); its plaintext is never shown — keyless requests are attributed
+// to it by id.
+func (s *Store) BootstrapLocal(cfg *config.Config) (LocalIdentity, error) {
+	var nUsers int
+	if err := s.db.QueryRow(`SELECT COUNT(*) FROM users`).Scan(&nUsers); err != nil {
+		return LocalIdentity{}, err
+	}
+	if nUsers == 0 {
+		raw, err := s.getSetting(RuntimeSettingsKey)
+		if err != nil {
+			return LocalIdentity{}, err
+		}
+		if raw == "" {
+			if err := s.SaveRuntimeSettings(settings.DefaultLocalRuntimeSettings()); err != nil {
+				return LocalIdentity{}, fmt.Errorf("seed local settings: %w", err)
+			}
+		}
+	}
+	if err := s.Bootstrap(cfg, nil, LocalOwnerEmail, newSecret(40)); err != nil {
+		return LocalIdentity{}, err
+	}
+	var id LocalIdentity
+	if err := s.db.QueryRow(`SELECT id FROM users WHERE role='superadmin' ORDER BY id LIMIT 1`).Scan(&id.OwnerID); err != nil {
+		return LocalIdentity{}, fmt.Errorf("local owner: %w", err)
+	}
+	if nUsers == 0 {
+		if _, err := s.db.Exec(`UPDATE users SET name=? WHERE id=?`, LocalOwnerName, id.OwnerID); err != nil {
+			return LocalIdentity{}, err
+		}
+	}
+	err := s.db.QueryRow(`SELECT id FROM api_keys WHERE user_id=? AND alias=? ORDER BY id LIMIT 1`,
+		id.OwnerID, LocalKeyAlias).Scan(&id.KeyID)
+	if errors.Is(err, sql.ErrNoRows) {
+		_, k, cerr := s.CreateClientKey(id.OwnerID, LocalKeyAlias)
+		if cerr != nil {
+			return LocalIdentity{}, fmt.Errorf("local key: %w", cerr)
+		}
+		return LocalIdentity{OwnerID: id.OwnerID, KeyID: k.ID}, nil
+	}
+	if err != nil {
+		return LocalIdentity{}, err
+	}
+	return id, nil
+}
+
 func (s *Store) getSettingTx(tx *sql.Tx, key string) (string, error) {
 	var v string
 	err := tx.QueryRow(`SELECT value FROM settings WHERE key=?`, key).Scan(&v)

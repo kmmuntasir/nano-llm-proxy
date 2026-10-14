@@ -65,6 +65,7 @@ type gateway struct {
 	google   *googleVerifier   // Google sign-in ID-token verifier; nil when not configured
 	keyCheck keyVerifier       // upstream key verification before save (keycheck.go); nil = skip
 	about    *aboutInfo        // build stamp + parsed changelog for GET /api/about (about.go)
+	local    *localState       // local-mode wiring (local.go); nil in server mode
 
 	mcpOnce    sync.Once    // builds mcpHandler exactly once
 	mcpHandler http.Handler // SDK streamable-HTTP handler behind /mcp

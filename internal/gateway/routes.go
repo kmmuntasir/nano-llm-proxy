@@ -70,6 +70,12 @@ func (g *gateway) RegisterRoutes(mux *http.ServeMux, webFS fs.FS) {
 
 	mux.HandleFunc("GET /api/dashboard", g.requireSession(g.handleDashboard))
 
+	// local mode only (404 in server mode): this computer's port, data
+	// folder, background service and SearXNG
+	mux.HandleFunc("GET /api/local", g.localOnly(g.requireSession(g.requireAdmin(g.handleLocalInfo))))
+	mux.HandleFunc("PUT /api/local/autostart", g.localOnly(g.requireSession(g.requireAdmin(g.handleLocalAutostart))))
+	mux.HandleFunc("PUT /api/local/port", g.localOnly(g.requireSession(g.requireAdmin(g.handleLocalPort))))
+
 	mux.HandleFunc("GET /api/usage/summary", g.requireSession(g.handleUsageSummary))
 	mux.HandleFunc("GET /api/usage/timeseries", g.requireSession(g.handleUsageTimeseries))
 	mux.HandleFunc("GET /api/usage/users", g.requireSession(g.requireAdmin(g.handleUsageUsers)))
@@ -120,6 +126,15 @@ func (g *gateway) clientOnly(next http.HandlerFunc) http.HandlerFunc {
 		key := strings.TrimPrefix(r.Header.Get("Authorization"), "Bearer ")
 		if key == "" {
 			key = r.Header.Get("x-api-key")
+		}
+		if g.local != nil {
+			ck, ok := g.localClient(w, r, key)
+			if !ok {
+				return
+			}
+			g.usage.record(ck.ID)
+			next(w, withTrace(withClientKey(r, ck)))
+			return
 		}
 		if g.store != nil {
 			if key == "" {

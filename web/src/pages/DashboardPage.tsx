@@ -11,6 +11,7 @@ import {
 } from "@chakra-ui/react"
 import { api } from "../api/client"
 import { isAdminRole } from "../api/roles"
+import { useIsLocal } from "../api/useAuthConfig"
 import { DataTable } from "../components/DataTable"
 import { useSession } from "../App"
 import type { DashboardData, UsageActivityRow, UsageTotals } from "../api/types"
@@ -49,7 +50,9 @@ export default function DashboardPage() {
   })
   // 24h usage totals for the stat row, scoped to the signed-in user
   const { data: me } = useSession()
-  const isAdmin = isAdminRole(me?.user.role)
+  const isLocal = useIsLocal()
+  // local mode has a single owner — a per-user column says nothing
+  const showUser = isAdminRole(me?.user.role) && !isLocal
   const usage = useQuery({
     queryKey: ["dashboard", "usage"],
     queryFn: () => {
@@ -134,7 +137,7 @@ export default function DashboardPage() {
               rowKey={(_, i) => String(i)}
               empty="No requests recorded yet"
               columns={[
-                ...(isAdmin
+                ...(showUser
                   ? [{ header: "User", render: (e: UsageActivityRow) => e.email }]
                   : []),
                 { header: "Time", render: (e: UsageActivityRow) => fmtTs(e.ts) },
