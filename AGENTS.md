@@ -18,5 +18,14 @@ idempotent installer: `scripts/install-web-tools.sh` (use `--check` for a
 read-only verify). It never touches the gateway binary; `deploy.sh` does
 not install it.
 
+## Local install (one person's computer)
+
+When the user wants nano-llm-proxy on their own machine rather than a
+server, use local mode instead of `deploy.sh`: the one-line installers in
+`scripts/install/` (published as release assets) or
+`nano-llm-proxy local install`. Read `docs/local.md` first. Local mode has
+no sign-in and listens on loopback only; never point it at a shared or
+multi-user machine.
+
 `.env`, `keys.json`, and `gateway.db` hold secrets and runtime state — never
 commit them, copy their contents into code or commits, or send them anywhere.

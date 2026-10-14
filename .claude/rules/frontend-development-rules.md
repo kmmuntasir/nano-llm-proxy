@@ -38,6 +38,7 @@ web/public/             # static files (favicon)
 
 - **Server state: TanStack Query.** `useQuery` with a stable `queryKey` array (`["me"]`, `["models"]`, `["usage", "summary", from, to]`); `useMutation` + `queryClient.invalidateQueries` after writes. This is the established pattern — no Redux/Zustand/Jotai, no second cache layer.
 - **Session:** `useSession()` in `App.tsx` (`["me"]`) is the single source of "who am I"; role gating reads `user.role`.
+- **Mode:** `useIsLocal()` (`api/useAuthConfig.ts`) — local mode hides sign-in, Users, roles, password, per-user usage views and Google UI, and shows `ThisComputerCard` in Settings. Copy that mentions admins, accounts or `fg-` keys needs a local-mode variant (see `DocsPage.tsx`).
 - **Local UI state:** `useState`. **URL state:** React Router.
 - Forms are plain controlled inputs + `useState` + a mutation; no form library is installed. Don't add one for a single form.
 

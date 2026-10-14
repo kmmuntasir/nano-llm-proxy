@@ -21,14 +21,16 @@ differently:
 - `/api/*` needs no session: every request acts as the single owner (a
   superadmin). `POST /api/auth/login` and `POST /api/auth/google` answer
   404, `POST /api/auth/logout` answers `{"ok": true}` and does nothing.
-  State-changing `/api/*` requests keep the same-origin Origin check (403).
+  State-changing `/api/*` requests keep the same-origin Origin check (403);
+  `NANO_TRUSTED_ORIGINS` is ignored.
 - `/v1/*` and `/mcp` accept a missing or unknown key and bill the request to
   the built-in `local (no key)` client key, unless the `local.requireApiKey`
   setting is on (then 401 as in server mode). A valid `fg-…` key is used as
   itself. With `local (no key)` disabled, keyless requests get a 401.
 - `/v1/*` and `/mcp` answer 403 when an `Origin` header names a host other
   than `localhost`, `127.0.0.1` or `::1`, and 415 for a `POST` whose
-  `Content-Type` isn't JSON. These errors use the `{"error":{"message"}}`
+  `Content-Type` media type isn't exactly `application/json` (parameters
+  such as `charset` are fine). These errors use the `{"error":{"message"}}`
   shape on every surface.
 - Every route, `/health` and the GUI included, answers 403 (plain text) when
   the `Host` header isn't `localhost`, `127.0.0.1` or `::1` with the

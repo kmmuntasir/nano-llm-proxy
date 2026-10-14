@@ -27,7 +27,9 @@ Release notes are generated from commit prefixes, so `feat:`, `fix:`,
   folder, log file and SearXNG status, backed by `GET /api/local`,
   `PUT /api/local/autostart` and `PUT /api/local/port` (404 in server mode).
   `GET /api/auth/config` now always reports `mode` (`server` or `local`).
-  See `docs/local.md`.
+  The in-app Guide follows the mode: placeholder-key snippets (real `fg-`
+  keys once "Require an API key" is on), no admin or account wording, and
+  local troubleshooting. See `docs/local.md`.
 - One-line installers for local mode, attached to every release:
   `install.sh` (Linux, macOS), `install.ps1` (Windows PowerShell) and
   `install.cmd` (Windows CMD). No admin rights: they verify the download

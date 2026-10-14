@@ -37,7 +37,8 @@ In scope:
 
 - anything in `internal/` or `main.go`
 - the admin GUI in `web/`
-- `deploy.sh` and `scripts/install-web-tools.sh`
+- `deploy.sh`, `scripts/install-web-tools.sh` and the local-mode installers in
+  `scripts/install/`
 - the running service's authentication, authorization, and network surface
 
 Out of scope:
@@ -81,6 +82,16 @@ secret is stored). It only signs in users an admin added on the Users
 page — an unknown email is refused, never created — and
 `GOOGLE_WORKSPACE_DOMAIN` can restrict it further to one Workspace domain.
 Deactivating a user ends their sessions and turns off their client keys.
+
+**Local mode has no sign-in.** `nano-llm-proxy local` (what the one-line
+installers set up) is for one person's computer: the GUI and, unless
+"Require an API key" is on, `/v1/*` and `/mcp` are open to every program
+and user on that machine. In exchange it refuses to listen beyond loopback,
+answers only `Host: localhost`/`127.0.0.1`/`[::1]` on its port (DNS
+rebinding), rejects foreign `Origin`s and non-JSON `POST`s on `/v1/*` and
+`/mcp` (so a web page can't spend your credits), and keeps its data folder
+at `0700`. Don't use it on a shared multi-user machine; see
+[docs/local.md](docs/local.md#security-model).
 
 **`web_read` fetches URLs on behalf of authenticated users.** It has SSRF
 protection, but treat the web tools as a privileged feature: enable them only

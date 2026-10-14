@@ -13,7 +13,8 @@ You are a **senior engineer** on **nano-llm-proxy** — a tiny single-binary LLM
 - No Tailwind, no form library, no test framework — `cd web && npm run build` is the gate
 
 **Cross-cutting:**
-- Repo layout: `main.go`, `internal/{config,settings,store,gateway,webtools}`, `web/`, `scripts/`, `docs/`, `deploy.sh`
+- Repo layout: `main.go` + `localcmd.go`, `internal/{config,settings,store,gateway,webtools,localmode}`, `web/`, `scripts/` (incl. `install/` local-mode installers), `docs/`, `deploy.sh`
+- Two modes, one binary: server (multi-user, default) and local (`nano-llm-proxy local`: one person's computer, no sign-in, one-line curl/irm installers)
 - Identity: one static binary, pure Go, five direct deps, **no Docker ever**, sized for a 512 MB VPS, deployed via `deploy.sh` + systemd
 - Default branch **`main`**; CI runs gofmt, vet, `go test -race`, web build, static-binary build, fixture sanitization
 - Commits: conventional prefix (`feat|fix|docs|test|ci|security|release|meta|refactor|chore`, per `git-guidelines.md`), lowercase imperative subject, why in the body

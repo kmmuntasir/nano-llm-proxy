@@ -10,16 +10,20 @@ Go (see `go.mod` for the pinned version) + SQLite (`modernc.org/sqlite`, pure Go
 
 ```
 main.go                  # bootstrap wiring only: config → store → gateway → serve; -version, -reset-admin-password
+localcmd.go              # `nano-llm-proxy local …` subcommands (install/uninstall/status/datadir), local log setup
 webprod.go / webstub.go  # `prod` tag embeds web/dist; untagged builds return no FS (no Node needed for go test)
 internal/config/         # bootstrap env config + .env parser (config.go, dotenv.go)
 internal/settings/       # runtime settings document (JSON in the settings table)
 internal/store/          # SQLite: schema, in-code migrations and queries (store.go; usage reporting queries in usage_report.go)
 internal/gateway/        # HTTP runtime: routes.go, auth.go, pool.go, provider adapters, SSE, usage, /api/* handlers (api_*.go), MCP (mcp*.go)
 internal/webtools/       # web_search (SearXNG) / web_read (fetch + obscura), SSRF guard
-scripts/                 # install-web-tools.sh, fixture capture/sanitize
+internal/localmode/      # local mode's per-user services (systemd user / XDG autostart / launchd / HKCU Run), data dir, browser open
+scripts/                 # install-web-tools.sh, fixture capture/sanitize; install/ = local-mode one-line installers (release assets)
 deploy.sh                # build + hardened systemd install
-docs/                    # api.md, configuration.md, deployment.md, architecture/
+docs/                    # api.md, configuration.md, deployment.md, local.md, architecture/
 ```
+
+**Two modes, one binary.** Server mode (default) is the multi-user deployment. Local mode (`nano-llm-proxy local` / `NANO_MODE=local`, `docs/local.md`) is one person's computer: no sign-in (an implicit owner), optional client keys, loopback only, plus a Host guard and Origin/Content-Type checks on `/v1` + `/mcp` (`internal/gateway/local.go`). Every local behaviour is gated on `g.isLocal()` / `cfg.IsLocal()`; server mode must stay byte-for-byte unchanged — cover both modes in tests when touching auth, `clientOnly`, or `requireSession`.
 
 `internal/gateway/testdata/` holds captured fixtures — reference material only; no Go test reads it.
 
@@ -71,6 +75,7 @@ Provider = preset or custom URL; model prefix selects the provider and is stripp
 
 ```bash
 go run .                                                   # gateway on :8787 (needs ADMIN_EMAIL/ADMIN_PASSWORD on first boot)
+XDG_DATA_HOME=/tmp/nlp go run . local                      # local mode against a throwaway data dir (no credentials needed)
 (cd web && npm ci && npm run build)                        # build the GUI (embedded under `prod`)
 CGO_ENABLED=0 go build -tags prod -trimpath -ldflags="-s -w" -o nano-llm-proxy .
 go vet ./... && go test -race ./... && test -z "$(gofmt -l .)"   # the gate (matches CI)

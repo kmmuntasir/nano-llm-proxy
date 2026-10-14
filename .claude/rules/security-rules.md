@@ -13,6 +13,7 @@ Source of truth for the public posture is `SECURITY.md`; these rules keep code c
 - Upstream provider keys are stored **reversibly** in SQLite (they must be forwarded verbatim). `gateway.db` is `0600`. No envelope encryption — if a change affects this, call it out.
 - No built-in TLS; binds `127.0.0.1` by default; session cookies are `Secure` by default (`NANO_COOKIE_SECURE`). Behind a proxy, `NANO_TRUSTED_ORIGINS` is the only way to widen Origin acceptance.
 - Single instance by design; no shared state across replicas.
+- **Local mode has no sign-in** — its whole boundary is: forced loopback bind, the Host guard (DNS rebinding), the GUI Origin check (trusted origins ignored), and on `/v1` + `/mcp` no foreign `Origin` and an exact `application/json` Content-Type (forces a CORS preflight that is never granted). Never weaken any of these, and never let local behaviour leak into server mode.
 
 ## Authentication & authorization
 

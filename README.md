@@ -91,6 +91,10 @@ database for.
   (native fetch + obscura headless-browser rendering) with SSRF protection,
   per-user metering, and an idempotent installer (`scripts/install-web-tools.sh`)
   — no paid search APIs
+- Local mode for your own computer: one-line installers (`curl … | bash`,
+  `irm … | iex`), no sign-in, any placeholder key, starts at sign-in with no
+  terminal open, and a private SearXNG for web search — see
+  [docs/local.md](docs/local.md)
 - Full test suite (`go test -race ./...`) against scripted mock upstreams and
   local fixture servers — no network, no Node, no API keys required
 
@@ -474,6 +478,11 @@ email is `ADMIN_EMAIL` and ends its sessions — then restart.
   [Where this is deliberately not the best choice](#where-this-is-deliberately-not-the-best-choice);
   if you need provider credentials encrypted at rest, use full-disk
   encryption or pick a gateway that does it for you.
+- Local mode has no sign-in, so it only listens on loopback (any other bind
+  is fatal), checks the `Host` header on every route against DNS rebinding,
+  and refuses browser-originated and non-JSON calls on `/v1/*` and `/mcp`.
+  Anyone with a shell on the machine can use it — see
+  [docs/local.md](docs/local.md#security-model).
 
 ## Configuration
 
@@ -491,6 +500,7 @@ real environment always wins; see `.env.example`). Full reference in
 | `NANO_DB_PATH` | `gateway.db` | SQLite database |
 | `NANO_COOKIE_SECURE` | true | Secure flag on session cookies (false for plain HTTP) |
 | `NANO_TRUSTED_ORIGINS` | empty | Extra Origins allowed on GUI mutations behind a reverse proxy |
+| `NANO_MODE` | `server` | `local` runs [local mode](docs/local.md) (same as `nano-llm-proxy local`); real environment only |
 | `GOOGLE_CLIENT_ID` / `GOOGLE_WORKSPACE_DOMAIN` | empty | Optional Google sign-in for the GUI, for users added on the Users page only (never creates accounts), optionally limited to one Workspace domain; password sign-in can then be switched off in Settings |
 
 **Runtime** — everything you tune while it runs (rotation, retries, daily

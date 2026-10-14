@@ -184,7 +184,7 @@ Local mode has its own subcommands (details in [local.md](local.md#the-local-com
 
 ```text
 nano-llm-proxy local                      run in local mode (foreground)
-nano-llm-proxy local install [--port N] [--no-autostart] [--no-open]
+nano-llm-proxy local install [--port N] [--no-autostart] [--no-open] [--quiet]
 nano-llm-proxy local uninstall [--purge]
 nano-llm-proxy local status
 nano-llm-proxy local datadir

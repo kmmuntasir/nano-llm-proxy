@@ -260,7 +260,7 @@ your agents' base URLs after a change.
 
 ```text
 nano-llm-proxy local                      run in local mode (foreground)
-nano-llm-proxy local install [--port N] [--no-autostart] [--no-open]
+nano-llm-proxy local install [--port N] [--no-autostart] [--no-open] [--quiet]
 nano-llm-proxy local uninstall [--purge]
 nano-llm-proxy local status
 nano-llm-proxy local datadir
@@ -273,7 +273,8 @@ nano-llm-proxy local datadir
 - `local install` is what the installers run: it creates the database,
   registers and starts the background services (restarting running ones, so
   an upgrade runs the new binary), and opens the browser. `--port` writes
-  `NANO_PORT` to the data folder's `.env`.
+  `NANO_PORT` to the data folder's `.env`; `--quiet` skips its closing
+  summary (the installers print their own).
 - `local uninstall` removes the background services and their sign-in
   entries. `--purge` also deletes the data folder: the database with your
   provider keys, the log, SearXNG. The binary stays; the installers'
@@ -297,7 +298,8 @@ computer:
   `Origin` header that isn't a loopback host gets a 403, and a `POST`
   without a JSON `Content-Type` gets a 415. A cross-site page can't send a
   JSON request without a CORS preflight, which the gateway never approves.
-  GUI mutations keep the usual same-origin check.
+  GUI mutations keep the usual same-origin check; `NANO_TRUSTED_ORIGINS` is
+  ignored in local mode.
 - **Anyone with a shell on this computer has full access.** The GUI and
   `/api/*` need no credentials, so any program or user that can reach
   `localhost` can manage providers and spend your credits. **Require an API
