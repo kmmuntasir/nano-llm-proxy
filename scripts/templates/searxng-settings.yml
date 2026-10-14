@@ -11,7 +11,19 @@
 #   CAPTCHAs, faster (1 vCPU) responses. Re-trim to taste; every engine
 #   here works without an API key.
 
-use_default_settings: true
+use_default_settings:
+  # keep_only is what actually trims: plain "true" would keep every default
+  # engine (80+), with the list below only re-enabling these
+  engines:
+    keep_only:
+      - duckduckgo
+      - duckduckgo web
+      - brave
+      - bing
+      - qwant
+      - wikipedia
+      - stackoverflow
+      - github
 
 server:
   secret_key: "@@SEARXNG_SECRET@@"
@@ -41,15 +53,9 @@ engines:
     disabled: false
   - name: qwant
     disabled: false
-  - name: startpage
-    disabled: false
-  - name: mojeek
-    disabled: false
-  - name: marginalia
-    disabled: false
   - name: wikipedia
     disabled: false
-  - name: stackexchange
+  - name: stackoverflow
     disabled: false
   - name: github
     disabled: false
