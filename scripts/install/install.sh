@@ -10,7 +10,8 @@
 #      against the release's checksums.txt;
 #   2. installs the binary to ~/.local/bin/nano-llm-proxy (the previous one is
 #      kept as nano-llm-proxy.bak);
-#   3. optionally sets up a private SearXNG (web search) in the data folder;
+#   3. optionally sets up a private SearXNG (web search) in the data folder,
+#      on your Python 3.10+ or, without one, a private Python fetched by uv;
 #   4. uses your obscura (the headless browser web_read uses for JavaScript-
 #      heavy pages) if one is on PATH, else downloads the pinned release into
 #      the data folder and checks its SHA-256;
@@ -21,8 +22,9 @@
 #
 # Test overrides: NANO_INSTALL_BASE_URL (a directory URL holding the archives
 # and checksums.txt; skips GitHub), NANO_INSTALL_VERSION (same as --version),
-# NANO_INSTALL_OBSCURA_BASE_URL (a directory URL holding the obscura archives;
-# they must still match the pinned hashes below).
+# NANO_INSTALL_OBSCURA_BASE_URL and NANO_INSTALL_UV_BASE_URL (directory URLs
+# holding the obscura / uv archives; they must still match the pinned hashes
+# below).
 
 set -euo pipefail
 
@@ -35,6 +37,23 @@ BIN="$BIN_DIR/nano-llm-proxy"
 SEARXNG_REF="${SEARXNG_REF:-d8ae3abd59b6cb3970e3380e484c7d4cd8529619}"
 SEARXNG_REPO="https://github.com/searxng/searxng.git"
 SEARXNG_PORT=8899
+
+# When the machine has no Python 3.10+ (stock macOS ships 3.9; older Linux
+# distros too), SearXNG gets a private Python: uv, a single static binary,
+# fetches a standalone CPython into the data folder (uv verifies those
+# downloads itself). Nothing system-wide, no admin rights, gone with
+# --purge. uv's own archive is checked against the hashes pinned here
+# (from its release's .sha256 files); a bump must update all four.
+UV_VERSION="0.12.24"
+UV_PYTHON="3.12"
+uv_sha256() { # asset — the pinned hash, empty for an unknown asset
+    case "$1" in
+        uv-x86_64-unknown-linux-gnu.tar.gz) echo b4dfaef47d491a7296981f8374a4595f55dbf84e8937c8ecd2983574d8bb3da6 ;;
+        uv-aarch64-unknown-linux-gnu.tar.gz) echo 5231be65f496304623895dacdbf1de8504fec90303684bdf05805aa34414dd21 ;;
+        uv-x86_64-apple-darwin.tar.gz) echo 4fa82e37cb94767661f532b001e470b67a186c7260e305bd84ddb78fd545c0b6 ;;
+        uv-aarch64-apple-darwin.tar.gz) echo 0c4346de7abdb49495b393b9ec809fe387aa43e586be20fecb972216c1e71732 ;;
+    esac
+}
 
 # v0.2.4 rather than the server script's v0.2.3: both publish the Linux,
 # macOS and Windows builds local mode needs, and v0.2.4 adds SSRF-gate and
@@ -285,6 +304,46 @@ find_python() { # prints the first python3 >= 3.10
     return 1
 }
 
+# Called inside `if`, where set -e is off: every step returns explicitly.
+get_uv() { # dir — prints the path of a working uv $UV_VERSION in dir
+    local arch os asset expected actual url x="$TMP/uv"
+    if [[ -x "$1/uv" ]] && [[ "$("$1/uv" --version 2>/dev/null | awk '{ print $2 }')" == "$UV_VERSION" ]]; then
+        printf '%s\n' "$1/uv"
+        return 0
+    fi
+    case "$ARCH" in amd64) arch=x86_64 ;; arm64) arch=aarch64 ;; esac
+    case "$OS" in linux) os=unknown-linux-gnu ;; darwin) os=apple-darwin ;; esac
+    asset="uv-$arch-$os.tar.gz"
+    expected=$(uv_sha256 "$asset")
+    [[ -n $expected ]] || return 1
+    url="${NANO_INSTALL_UV_BASE_URL:-https://github.com/astral-sh/uv/releases/download/$UV_VERSION}"
+    url="${url%/}/$asset"
+    rm -rf "$x" && mkdir -p "$x" || return 1
+    curl -fsSL --retry 3 -o "$x/$asset" "$url" || return 1
+    actual=$(sha256_of "$x/$asset")
+    if [[ $actual != "$expected" ]]; then
+        echo "checksum mismatch for $asset (expected $expected, got $actual)" >&2
+        return 1
+    fi
+    tar -xzf "$x/$asset" -C "$x" || return 1
+    mkdir -p "$1" && cp "$x/uv-$arch-$os/uv" "$1/uv" && chmod 755 "$1/uv" || return 1
+    rm -rf "$x"
+    printf '%s\n' "$1/uv"
+}
+
+# make_venv venv python-or-empty uvdir: a venv with pip, from the system
+# Python when there is one, else from a uv-managed private Python.
+make_venv() {
+    if [[ -n $2 ]]; then
+        "$2" -m venv "$1"
+        return
+    fi
+    local uv
+    uv=$(get_uv "$3") || return 1
+    UV_PYTHON_INSTALL_DIR="$3/python" UV_CACHE_DIR="$TMP/uv-cache" \
+        "$uv" venv --quiet --seed --python "$UV_PYTHON" --python-preference only-managed "$1"
+}
+
 searxng_at_ref() { # src — true when the checkout is exactly $SEARXNG_REF
     [[ -d "$1/.git" ]] && [[ "$(git -C "$1" rev-parse HEAD 2>/dev/null)" == "$SEARXNG_REF" ]]
 }
@@ -385,16 +444,14 @@ setup_search() {
         SEARCH_STATUS="off (--no-search)"
         return 0
     fi
-    local hint="" py
-    [[ $OS == darwin ]] && hint="on macOS: brew install python git"
-    if ! py=$(find_python); then
-        skip_search "it needs Python 3.10 or newer" "$hint"
-        return 0
-    fi
+    local hint="" py=""
+    [[ $OS == darwin ]] && hint="on macOS: xcode-select --install"
     if ! command -v git >/dev/null 2>&1; then
         skip_search "it needs git" "$hint"
         return 0
     fi
+    # no Python 3.10+ here: make_venv gives SearXNG a private one via uv
+    py=$(find_python) || py=""
 
     local sx="$DATADIR/searxng"
     local src="$sx/src" venv="$sx/venv" log="$sx/install.log" fetched=0
@@ -412,12 +469,19 @@ setup_search() {
     fi
 
     if [[ $fetched -eq 1 ]] || ! "$venv/bin/python" -c 'import searx' >/dev/null 2>&1; then
+        if [[ -z $py ]]; then
+            say "  no Python 3.10+ here: fetching a private Python $UV_PYTHON for SearXNG (uv $UV_VERSION)"
+        fi
         say "  installing Python packages (a few minutes the first time)"
         rm -rf "$venv"
-        if ! "$py" -m venv "$venv" >>"$log" 2>&1; then
+        if ! make_venv "$venv" "$py" "$sx/uv" >>"$log" 2>&1; then
             rm -rf "$venv"
-            skip_search "python3 -m venv failed (details: $log)" \
-                "on Debian/Ubuntu: sudo apt install python3-venv"
+            if [[ -n $py ]]; then
+                skip_search "python3 -m venv failed (details: $log)" \
+                    "on Debian/Ubuntu: sudo apt install python3-venv"
+            else
+                skip_search "could not set up a private Python (details: $log)"
+            fi
             return 0
         fi
         if ! pip_install_searxng "$venv" "$src" >>"$log" 2>&1; then
@@ -619,6 +683,25 @@ uninstall() {
 
 # --- main -----------------------------------------------------------------------
 
+# check_search: the SearXNG service was registered and started by `local
+# install`; make sure it really answers, so a crash on start shows up here
+# instead of as a failed web_search later.
+check_search() {
+    [[ $SEARCH_STATUS == on* ]] || return 0
+    [[ $NO_AUTOSTART -eq 0 ]] || return 0
+    local i log="$DATADIR/searxng/searxng.log"
+    say "Waiting for SearXNG to answer"
+    for ((i = 0; i < 60; i++)); do
+        if curl -fsS -o /dev/null --max-time 2 "http://127.0.0.1:$SEARXNG_PORT/healthz" 2>/dev/null; then
+            return 0
+        fi
+        sleep 1
+    done
+    warn "SearXNG did not answer on 127.0.0.1:$SEARXNG_PORT within a minute; its log ($log) ends with:"
+    tail -n 15 "$log" 2>/dev/null >&2 || true
+    SEARCH_STATUS="installed, but not answering (see $log)"
+}
+
 main() {
     parse_args "$@"
     detect_platform
@@ -650,6 +733,7 @@ main() {
     setup_search
     setup_obscura
     run_local_install
+    check_search
     summary
     path_hint
 }

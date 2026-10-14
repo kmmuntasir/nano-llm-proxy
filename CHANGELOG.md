@@ -38,7 +38,9 @@ Release notes are generated from commit prefixes, so `feat:`, `fix:`,
   autostart fallback, launchd LaunchAgent, or the `HKCU` Run key with the
   new console-less `nano-llm-proxyw.exe`), and open the GUI. On Linux and
   macOS they also set up a private SearXNG for web search on
-  `127.0.0.1:8899` (needs Python 3.10+ and git). Re-running upgrades;
+  `127.0.0.1:8899` (needs git; without a Python 3.10+ — stock macOS has
+  3.9 — it gets a private Python 3.12 via a pinned, checksum-verified uv,
+  all inside the data folder). Re-running upgrades;
   `--uninstall [--purge]` removes it. New `nano-llm-proxy local install`,
   `uninstall [--purge]`, `status` and `datadir` subcommands.
 - The local installers also set up obscura (the headless browser

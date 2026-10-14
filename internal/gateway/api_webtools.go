@@ -93,7 +93,7 @@ func (g *gateway) searxngNextStep(err error) string {
 		if runtime.GOOS == "windows" {
 			return "there's no SearXNG on this computer — set the URL of a SearXNG you can reach (with its JSON API on) above"
 		}
-		return "SearXNG isn't set up on this computer — re-run the installer without --no-search (it needs Python 3.10+ and git), or set the URL of another SearXNG above"
+		return "SearXNG isn't set up on this computer — re-run the installer without --no-search (it needs git), or set the URL of another SearXNG above"
 	}
 	return "SearXNG is installed but not answering — check its status under This computer and its log at " +
 		filepath.Join(home, "searxng.log") + "; `nano-llm-proxy local status` shows the service, re-running the installer restarts it"

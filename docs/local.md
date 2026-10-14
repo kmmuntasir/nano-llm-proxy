@@ -232,11 +232,17 @@ on, rate limiter off, a short list of engines that need no API key), all in
 background service. A fresh local database has web tools on and pointed at
 that URL.
 
-It needs Python 3.10 or newer (with `venv`) and `git`. Without them the
-installer skips web search with a warning and everything else still works;
-install them and re-run the installer to add it (macOS:
-`brew install python git`; Debian/Ubuntu: `sudo apt install python3-venv`).
-The first setup takes a few minutes. `settings.yml` is kept on re-install:
+It uses your Python when it is 3.10 or newer. Otherwise (stock macOS ships
+3.9, and so do some older Linux distributions) it downloads
+[uv](https://github.com/astral-sh/uv) — pinned version, SHA-256 checked —
+into `<data folder>/searxng/uv`, and uv fetches a private Python 3.12 there
+for SearXNG alone: no admin rights, nothing outside the data folder, about
+150 MB, removed by `--purge`. It also needs `git` (macOS:
+`xcode-select --install`); without it the installer skips web search with a
+warning and everything else still works — install it and re-run. After
+starting SearXNG the installer waits for it to answer and, if it doesn't,
+prints the end of `searxng/searxng.log`. The first setup takes a few
+minutes. `settings.yml` is kept on re-install:
 delete it to regenerate.
 
 On Windows there is no SearXNG setup. Set the URL of a SearXNG you can reach
