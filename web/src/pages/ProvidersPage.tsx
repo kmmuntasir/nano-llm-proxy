@@ -21,7 +21,7 @@ import {
   Text,
   VStack,
 } from "@chakra-ui/react"
-import { Activity, ChevronDown, ChevronUp, List, Pencil, Plus, Trash2 } from "lucide-react"
+import { Activity, ChevronDown, ChevronUp, FileUp, List, Pencil, Plus, Trash2 } from "lucide-react"
 import { api, del, patch, post, put, ApiError } from "../api/client"
 import ModelCard from "../components/ModelCard"
 import type {
@@ -33,6 +33,7 @@ import type {
   ZaiUsageLimit,
 } from "../api/types"
 import ConfirmDialog from "../components/ConfirmDialog"
+import ProviderKeyImportDialog from "../components/ProviderKeyImportDialog"
 import StatusBadge from "../components/StatusBadge"
 import { toaster } from "../components/ui/toaster"
 import { PasswordInput } from "../components/ui/password-input"
@@ -720,6 +721,7 @@ function ProviderCard({ p }: { p: ProviderView }) {
   const [keysOpen, setKeysOpen] = useState(false)
   const [modelsOpen, setModelsOpen] = useState(false)
   const [usageOpen, setUsageOpen] = useState(false)
+  const [importOpen, setImportOpen] = useState(false)
   // the enable switch only proposes a change; it applies after the
   // confirmation dialog (null = no pending change)
   const [pendingEnabled, setPendingEnabled] = useState<boolean | null>(null)
@@ -950,6 +952,9 @@ function ProviderCard({ p }: { p: ProviderView }) {
                     <Button size="2xs" type="submit" loading={addKey.isPending} loadingText="Verifying…">
                       <Plus /> Add key
                     </Button>
+                    <Button size="2xs" type="button" variant="outline" onClick={() => setImportOpen(true)}>
+                      <FileUp /> Import keys
+                    </Button>
                   </HStack>
                 </form>
               </Stack>
@@ -960,6 +965,7 @@ function ProviderCard({ p }: { p: ProviderView }) {
       </Card.Body>
 
       <ModelsListModal provider={p} open={modelsOpen} onOpenChange={setModelsOpen} />
+      <ProviderKeyImportDialog provider={p} open={importOpen} onOpenChange={setImportOpen} />
       {p.preset === "zai" && <KeyUsageModal provider={p} open={usageOpen} onOpenChange={setUsageOpen} />}
       <ConfirmDialog
         open={pendingEnabled !== null}

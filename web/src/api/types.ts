@@ -84,6 +84,34 @@ export interface ProviderView {
   keys: ProviderKeyView[]
 }
 
+// POST /api/providers/{id}/keys/import. content is the uploaded file's raw
+// text, sent verbatim: the backend parses it in order and reports duplicate
+// aliases, which a browser-side JSON.parse would reorder or silently drop.
+export interface ProviderKeyImportRequest {
+  content: string
+}
+
+export type ProviderKeyImportStatus =
+  | "added"
+  | "duplicate"
+  | "invalid"
+  | "refused"
+  | "unverifiable"
+  | "rejected"
+
+// One entry per alias in the file, in file order. Key values are never
+// returned.
+export interface ProviderKeyImportResult {
+  label: string
+  status: ProviderKeyImportStatus
+  message: string
+}
+
+export interface ProviderKeyImportResponse {
+  added: number
+  results: ProviderKeyImportResult[]
+}
+
 // A curated preset from GET /api/providers/presets — release-managed
 // endpoints the GUI offers in the "Add Provider" dropdown.
 export interface PresetSpecView {

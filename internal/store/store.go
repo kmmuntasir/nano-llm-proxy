@@ -1390,6 +1390,44 @@ func (s *Store) AddProviderKey(providerID int64, label, key string) (ProviderKey
 	return ProviderKey{ID: id, ProviderID: providerID, Key: key, Label: label, SortOrder: max + 1, CreatedAt: now}, nil
 }
 
+// AddProviderKeys appends keys (Label + Key) to a provider in one
+// transaction: sort_order continues after the provider's existing keys, in
+// the given order. ErrNotFound when the provider is gone.
+func (s *Store) AddProviderKeys(providerID int64, keys []ProviderKey) ([]ProviderKey, error) {
+	now := time.Now().Unix()
+	tx, err := s.db.Begin()
+	if err != nil {
+		return nil, err
+	}
+	defer tx.Rollback()
+	var exists int
+	if err := tx.QueryRow(`SELECT COUNT(*) FROM providers WHERE id=?`, providerID).Scan(&exists); err != nil {
+		return nil, fmt.Errorf("look up provider: %w", err)
+	}
+	if exists == 0 {
+		return nil, ErrNotFound
+	}
+	var max int64
+	if err := tx.QueryRow(`SELECT COALESCE(MAX(sort_order), -1) FROM provider_keys WHERE provider_id=?`, providerID).Scan(&max); err != nil {
+		return nil, fmt.Errorf("read key order: %w", err)
+	}
+	out := make([]ProviderKey, 0, len(keys))
+	for i, k := range keys {
+		order := max + 1 + int64(i)
+		res, err := tx.Exec(`INSERT INTO provider_keys (provider_id, key, label, sort_order, disabled, created_at)
+			VALUES (?, ?, ?, ?, 0, ?)`, providerID, k.Key, k.Label, order, now)
+		if err != nil {
+			return nil, err
+		}
+		id, _ := res.LastInsertId()
+		out = append(out, ProviderKey{ID: id, ProviderID: providerID, Key: k.Key, Label: k.Label, SortOrder: order, CreatedAt: now})
+	}
+	if err := tx.Commit(); err != nil {
+		return nil, err
+	}
+	return out, nil
+}
+
 func (s *Store) UpdateProviderKey(id int64, label *string, disabled *bool) error {
 	var sets []string
 	args := []any{}

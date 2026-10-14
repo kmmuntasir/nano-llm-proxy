@@ -192,27 +192,56 @@ func (g *gateway) keyProbe(ctx context.Context, method, url string, headers map[
 	return resp.StatusCode, b, nil
 }
 
+// Key-check verdicts for a key that failed verification — the statuses the
+// bulk import reports per key (api_keyimport.go).
+const (
+	keyCheckInvalid      = "invalid"      // the upstream says the key is wrong
+	keyCheckRefused      = "refused"      // authenticated, but this server may not use it
+	keyCheckUnverifiable = "unverifiable" // a probe couldn't complete
+)
+
+// classifyKeyCheck turns a verification failure into its verdict and the
+// message the admin sees. what names the key ("Key \"work-1\""); provider
+// is the provider's name. Writes nothing, so a single add and a bulk import
+// word every failure identically.
+func classifyKeyCheck(err error, provider, what string) (status, message string) {
+	var rejected *keyRejectedError
+	if errors.As(err, &rejected) {
+		if rejected.refused {
+			return keyCheckRefused, fmt.Sprintf("%s was refused — %s's %s. The key may be genuine, but this server can't use it (region, IP allowlist, permissions, or a blocked account or budget).", what, provider, rejected)
+		}
+		return keyCheckInvalid, fmt.Sprintf("%s is invalid — %s's %s", what, provider, rejected)
+	}
+	return keyCheckUnverifiable, fmt.Sprintf("Couldn't verify %s against %s — %v. Nothing was saved; try again.", what, provider, err)
+}
+
+// keyCheckVerdict runs the gateway's verifier (none configured = pass) and
+// returns "" when the key passed, else classifyKeyCheck's verdict and
+// message. Failures are logged by label; the key itself never is.
+func (g *gateway) keyCheckVerdict(ctx context.Context, provider, baseURL, anthropicBaseURL, key, what string) (status, message string) {
+	if g.keyCheck == nil {
+		return "", ""
+	}
+	err := g.keyCheck(ctx, baseURL, anthropicBaseURL, key)
+	if err == nil {
+		return "", ""
+	}
+	log.Printf("provider key check provider=%s key=%q failed: %v", provider, what, err)
+	return classifyKeyCheck(err, provider, what)
+}
+
 // checkProviderKey runs the gateway's verifier and, on failure, writes the
 // API error (400 rejected / 503 unverifiable) and returns false. what names
 // the key in messages; the key itself is never logged or echoed.
 func (g *gateway) checkProviderKey(w http.ResponseWriter, r *http.Request, provider, baseURL, anthropicBaseURL, key, what string) bool {
-	if g.keyCheck == nil {
+	status, msg := g.keyCheckVerdict(r.Context(), provider, baseURL, anthropicBaseURL, key, what)
+	switch status {
+	case "":
 		return true
+	case keyCheckUnverifiable:
+		apiErr(w, http.StatusServiceUnavailable, msg)
+	default:
+		apiErr(w, http.StatusBadRequest, msg)
 	}
-	err := g.keyCheck(r.Context(), baseURL, anthropicBaseURL, key)
-	if err == nil {
-		return true
-	}
-	log.Printf("provider key check provider=%s key=%q failed: %v", provider, what, err)
-	var rejected *keyRejectedError
-	if errors.As(err, &rejected) {
-		if rejected.refused {
-			apiErr(w, http.StatusBadRequest, fmt.Sprintf("%s was refused — %s's %s. The key may be genuine, but this server can't use it (region, IP allowlist, permissions, or a blocked account or budget).", what, provider, rejected))
-			return false
-		}
-		apiErr(w, http.StatusBadRequest, fmt.Sprintf("%s is invalid — %s's %s", what, provider, rejected))
-		return false
-	}
-	apiErr(w, http.StatusServiceUnavailable, fmt.Sprintf("Couldn't verify %s against %s — %v. Nothing was saved; try again.", what, provider, err))
 	return false
 }
