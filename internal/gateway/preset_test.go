@@ -679,9 +679,10 @@ func TestProviderKeyUsageEndpoint(t *testing.T) {
 	if rec := call(p.ID, 99999); rec.Code != 404 {
 		t.Fatalf("unknown key usage: got %d, want 404", rec.Code)
 	}
-	// upstream refusal -> 502 with the upstream message
+	// upstream refusal -> 503 with the upstream message (never 502: Cloudflare
+	// would replace the body)
 	fail = true
-	if rec := call(p.ID, keys[0].ID); rec.Code != 502 || !strings.Contains(rec.Body.String(), "quota exceeded") {
+	if rec := call(p.ID, keys[0].ID); rec.Code != http.StatusServiceUnavailable || !strings.Contains(rec.Body.String(), "quota exceeded") {
 		t.Fatalf("failed usage: got %d: %s", rec.Code, rec.Body.String())
 	}
 }

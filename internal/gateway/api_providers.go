@@ -17,7 +17,7 @@ import (
 	"github.com/kmmuntasir/nano-llm-proxy/internal/store"
 )
 
-// store.Provider management endpoints (superadmin only). GUI-added providers are
+// store.Provider management endpoints (admins only). GUI-added providers are
 // always type "openai"; the one builtin (zen=opencode) is editable but can't
 // be renamed or deleted. Preset providers carry a `preset` id from the curated
 // registry (providerspec.go) — set at creation, never patched.
@@ -482,7 +482,7 @@ func (g *gateway) handleProviderKeyUsage(w http.ResponseWriter, r *http.Request)
 	req.Header.Set("Content-Type", "application/json")
 	resp, err := g.client.Do(req)
 	if err != nil {
-		apiErr(w, http.StatusBadGateway, "Usage fetch failed: "+err.Error())
+		apiErr(w, http.StatusServiceUnavailable, "Usage fetch failed: "+err.Error())
 		return
 	}
 	defer resp.Body.Close()
@@ -493,7 +493,7 @@ func (g *gateway) handleProviderKeyUsage(w http.ResponseWriter, r *http.Request)
 		Data    json.RawMessage `json:"data"`
 	}
 	if err := json.Unmarshal(body, &parsed); err != nil {
-		apiErr(w, http.StatusBadGateway, fmt.Sprintf("Usage fetch: upstream HTTP %d with an unparseable body", resp.StatusCode))
+		apiErr(w, http.StatusServiceUnavailable, fmt.Sprintf("Usage fetch: upstream HTTP %d with an unparseable body", resp.StatusCode))
 		return
 	}
 	if !parsed.Success {
@@ -501,7 +501,7 @@ func (g *gateway) handleProviderKeyUsage(w http.ResponseWriter, r *http.Request)
 		if msg == "" {
 			msg = fmt.Sprintf("upstream HTTP %d", resp.StatusCode)
 		}
-		apiErr(w, http.StatusBadGateway, "Usage fetch failed: "+msg)
+		apiErr(w, http.StatusServiceUnavailable, "Usage fetch failed: "+msg)
 		return
 	}
 	w.Header().Set("Content-Type", "application/json")
@@ -532,7 +532,7 @@ func (g *gateway) handleProviderModels(w http.ResponseWriter, r *http.Request) {
 	}
 	models, err := g.fetchUpstreamModels(ref)
 	if err != nil {
-		apiErr(w, http.StatusBadGateway, "Catalog fetch failed: "+err.Error())
+		apiErr(w, http.StatusServiceUnavailable, "Catalog fetch failed: "+err.Error())
 		return
 	}
 	writeJSON(w, http.StatusOK, map[string]any{"models": models})

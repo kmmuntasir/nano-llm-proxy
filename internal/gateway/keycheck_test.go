@@ -190,3 +190,116 @@ func TestProviderKeysVerifiedBeforeSave(t *testing.T) {
 		t.Fatal("provider created though its key couldn't be verified")
 	}
 }
+
+// TestKeyCheckEdgeVerdicts covers the provider quirks found in the preset
+// survey: xAI's 400 for a wrong key, 403 as "refused" (not "invalid"), a
+// key-info endpoint, and an ordinary 400 still counting as authenticated.
+func TestKeyCheckEdgeVerdicts(t *testing.T) {
+	g := newGateway(testCfg(), testRuntime(), &config.KeyFile{})
+	// xAI-like: a wrong key is a 400 on every endpoint; a good key gets 200
+	// for the model list and a plain 400 for the unknown model
+	xai := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if strings.TrimPrefix(r.Header.Get("Authorization"), "Bearer ") != goodKey {
+			w.WriteHeader(400)
+			w.Write([]byte(`{"code":"invalid-argument","error":"Incorrect API key provided. You can obtain an API key from https://console.x.ai."}`))
+			return
+		}
+		if r.Method == http.MethodGet {
+			w.Write([]byte(`{"data":[]}`))
+			return
+		}
+		w.WriteHeader(400)
+		w.Write([]byte(`{"error":"The model nano-llm-proxy-key-check does not exist"}`))
+	}))
+	t.Cleanup(xai.Close)
+	regionBlocked := fakeUpstream{all: 403, body: `{"error":{"code":"unsupported_country_region_territory","message":"Country, region, or territory not supported"}}`}.server(t)
+
+	verdict := func(base, key string) (string, *keyRejectedError) {
+		err := g.verifyUpstreamKey(context.Background(), base, "", key)
+		var rej *keyRejectedError
+		switch {
+		case errors.As(err, &rej) && rej.refused:
+			return "refused", rej
+		case errors.As(err, &rej):
+			return "invalid", rej
+		case err != nil:
+			return "unverifiable", nil
+		}
+		return "ok", nil
+	}
+	if v, _ := verdict(xai.URL, "sk-wrong"); v != "invalid" {
+		t.Errorf("xAI-style wrong key: %s, want invalid", v)
+	}
+	if v, _ := verdict(xai.URL, goodKey); v != "ok" {
+		t.Errorf("xAI-style good key (plain 400 for the fake model): %s, want ok", v)
+	}
+	if v, rej := verdict(regionBlocked.URL, goodKey); v != "refused" || rej.status != 403 {
+		t.Errorf("region-blocked key: %s, want refused", v)
+	}
+
+	// key-info endpoint: public model list and a chat that checks the model
+	// first would let a bad key through; the key-info GET catches it
+	var keyInfoHits int
+	lenient := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path == "/key" {
+			keyInfoHits++
+			if r.Header.Get("Authorization") != "Bearer "+goodKey {
+				w.WriteHeader(401)
+				w.Write([]byte(`{"error":{"message":"Missing Authentication header","code":401}}`))
+				return
+			}
+			w.Write([]byte(`{"data":{"label":"x"}}`))
+			return
+		}
+		if r.Method == http.MethodGet {
+			w.Write([]byte(`{"data":[]}`))
+			return
+		}
+		w.WriteHeader(404)
+		w.Write([]byte(`{"error":"model not found"}`))
+	}))
+	t.Cleanup(lenient.Close)
+	if v, _ := verdict(lenient.URL, "sk-bad"); v != "ok" || keyInfoHits != 0 {
+		t.Fatalf("without a key-info entry the lenient host can't tell: %s (hits %d)", v, keyInfoHits)
+	}
+	keyInfoEndpoints["127.0.0.1"] = "/key"
+	t.Cleanup(func() { delete(keyInfoEndpoints, "127.0.0.1") })
+	if v, _ := verdict(lenient.URL, "sk-bad"); v != "invalid" {
+		t.Errorf("key-info endpoint should catch the bad key: %s", v)
+	}
+	if v, _ := verdict(lenient.URL, goodKey); v != "ok" {
+		t.Errorf("key-info endpoint, good key: %s", v)
+	}
+	if keyInfoPath("https://openrouter.ai/api/v1") != "/key" || keyInfoPath("https://api.x.ai/v1") != "" {
+		t.Error("keyInfoPath table lookup wrong")
+	}
+
+	// the handler words the two rejections differently
+	g2, _ := testStoreGateway(t, "http://127.0.0.1:1")
+	g2.keyCheck = g2.verifyUpstreamKey
+	cookie := loginAs(t, g2, "admin@example.com", "super-secret-pass")
+	for _, c := range []struct{ base, want string }{
+		{xai.URL, `is invalid`},
+		{regionBlocked.URL, `was refused`},
+	} {
+		body := fmt.Sprintf(`{"name":"p%d","baseUrl":%q,"keys":[{"key":"sk-x","label":"k"}]}`, len(c.base)%97, c.base)
+		req := httptest.NewRequest("POST", "/api/providers", strings.NewReader(body))
+		req.AddCookie(cookie)
+		req.Header.Set("Origin", "https://gateway.example.com")
+		rec := httptest.NewRecorder()
+		g2.requireSession(g2.requireAdmin(g2.handleCreateProvider))(rec, req)
+		if rec.Code != http.StatusBadRequest || !strings.Contains(rec.Body.String(), c.want) {
+			t.Errorf("%s: %d %s, want 400 %q", c.base, rec.Code, rec.Body.String(), c.want)
+		}
+	}
+}
+
+func TestKeyCheckOneLine(t *testing.T) {
+	pretty := []byte("{\n  \"error\": {\n    \"message\": \"Incorrect API key provided\"\n  }\n}\n")
+	if got := oneLine(pretty); got != `{ "error": { "message": "Incorrect API key provided" } }` {
+		t.Fatalf("oneLine = %q", got)
+	}
+	if got := oneLine([]byte(strings.Repeat("x", 300))); len([]rune(got)) != 201 {
+		t.Fatalf("not capped: %d runes", len([]rune(got)))
+	}
+}

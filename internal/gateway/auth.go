@@ -249,7 +249,7 @@ func (g *gateway) handleAuthConfig(w http.ResponseWriter, r *http.Request) {
 
 // handleGoogleLogin serves POST /api/auth/google: verify the Google ID token,
 // then sign in the existing account with that email. Accounts are only ever
-// created by a superadmin on the Users page — an unknown email is refused,
+// created by an admin on the Users page — an unknown email is refused,
 // so no Google account can mint itself access to the upstream keys. A
 // configured Workspace domain is an additional restriction.
 func (g *gateway) handleGoogleLogin(w http.ResponseWriter, r *http.Request) {
@@ -280,7 +280,7 @@ func (g *gateway) handleGoogleLogin(w http.ResponseWriter, r *http.Request) {
 	if err != nil {
 		if !errors.Is(err, errGoogleToken) {
 			log.Printf("google login: %v", err)
-			apiErr(w, http.StatusBadGateway, "Couldn't reach Google to verify the sign-in — try again")
+			apiErr(w, http.StatusServiceUnavailable, "Couldn't reach Google to verify the sign-in — try again")
 			return
 		}
 		g.backoff.fail(key)
@@ -337,7 +337,8 @@ func (g *gateway) handleMe(w http.ResponseWriter, r *http.Request) {
 }
 
 // resetAdminPassword is the operator escape hatch (-reset-admin-password):
-// sets the superadmin's password to $ADMIN_PASSWORD and kills their sessions.
+// sets the password of the $ADMIN_EMAIL account to $ADMIN_PASSWORD and kills
+// its sessions.
 // Only ever run by hand on the box.
 func ResetAdminPassword(st *store.Store) {
 	email, pass := os.Getenv("ADMIN_EMAIL"), os.Getenv("ADMIN_PASSWORD")

@@ -356,7 +356,7 @@ func (g *gateway) mergedCatalog() ([]any, bool) {
 func (g *gateway) handleModels(w http.ResponseWriter, r *http.Request) {
 	models, ok := g.catalogFor(r)
 	if !ok {
-		writeErr(w, http.StatusBadGateway, "Catalog fetch failed: all providers unavailable")
+		writeErr(w, http.StatusServiceUnavailable, "Catalog fetch failed: all providers unavailable")
 		return
 	}
 	w.Header().Set("Content-Type", "application/json")
@@ -369,7 +369,7 @@ func (g *gateway) handleModels(w http.ResponseWriter, r *http.Request) {
 func (g *gateway) handleAllModels(w http.ResponseWriter, r *http.Request) {
 	models, ok := g.catalogFor(r)
 	if !ok {
-		apiErr(w, http.StatusBadGateway, "Catalog fetch failed: all providers unavailable")
+		apiErr(w, http.StatusServiceUnavailable, "Catalog fetch failed: all providers unavailable")
 		return
 	}
 	w.Header().Set("Content-Type", "application/json")
