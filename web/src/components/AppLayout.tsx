@@ -1,5 +1,5 @@
 import { useState } from "react"
-import { NavLink, useNavigate } from "react-router-dom"
+import { Link as RouterLink, NavLink, useNavigate } from "react-router-dom"
 import type { ComponentProps, ComponentType, ReactNode } from "react"
 import { useMutation, useQueryClient } from "@tanstack/react-query"
 import {
@@ -9,6 +9,7 @@ import {
   Heading,
   HStack,
   IconButton,
+  Link,
   Menu,
   Portal,
   Text,
@@ -32,6 +33,7 @@ import { useColorMode } from "./ui/color-mode"
 import { useTheme } from "next-themes"
 import { post } from "../api/client"
 import { isAdminRole } from "../api/roles"
+import { useAbout } from "../api/useAbout"
 import { toaster } from "./ui/toaster"
 import UserAvatar from "./UserAvatar"
 import { useSession } from "../App"
@@ -155,13 +157,41 @@ function SidebarContent({
         ))}
       </VStack>
       <Box mt="auto" pt={6}>
-        <SidebarFooter />
+        <SidebarFooter onNavigate={onNavigate} />
       </Box>
     </>
   )
 }
 
-function SidebarFooter() {
+// VersionLabel links the running build to the About page. Hidden until
+// /api/about answers; truncates so it never widens the rail or the drawer.
+function VersionLabel({ onNavigate }: { onNavigate?: () => void }) {
+  const { data } = useAbout()
+  if (!data?.displayVersion) return null
+  return (
+    <Link
+      asChild
+      variant="plain"
+      ml="auto"
+      minW={0}
+      px={1}
+      color="fg.muted"
+      _hover={{ color: "fg" }}
+    >
+      <RouterLink
+        to="/about"
+        title={`Nano LLM Proxy ${data.version} — about & changelog`}
+        onClick={onNavigate}
+      >
+        <Text as="span" fontSize="xs" fontFamily="mono" truncate>
+          {data.displayVersion}
+        </Text>
+      </RouterLink>
+    </Link>
+  )
+}
+
+function SidebarFooter({ onNavigate }: { onNavigate?: () => void }) {
   const { data } = useSession()
   const navigate = useNavigate()
   const qc = useQueryClient()
@@ -191,7 +221,7 @@ function SidebarFooter() {
           </VStack>
         </HStack>
       )}
-      <HStack px={1}>
+      <HStack px={1} minW={0}>
         <ColorModeMenu />
         <IconButton
           variant="ghost"
@@ -202,6 +232,7 @@ function SidebarFooter() {
         >
           <LogOut />
         </IconButton>
+        <VersionLabel onNavigate={onNavigate} />
       </HStack>
     </VStack>
   )
@@ -257,7 +288,7 @@ function MobileSidebar({
             </VStack>
           </Drawer.Body>
           <Drawer.Footer pb={5}>
-            <SidebarFooter />
+            <SidebarFooter onNavigate={() => onOpenChange(false)} />
           </Drawer.Footer>
           <Drawer.CloseTrigger />
         </Drawer.Content>

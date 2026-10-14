@@ -8,6 +8,7 @@ import type { UserView } from "./api/types"
 import AppLayout from "./components/AppLayout"
 import LoginPage from "./pages/LoginPage"
 import DashboardPage from "./pages/DashboardPage"
+import AboutPage from "./pages/AboutPage"
 import DocsPage from "./pages/DocsPage"
 import ModelsPage from "./pages/ModelsPage"
 import ProfilePage from "./pages/ProfilePage"
@@ -64,6 +65,7 @@ export default function App() {
         <Route path="/" element={<DashboardPage />} />
         <Route path="/models" element={<ModelsPage />} />
         <Route path="/docs" element={<DocsPage />} />
+        <Route path="/about" element={<AboutPage />} />
         <Route
           path="/usage/*"
           element={

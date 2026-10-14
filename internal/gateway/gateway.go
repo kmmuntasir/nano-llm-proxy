@@ -64,6 +64,7 @@ type gateway struct {
 	webtools *webtools.Service // /mcp tool backends (SearXNG + native/obscura reader)
 	google   *googleVerifier   // Google sign-in ID-token verifier; nil when not configured
 	keyCheck keyVerifier       // upstream key verification before save (keycheck.go); nil = skip
+	about    *aboutInfo        // build stamp + parsed changelog for GET /api/about (about.go)
 
 	mcpOnce    sync.Once    // builds mcpHandler exactly once
 	mcpHandler http.Handler // SDK streamable-HTTP handler behind /mcp

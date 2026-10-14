@@ -217,6 +217,11 @@ export default function DocsPage() {
           everywhere, sent as <Code fontFamily="mono">Authorization: Bearer fg-…</Code>{" "}
           or <Code fontFamily="mono">x-api-key: fg-…</Code>.
         </Text>
+        <Text fontSize="sm" color="fg.muted">
+          The version label at the bottom of the sidebar opens the{" "}
+          <PageLink to="/about">About page</PageLink>: the running build and
+          the changelog.
+        </Text>
       </Section>
 
       <Section title="Pick models">

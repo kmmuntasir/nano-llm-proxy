@@ -525,3 +525,31 @@ export interface ZaiUsage {
   level: string // plan tier: lite | pro | max
   limits: ZaiUsageLimit[]
 }
+
+// GET /api/about — the running build and the changelog (any signed-in user).
+// intro and section items are inline markdown (code, bold, italic, links).
+export interface ReleaseSectionView {
+  title: string
+  items: string[]
+}
+
+export interface ReleaseNotesView {
+  version: string // "Unreleased" or a bare semver like "0.1.1"
+  date: string // "" for Unreleased
+  url: string // compare/release link; may be ""
+  intro: string // paragraphs separated by a blank line; may be ""
+  sections: ReleaseSectionView[]
+}
+
+export interface AboutView {
+  name: string
+  version: string // raw build version; "dev" for local builds
+  displayVersion: string // compact sidebar label, e.g. "v0.1.1+48"
+  baseVersion: string // latest release this build is based on; "" when unknown
+  commitsAhead: number // commits after baseVersion; 0 = exactly the release
+  commit: string // "" when unknown
+  buildDate: string // RFC3339; "" when unknown
+  repository: string
+  license: string
+  releases: ReleaseNotesView[] // newest first; "Unreleased" first when present
+}

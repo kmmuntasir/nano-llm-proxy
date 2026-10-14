@@ -11,6 +11,12 @@ Release notes are generated from commit prefixes, so `feat:`, `fix:`,
 
 ### Added
 
+- Version and About page. The sidebar shows the running version (e.g.
+  `v0.1.1+48`); clicking it opens an About page with the build details, the
+  GitHub links and an invitation to contribute, and the changelog of every
+  release as an accordion, newest first and expanded. The changelog is
+  `CHANGELOG.md` embedded in the binary and served by `GET /api/about`, so
+  it always matches the running build.
 - Admin role. Roles are now `superadmin`, `admin` and `user`. Admins have
   every admin page and capability; the one difference is that they can't
   change a superadmin account in any way (deactivate, delete, rename, change

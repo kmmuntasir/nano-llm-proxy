@@ -93,6 +93,7 @@ func main() {
 	if err != nil {
 		log.Fatalf("gateway: %v", err)
 	}
+	g.SetAbout(version, commit, date, changelogMD)
 	log.Printf("nano-llm-proxy %s starting: providers=%d upstream_keys_healthy=%d ua=%s bind=%s:%d db=%s",
 		version, g.ProviderCount(), g.HealthyUpstreamKeys(), rs.Zen.UserAgent, cfg.Bind, cfg.Port, cfg.DBPath)
 	go g.MaintenanceLoop()
