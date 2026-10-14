@@ -145,7 +145,8 @@ export default function ClaudeCodeSetupDialog({
 
             <Text fontSize="xs" color="fg.muted">
               Models with ≥ 1M context get the <Code fontFamily="mono">[1m]</Code> suffix —
-              Claude Code reads it for context accounting and strips it before sending.
+              Claude Code reads it for context accounting, and the gateway strips it
+              before calling upstream.
             </Text>
 
             <JsonBlock code={json} title="settings.json" copyLabel="copy env block" />

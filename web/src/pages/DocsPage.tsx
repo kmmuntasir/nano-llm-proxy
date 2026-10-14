@@ -1,4 +1,5 @@
 import { useMemo } from "react"
+import { Link as RouterLink } from "react-router-dom"
 import {
   Badge,
   Card,
@@ -26,14 +27,60 @@ interface TroubleshootingRow {
 }
 
 const TROUBLESHOOTING: TroubleshootingRow[] = [
-  { symptom: "401 from /v1 or /mcp", meaning: "Missing/revoked key — create a new one in Profile → My API Keys" },
-  { symptom: "502 no healthy keys", meaning: "The provider's upstream keys are exhausted or cooling — an admin adds/fixes keys on the Providers page" },
-  { symptom: "404 from /mcp", meaning: "Web tools are disabled in Settings → Web tools (admin)" },
-  { symptom: "web_search returns no results", meaning: "Search engines may be CAPTCHA-blocked from this deployment's IP — an admin can trim engines in /etc/searxng/settings.yml (see docs/deployment.md)" },
-  { symptom: "web_read returns empty/JS-shell text", meaning: "Re-run with render: true — the page needs a real browser" },
-  { symptom: "Empty reply that stops after a long pause (Pi)", meaning: "The model burned Pi's 4096-token output cap on hidden reasoning — switch models or just say continue; the gateway relays upstream finish reasons verbatim" },
-  { symptom: "5xx / 523 from the public URL", meaning: "The host or network in front of the gateway is down, not the gateway — retry shortly; if it persists, check the deployment's host" },
-  { symptom: "model not found", meaning: "Use the exact provider/model id from the Models page" },
+  {
+    symptom: "401 Invalid or missing API key",
+    meaning:
+      "The key is missing, revoked or disabled, or your account was deactivated. Create a key in Profile → My API Keys, or ask an admin to reactivate your account.",
+  },
+  {
+    symptom: '400 Model must be "<provider>/<id>"',
+    meaning:
+      "Use the full provider/model id from the Models page (e.g. zen/…). On /v1/messages a bare claude-* name only works when an admin has set an Anthropic fallback model.",
+  },
+  {
+    symptom: "400 Unknown provider",
+    meaning:
+      "The provider prefix is misspelled, or an admin hasn't given your account access to that provider. The Models page lists only the providers you can use.",
+  },
+  {
+    symptom: "502 upstream 4xx: …",
+    meaning:
+      "The upstream rejected the request — usually a wrong model id under a valid provider, or a parameter that model doesn't accept.",
+  },
+  {
+    symptom: "502 No healthy <provider> keys available",
+    meaning:
+      "Every upstream key tried was rate-limited, cooling down or disabled. Cooling keys recover on their own — retry in a minute; if it persists an admin checks the Providers page.",
+  },
+  {
+    symptom: "Cloudflare-branded 502 page",
+    meaning:
+      "Can be the gateway's own 502 above: Cloudflare replaces the gateway's error body with its own page. Check Usage → Requests for the real failure reason before assuming the host is down.",
+  },
+  {
+    symptom: "520–526 (e.g. 523) from the public URL",
+    meaning:
+      "The host or network in front of the gateway is unreachable, not the gateway itself — retry shortly; if it persists, check the deployment's host.",
+  },
+  {
+    symptom: "Reply cut off (finish reason length / max_tokens)",
+    meaning:
+      "The model used up the client's output budget, often on hidden reasoning. Raise the client's max output tokens (Pi: maxTokens per model, default 16384), switch models, or say continue. The gateway adds no output cap of its own.",
+  },
+  {
+    symptom: "404 from /mcp",
+    meaning:
+      "Web tools are disabled in Settings → Web tools (MCP). A bad key still gets 401 first.",
+  },
+  {
+    symptom: "web_search returns no results",
+    meaning:
+      "Search engines may be CAPTCHA-blocked from this deployment's IP — an admin can trim engines in /etc/searxng/settings.yml (see docs/deployment.md).",
+  },
+  {
+    symptom: "web_read returns empty/JS-shell text",
+    meaning: "Re-run with render: true — the page needs a real browser.",
+  },
 ]
 
 function Section({
@@ -57,6 +104,14 @@ function Section({
   )
 }
 
+function PageLink({ to, children }: { to: string; children: React.ReactNode }) {
+  return (
+    <Link asChild colorPalette="blue" variant="underline">
+      <RouterLink to={to}>{children}</RouterLink>
+    </Link>
+  )
+}
+
 export default function DocsPage() {
   const origin = window.location.origin
 
@@ -76,95 +131,45 @@ export default function DocsPage() {
         2,
       ),
       claudeMcp: `claude mcp add -s user -t http nano-web ${origin}/mcp --header "Authorization: Bearer ${FG_PLACEHOLDER}"`,
-      mcpJson: JSON.stringify(
+      piModels: JSON.stringify(
         {
-          mcpServers: {
-            "nano-web": {
-              type: "http",
-              url: `${origin}/mcp`,
-              headers: { Authorization: `Bearer ${FG_PLACEHOLDER}` },
-            },
-          },
-        },
-        null,
-        2,
-      ),
-      opencodeProvider: JSON.stringify(
-        {
-          $schema: "https://opencode.ai/config.json",
-          provider: {
-            nano: {
-              npm: "@ai-sdk/openai-compatible",
-              name: "Nano",
-              options: { baseURL: `${origin}/v1`, apiKey: FG_PLACEHOLDER },
-            },
-          },
-        },
-        null,
-        2,
-      ),
-      opencodeMcp: JSON.stringify(
-        {
-          mcp: {
-            "nano-web": {
-              type: "remote",
-              url: `${origin}/mcp`,
-              headers: { Authorization: `Bearer ${FG_PLACEHOLDER}` },
-              enabled: true,
-            },
-          },
-        },
-        null,
-        2,
-      ),
-      kiloMcp: JSON.stringify(
-        {
-          mcpServers: {
-            "nano-web": {
-              type: "streamable-http",
-              url: `${origin}/mcp`,
-              headers: { Authorization: `Bearer ${FG_PLACEHOLDER}` },
-            },
-          },
-        },
-        null,
-        2,
-      ),
-      piCompatInstall: "pi install npm:@billjr99/pi-openai-compat",
-      piCompatJson: JSON.stringify(
-        {
+          $schema: "https://pi.dev/schemas/models.schema.json",
           providers: {
-            custom: {
-              displayName: "Nano",
+            nano: {
+              name: "Nano",
               baseUrl: `${origin}/v1`,
+              api: "openai-completions",
               apiKey: FG_PLACEHOLDER,
+              models: [
+                {
+                  id: "provider/model-id",
+                  contextWindow: 200000,
+                  maxTokens: 32000,
+                  reasoning: true,
+                  input: ["text", "image"],
+                },
+              ],
             },
           },
         },
         null,
         2,
       ),
-      piMcpInstall: "pi install npm:pi-mcp-adapter",
+      piMcpAdd: `pi mcp add nano-web --url ${origin}/mcp --header "Authorization=Bearer ${FG_PLACEHOLDER}" --exposure direct --description "Web search and page reading"`,
       piMcpJson: JSON.stringify(
         {
           mcpServers: {
             "nano-web": {
-              type: "http",
               url: `${origin}/mcp`,
               headers: { Authorization: `Bearer ${FG_PLACEHOLDER}` },
+              exposure: "direct",
+              description: "Web search and page reading",
             },
           },
         },
         null,
         2,
       ),
-      codexToml: `model_provider = "nano"
-
-[model_providers.nano]
-name = "Nano"
-base_url = "${origin}/v1"
-env_key = "NANO_API_KEY"   # export NANO_API_KEY=fg-...
-wire_api = "chat"          # the gateway also speaks "responses"`,
       curl: `curl ${origin}/v1/chat/completions \\
   -H "Authorization: Bearer ${FG_PLACEHOLDER}" \\
   -H "Content-Type: application/json" \\
@@ -182,58 +187,68 @@ wire_api = "chat"          # the gateway also speaks "responses"`,
       <Text fontSize="sm" color="fg.muted">
         Everything on this page is generated for this deployment — every URL
         below points at <Code fontFamily="mono">{origin}</Code>. Grab a key
-        from <Link asChild><Code fontFamily="mono">Profile → My API Keys</Code></Link>{" "}
-        and paste it wherever a snippet says <Code fontFamily="mono">{FG_PLACEHOLDER}</Code>.
+        from <PageLink to="/profile">Profile → My API Keys</PageLink> and paste
+        it wherever a snippet says <Code fontFamily="mono">{FG_PLACEHOLDER}</Code>.
       </Text>
 
       <Section title="What this is">
         <Text fontSize="sm">
           One endpoint in front of many LLM providers. You get a single{" "}
-          <Code fontFamily="mono">fg-…</Code> key, every model from every
-          configured provider under one catalog, automatic key rotation and
-          failover, per-user usage tracking, and self-hosted MCP web tools
-          (<Code fontFamily="mono">web_search</Code>,{" "}
+          <Code fontFamily="mono">fg-…</Code> key, every model from the
+          providers your account can use under one catalog, automatic upstream
+          key rotation and failover, per-user usage tracking, and self-hosted
+          MCP web tools (<Code fontFamily="mono">web_search</Code>,{" "}
           <Code fontFamily="mono">web_read</Code>) — no paid search APIs.
         </Text>
         <HStack gap={2} flexWrap="wrap">
           <Badge variant="outline">OpenAI — <Code fontFamily="mono">{origin}/v1</Code></Badge>
-          <Badge variant="outline">Anthropic — <Code fontFamily="mono">{origin}/v1</Code></Badge>
+          <Badge variant="outline">Anthropic — <Code fontFamily="mono">{origin}</Code></Badge>
           <Badge variant="outline">MCP — <Code fontFamily="mono">{origin}/mcp</Code></Badge>
         </HStack>
         <Text fontSize="sm" color="fg.muted">
-          All three surfaces live under the same base:{" "}
-          <Code fontFamily="mono">/v1/chat/completions</Code>,{" "}
-          <Code fontFamily="mono">/v1/responses</Code> (OpenAI),{" "}
-          <Code fontFamily="mono">/v1/messages</Code> (Anthropic),{" "}
-          <Code fontFamily="mono">/v1/models</Code>, and{" "}
-          <Code fontFamily="mono">POST /mcp</Code>. Same key works everywhere.
+          Endpoints: <Code fontFamily="mono">/v1/chat/completions</Code> and{" "}
+          <Code fontFamily="mono">/v1/models</Code> (OpenAI),{" "}
+          <Code fontFamily="mono">/v1/messages</Code> (Anthropic — SDKs and
+          Claude Code take the base URL without <Code fontFamily="mono">/v1</Code>{" "}
+          and append the path themselves),{" "}
+          <Code fontFamily="mono">/v1/responses</Code> (OpenAI Responses — only
+          zen models served on the Responses API), and{" "}
+          <Code fontFamily="mono">POST /mcp</Code>. The same key works
+          everywhere, sent as <Code fontFamily="mono">Authorization: Bearer fg-…</Code>{" "}
+          or <Code fontFamily="mono">x-api-key: fg-…</Code>.
         </Text>
       </Section>
 
       <Section title="Pick models">
         <Text fontSize="sm">
-          The <Link asChild><Text as="span">Models page</Text></Link> lists every
-          live model with its exact <Code fontFamily="mono">provider/model</Code>{" "}
-          id (click the id to copy) plus context window, output limit, and
-          reasoning flags. Use that full id as the{" "}
-          <Code fontFamily="mono">model</Code> value in any client.
+          The <PageLink to="/models">Models page</PageLink> lists every model
+          your account can use, with its exact{" "}
+          <Code fontFamily="mono">provider/model</Code> id (copy button next to
+          it), context window, output limit, reasoning flags and effort levels.
+          Use that full id as the <Code fontFamily="mono">model</Code> value in
+          any client.
         </Text>
         <Text fontSize="sm">
           Benchmark scores (Artificial Analysis indexes, Design Arena) come from
-          OpenRouter and refresh with the catalog sync (daily when auto-sync is
-          on); free and stealth models often have none.
+          OpenRouter. They refresh daily when an admin has the catalog auto-sync
+          on, or when an admin presses Sync now; free and stealth models often
+          have none.
         </Text>
         <List.Root fontSize="sm" pl={4}>
           <List.Item>
-            Models with ≥ 1M context take a <Code fontFamily="mono">[1m]</Code>{" "}
-            suffix for Claude Code context accounting — the gateway strips it
-            before calling upstream, and the setup generator adds it
-            automatically.
+            The Claude Code setup generator on the Models page adds a{" "}
+            <Code fontFamily="mono">[1m]</Code> suffix to models with a context
+            window of 1M tokens or more, so Claude Code accounts for the larger
+            context. The gateway strips a trailing{" "}
+            <Code fontFamily="mono">[1m]</Code> from any model id before
+            calling upstream.
           </List.Item>
           <List.Item>
-            A literal <Code fontFamily="mono">claude-*</Code> model name routes
-            to the admin-configured fallback target (handy for Claude Code
-            background tasks).
+            On <Code fontFamily="mono">/v1/messages</Code> only, a bare{" "}
+            <Code fontFamily="mono">claude-*</Code> model name (no{" "}
+            <Code fontFamily="mono">provider/</Code> prefix) is rerouted to the
+            admin-configured Anthropic fallback model — handy for Claude Code
+            background tasks. With no fallback set, it fails with 400.
           </List.Item>
         </List.Root>
       </Section>
@@ -252,66 +267,45 @@ wire_api = "chat"          # the gateway also speaks "responses"`,
         <JsonBlock code={snippets.claudeMcp} title="claude mcp add" copyLabel="copy command" />
       </Section>
 
-      <Section title="opencode">
-        <Text fontSize="sm">
-          Custom provider in <Code fontFamily="mono">~/.config/opencode/opencode.json</Code>{" "}
-          (OpenAI-compatible; the gateway also serves{" "}
-          <Code fontFamily="mono">/v1/responses</Code>):
-        </Text>
-        <JsonBlock code={snippets.opencodeProvider} title="opencode.json" copyLabel="copy provider config" />
-        <Text fontSize="sm">MCP web tools:</Text>
-        <JsonBlock code={snippets.opencodeMcp} title="opencode.json (mcp)" copyLabel="copy mcp config" />
-      </Section>
-
-      <Section title="Codex CLI">
-        <Text fontSize="sm">
-          <Code fontFamily="mono">~/.codex/config.toml</Code> — export{" "}
-          <Code fontFamily="mono">NANO_API_KEY</Code> in your shell:
-        </Text>
-        <JsonBlock code={snippets.codexToml} title="config.toml" copyLabel="copy config" />
-      </Section>
-
-      <Section title="Kilo Code">
-        <Text fontSize="sm">
-          In Kilo Code's provider settings pick <Text as="span" fontWeight="medium">OpenAI
-          Compatible</Text>, set the base URL to{" "}
-          <Code fontFamily="mono">{origin}/v1</Code> and paste your{" "}
-          <Code fontFamily="mono">fg-</Code> key as the API key. For MCP web
-          tools, add this server to <Code fontFamily="mono">~/.config/kilo/kilo.jsonc</Code>:
-        </Text>
-        <JsonBlock code={snippets.kiloMcp} title="kilo.jsonc (mcpServers)" copyLabel="copy config" />
-      </Section>
-
       <Section title="Pi coding agent">
         <Text fontSize="sm">
-          Pi has no built-in custom-endpoint or MCP support — both come from
-          packages. <Text as="span" fontWeight="medium">1. Connect the gateway</Text>{" "}
-          with the OpenAI-compat extension:
+          <Text as="span" fontWeight="medium">1. Connect the gateway.</Text> Pi
+          supports custom endpoints natively — add the gateway as an
+          OpenAI-compatible provider in{" "}
+          <Code fontFamily="mono">~/.pi/agent/models.json</Code>. Pi doesn't
+          discover models from this file, so list each model you want, using
+          the exact id and limits from the{" "}
+          <PageLink to="/models">Models page</PageLink>. Only{" "}
+          <Code fontFamily="mono">id</Code> is required; without{" "}
+          <Code fontFamily="mono">maxTokens</Code> Pi caps output at 16384
+          tokens. Opening <Code fontFamily="mono">/model</Code> reloads the
+          file.
         </Text>
-        <JsonBlock code={snippets.piCompatInstall} title="install compat extension" copyLabel="copy" />
+        <JsonBlock code={snippets.piModels} title="~/.pi/agent/models.json" copyLabel="copy config" />
         <Text fontSize="sm">
-          Then put this in <Code fontFamily="mono">~/.config/pi-openai-compat/config.json</Code>{" "}
-          and restart Pi — its models appear under the custom provider:
+          <Text as="span" fontWeight="medium">2. MCP web tools.</Text> Pi has
+          built-in MCP support — no package needed. Add the server with one
+          command (<Code fontFamily="mono">--exposure direct</Code> offers the
+          tools to the model like built-ins; the default{" "}
+          <Code fontFamily="mono">codemode</Code> only makes them callable from
+          codemode scripts):
         </Text>
-        <JsonBlock code={snippets.piCompatJson} title="pi-openai-compat config.json" copyLabel="copy config" />
+        <JsonBlock code={snippets.piMcpAdd} title="pi mcp add" copyLabel="copy command" />
         <Text fontSize="sm">
-          <Text as="span" fontWeight="medium">2. MCP web tools</Text> via the
-          MCP adapter package (restart Pi after installing):
+          …or write it to <Code fontFamily="mono">~/.pi/agent/mcp.json</Code>{" "}
+          yourself. Check it with <Code fontFamily="mono">pi mcp list</Code> or{" "}
+          <Code fontFamily="mono">/mcp</Code> inside a session. Installing the{" "}
+          <Code fontFamily="mono">pi-mcp-adapter</Code> package replaces this
+          built-in support, so skip it.
         </Text>
-        <JsonBlock code={snippets.piMcpInstall} title="install MCP adapter" copyLabel="copy" />
-        <Text fontSize="sm">
-          Then add the server to <Code fontFamily="mono">~/.config/mcp/mcp.json</Code>{" "}
-          (Pi's global MCP config). Servers are lazy — Pi connects the first
-          time a tool is used; check status with <Code fontFamily="mono">/mcp</Code>:
-        </Text>
-        <JsonBlock code={snippets.piMcpJson} title="~/.config/mcp/mcp.json" copyLabel="copy config" />
+        <JsonBlock code={snippets.piMcpJson} title="~/.pi/agent/mcp.json" copyLabel="copy config" />
       </Section>
 
       <Section title="Anything else (OpenAI-compatible)">
         <Text fontSize="sm">
           Any client speaking OpenAI chat completions works: base URL{" "}
           <Code fontFamily="mono">{origin}/v1</Code>, your key as a Bearer
-          token.
+          token, and a <Code fontFamily="mono">provider/model</Code> id.
         </Text>
         <JsonBlock code={snippets.curl} title="curl" copyLabel="copy" />
       </Section>
@@ -319,16 +313,68 @@ wire_api = "chat"          # the gateway also speaks "responses"`,
       <Section title="MCP web tools">
         <Text fontSize="sm">
           Two tools at <Code fontFamily="mono">{origin}/mcp</Code>:{" "}
-          <Code fontFamily="mono">web_search</Code> (self-hosted SearXNG) and{" "}
+          <Code fontFamily="mono">web_search</Code> (self-hosted SearXNG;{" "}
+          <Code fontFamily="mono">maxResults</Code> 1–25) and{" "}
           <Code fontFamily="mono">web_read</Code> (fast native fetch, with a
           headless-browser fallback for JavaScript-heavy or bot-protected
           pages — set <Code fontFamily="mono">render: true</Code> if a page
-          comes back empty). Private/loopback addresses are refused. Your
-          calls are metered on the Usage page under the{" "}
-          <Code fontFamily="mono">web-tools</Code> provider. The admin must
-          have web tools enabled (Settings → Web tools) — otherwise the
-          endpoint answers 404. Per-client snippets above; any MCP-capable
-          client works the same way.
+          comes back empty; <Code fontFamily="mono">maxChars</Code> limits the
+          text returned). Private, loopback, link-local and other internal
+          addresses are refused, checked after DNS and on every redirect.
+        </Text>
+        <Text fontSize="sm">
+          Your calls are metered on the Usage page under provider{" "}
+          <Code fontFamily="mono">web-tools</Code> (models{" "}
+          <Code fontFamily="mono">web_search</Code> /{" "}
+          <Code fontFamily="mono">web_read</Code>, surface{" "}
+          <Code fontFamily="mono">mcp</Code>). An admin must have web tools
+          enabled in Settings → Web tools (MCP) — otherwise the endpoint
+          answers 404. Any MCP-capable client works the same way.
+        </Text>
+      </Section>
+
+      <Section title="Accounts & keys">
+        <List.Root fontSize="sm" pl={4} gap={1}>
+          <List.Item>
+            Accounts are created by an admin. Google sign-in (when enabled)
+            only works for an email that already has an account — it never
+            creates one. Password sign-in may be switched off by an admin.
+          </List.Item>
+          <List.Item>
+            Only you can create, rename or revoke your own{" "}
+            <Code fontFamily="mono">fg-</Code> keys, in{" "}
+            <PageLink to="/profile">Profile → My API Keys</PageLink>. Admins can
+            see your keys but not change them.
+          </List.Item>
+          <List.Item>
+            If an admin deactivates your account, your sessions end and every
+            one of your keys starts returning 401.
+          </List.Item>
+          <List.Item>
+            The gateway rotates its upstream keys for you: each provider
+            sticks with one healthy key (good for prompt caching) and fails over
+            to the next on errors or rate limits; by default the starting key
+            moves one place each day.
+          </List.Item>
+        </List.Root>
+      </Section>
+
+      <Section title="Usage & caching">
+        <Text fontSize="sm">
+          The <PageLink to="/usage">Usage page</PageLink> shows your requests,
+          errors, tokens, latency and cache hits over any time range, with
+          Overview, Models and Requests tabs (admins also get Users and
+          Users × Models). Every request is listed with its status, the failure
+          reason when it failed, and its token counts.
+        </Text>
+        <Text fontSize="sm">
+          Cached input tokens are reported back to clients:{" "}
+          <Code fontFamily="mono">prompt_tokens_details.cached_tokens</Code> on{" "}
+          <Code fontFamily="mono">/v1/chat/completions</Code>, and{" "}
+          <Code fontFamily="mono">cache_read_input_tokens</Code> on{" "}
+          <Code fontFamily="mono">/v1/messages</Code> (where{" "}
+          <Code fontFamily="mono">input_tokens</Code> excludes the cached part).
+          Whether a request hits the cache is up to the upstream provider.
         </Text>
       </Section>
 

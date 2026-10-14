@@ -33,7 +33,7 @@ func (g *gateway) handleResponses(w http.ResponseWriter, r *http.Request) {
 	}
 	ref, ok := g.providerFor(r, parts[0])
 	if !ok || ref.typ != "opencode" {
-		msg := fmt.Sprintf("store.Provider %q has no Responses API — use /v1/chat/completions", parts[0])
+		msg := fmt.Sprintf("Provider %q has no Responses API — use /v1/chat/completions", parts[0])
 		g.recordClientError(r, parts[0], parts[1], start, http.StatusBadRequest, msg)
 		writeErr(w, http.StatusBadRequest, msg)
 		return
