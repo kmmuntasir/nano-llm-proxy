@@ -9,6 +9,20 @@ Release notes are generated from commit prefixes, so `feat:`, `fix:`,
 
 ## [Unreleased]
 
+## [0.3.0] — 2026-10-15
+
+Local mode: nano-llm-proxy on your own computer, installed with one
+command, with no sign-in, any placeholder key, start at sign-in and its own
+web search. Also bulk key import from a JSON file, clearer web-tools
+diagnostics, and a SearXNG engine list that is finally trimmed.
+
+**Upgrading from 0.2.x:** no migrations; server mode behaves as before.
+`GET /api/auth/config` now always reports `mode`, and the settings document
+gains a `local` section (ignored in server mode). Existing server SearXNG
+installs keep their untrimmed engine list until you edit
+`/etc/searxng/settings.yml` (see Fixed). Local mode was tested end to end on
+Linux and macOS; the Windows installer is new — please report problems.
+
 ### Added
 
 - Local mode: run nano-llm-proxy on your own computer for yourself alone
@@ -68,7 +82,6 @@ Release notes are generated from commit prefixes, so `feat:`, `fix:`,
   and why (e.g. `duckduckgo (CAPTCHA)`).
 - `webTools.obscuraPath` may contain spaces (it is run without a shell);
   macOS keeps local mode's copy under `~/Library/Application Support`.
-
 - Pre-release builds (e.g. `0.3.0-rc.1`) show as `v0.3.0-rc.1` in the
   sidebar, and the About page marks the Unreleased notes as this build;
   `GET /api/about` gains `prerelease`. Only plain `x.y.z` versions were
@@ -361,7 +374,8 @@ instance with no shared pool across replicas; and upstream provider keys
 stored reversibly in the SQLite file, so the database must stay at mode
 `0600` on a host you trust.
 
-[Unreleased]: https://github.com/kmmuntasir/nano-llm-proxy/compare/v0.2.0...HEAD
+[Unreleased]: https://github.com/kmmuntasir/nano-llm-proxy/compare/v0.3.0...HEAD
+[0.3.0]: https://github.com/kmmuntasir/nano-llm-proxy/compare/v0.2.0...v0.3.0
 [0.2.0]: https://github.com/kmmuntasir/nano-llm-proxy/compare/v0.1.1...v0.2.0
 [0.1.1]: https://github.com/kmmuntasir/nano-llm-proxy/compare/v0.1.0...v0.1.1
 [0.1.0]: https://github.com/kmmuntasir/nano-llm-proxy/releases/tag/v0.1.0
