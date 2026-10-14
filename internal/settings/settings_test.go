@@ -39,7 +39,11 @@ func TestRuntimeSettingsValidate(t *testing.T) {
 		{"webtools fetch timeout", func(rs *RuntimeSettings) { rs.WebTools.FetchTimeoutSeconds = 0 }, "Fetch timeout"},
 		{"webtools obscura timeout", func(rs *RuntimeSettings) { rs.WebTools.ObscuraTimeoutSeconds = 2 }, "Obscura timeout"},
 		{"webtools maxchars low", func(rs *RuntimeSettings) { rs.WebTools.MaxChars = 500 }, "Max chars"},
-		{"webtools path whitespace", func(rs *RuntimeSettings) { rs.WebTools.ObscuraPath = "my obscura" }, "Obscura path"},
+		{"webtools path control char", func(rs *RuntimeSettings) { rs.WebTools.ObscuraPath = "bad\npath" }, "Obscura path"},
+		{"webtools path padded", func(rs *RuntimeSettings) { rs.WebTools.ObscuraPath = " obscura" }, "Obscura path"},
+		{"webtools path with spaces ok", func(rs *RuntimeSettings) {
+			rs.WebTools.ObscuraPath = "/Users/me/Library/Application Support/nano-llm-proxy/bin/obscura"
+		}, ""},
 		{"webtools enabled ok", func(rs *RuntimeSettings) { rs.WebTools.Enabled = true }, ""},
 	}
 	for _, tc := range cases {

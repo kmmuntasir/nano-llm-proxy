@@ -9,6 +9,7 @@ import (
 	"net"
 	"net/http"
 	"os"
+	"os/exec"
 	"path/filepath"
 	"runtime"
 	"strconv"
@@ -17,6 +18,7 @@ import (
 	"github.com/kmmuntasir/nano-llm-proxy/internal/config"
 	"github.com/kmmuntasir/nano-llm-proxy/internal/gateway"
 	"github.com/kmmuntasir/nano-llm-proxy/internal/localmode"
+	"github.com/kmmuntasir/nano-llm-proxy/internal/settings"
 	"github.com/kmmuntasir/nano-llm-proxy/internal/store"
 )
 
@@ -27,7 +29,7 @@ import (
 
 const localUsage = `usage:
   nano-llm-proxy local                      run in local mode (foreground)
-  nano-llm-proxy local install [--port N] [--no-autostart] [--no-open] [--quiet]
+  nano-llm-proxy local install [--port N] [--obscura PATH] [--no-autostart] [--no-open] [--quiet]
   nano-llm-proxy local uninstall [--purge]
   nano-llm-proxy local status
   nano-llm-proxy local datadir`
@@ -144,8 +146,12 @@ func localInstall(args []string) error {
 	noAutostart := fs.Bool("no-autostart", false, "don't start at sign-in (run `nano-llm-proxy local` yourself)")
 	noOpen := fs.Bool("no-open", false, "don't open the browser")
 	quiet := fs.Bool("quiet", false, "skip the closing summary (the installers print their own)")
+	obscura := fs.String("obscura", "", "absolute path of the obscura binary web_read should use (the installers pass the one they found or downloaded)")
 	if err := fs.Parse(args); err != nil {
 		return err
+	}
+	if *obscura != "" && !filepath.IsAbs(*obscura) {
+		return fmt.Errorf("--obscura must be an absolute path, got %q", *obscura)
 	}
 	dataDir, err := localmode.DataDir()
 	if err != nil {
@@ -167,10 +173,20 @@ func localInstall(args []string) error {
 	if err != nil {
 		return fmt.Errorf("store: %w", err)
 	}
-	_, err = st.BootstrapLocal(cfg)
+	if _, err = st.BootstrapLocal(cfg); err != nil {
+		err = fmt.Errorf("bootstrap: %w", err)
+	} else if *obscura != "" {
+		// before the services (re)start, so the gateway boots with it
+		var note string
+		if note, err = storeObscuraPath(st, dataDir, *obscura); err != nil {
+			err = fmt.Errorf("save obscura path: %w", err)
+		} else if note != "" {
+			fmt.Println(note)
+		}
+	}
 	st.Close() //nolint:errcheck
 	if err != nil {
-		return fmt.Errorf("bootstrap: %w", err)
+		return err
 	}
 	exe, err := executable()
 	if err != nil {
@@ -220,6 +236,48 @@ nano-llm-proxy is installed (local mode).
 Add your provider keys on the Providers page. Uninstall: nano-llm-proxy local uninstall [--purge]
 `, url, dataDir)
 	return nil
+}
+
+// obscuraPathOwned reports whether the configured obscura path is one the
+// installers may replace: the default bare "obscura" (looked up on PATH,
+// which a background service may not share with the user's shell) or a path
+// inside the data folder (a copy an earlier install downloaded). Any other
+// path is the user's choice and is never overwritten.
+func obscuraPathOwned(current, dataDir string) bool {
+	if current == "" || current == settings.DefaultRuntimeSettings().WebTools.ObscuraPath {
+		return true
+	}
+	if !filepath.IsAbs(current) {
+		return false
+	}
+	rel, err := filepath.Rel(filepath.Clean(dataDir), filepath.Clean(current))
+	return err == nil && rel != "." && filepath.IsLocal(rel)
+}
+
+// storeObscuraPath saves path (absolute) as webTools.obscuraPath when the
+// current value is one obscuraPathOwned allows replacing and the result
+// passes the same validation as a GUI save. A path that can't be stored is
+// not an error — obscura is optional — but comes back as a note to print.
+func storeObscuraPath(st *store.Store, dataDir, path string) (note string, err error) {
+	err = st.UpdateSettings(func(rs *settings.RuntimeSettings) *settings.RuntimeSettings {
+		current := rs.WebTools.ObscuraPath
+		if current == path {
+			return rs
+		}
+		if !obscuraPathOwned(current, dataDir) {
+			// the installers read this line for their summary
+			note = fmt.Sprintf("obscura: keeping your own path %s (Settings > Web tools); %s is not used", current, path)
+			return rs
+		}
+		next := rs.Clone()
+		next.WebTools.ObscuraPath = path
+		if msg := next.Validate(); msg != "" {
+			note = fmt.Sprintf("warning: obscura path %q not saved: %s", path, msg)
+			return rs
+		}
+		return next
+	})
+	return note, err
 }
 
 // enableAndRestart registers + starts a service; one that was already
@@ -311,6 +369,12 @@ func localStatus() error {
 	} else {
 		fmt.Println("Answering:    yes")
 	}
+	if path, ok := configuredObscura(cfg.DBPath); ok {
+		if _, err := exec.LookPath(path); err != nil {
+			path += " (not found)"
+		}
+		fmt.Println("Obscura:     ", path)
+	}
 	for _, name := range []string{"gateway", "searxng"} {
 		installed, running, err := localmode.Status(name)
 		switch {
@@ -323,4 +387,22 @@ func localStatus() error {
 		}
 	}
 	return nil
+}
+
+// configuredObscura reads webTools.obscuraPath; ok=false when there is no
+// database yet (status must not create one) or it can't be read.
+func configuredObscura(dbPath string) (path string, ok bool) {
+	if _, err := os.Stat(dbPath); err != nil {
+		return "", false
+	}
+	st, err := store.OpenStore(dbPath)
+	if err != nil {
+		return "", false
+	}
+	defer st.Close() //nolint:errcheck
+	rs, err := st.LoadRuntimeSettings()
+	if err != nil {
+		return "", false
+	}
+	return rs.WebTools.ObscuraPath, true
 }

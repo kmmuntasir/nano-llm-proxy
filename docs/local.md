@@ -21,7 +21,7 @@ mode differs.
 | Data | `gateway.db` and `.env` in the working directory | a per-user data folder (see [Where files live](#where-files-live)) |
 | First boot | needs `ADMIN_EMAIL` / `ADMIN_PASSWORD` | needs nothing |
 | Runs as | a systemd system service (`deploy.sh`, root) | a per-user background service, started at sign-in |
-| Web tools | off until `scripts/install-web-tools.sh` (root) | on, with a per-user SearXNG on `127.0.0.1:8899` (Linux/macOS) |
+| Web tools | off until `scripts/install-web-tools.sh` (root) | on, with a per-user SearXNG on `127.0.0.1:8899` (Linux/macOS) and obscura (your own, or a per-user copy) |
 | Extra request guards | Origin check on GUI mutations | also a Host check on every route, and Origin + JSON `Content-Type` checks on `/v1/*` and `/mcp` |
 | Users page | yes | hidden |
 
@@ -29,7 +29,9 @@ mode differs.
 
 No admin rights, no `sudo`. The installer downloads the release for your
 OS and CPU, checks its SHA-256 against the release's `checksums.txt`, and
-refuses to install on a mismatch.
+refuses to install on a mismatch. It also sets up
+[obscura](#page-rendering-obscura) for `web_read`, unless you already have
+one.
 
 macOS, Linux, WSL (bash):
 
@@ -64,6 +66,7 @@ bash: pass options after `bash -s --`, for example
 | `--version vX.Y.Z` | install this release instead of the latest (also `NANO_INSTALL_VERSION`) |
 | `--port N` | serve the GUI and API on port N, 1024–65535 (default 8787) |
 | `--no-search` | skip the SearXNG web-search setup |
+| `--no-obscura` | skip obscura, the headless browser `web_read` uses for JavaScript-heavy pages |
 | `--no-autostart` | don't start nano-llm-proxy at sign-in (start it yourself) |
 | `--no-open` | don't open the browser at the end |
 | `--uninstall` | remove the background services and the binary |
@@ -83,6 +86,7 @@ $env:NANO_INSTALL_PORT = 9000; irm https://github.com/kmmuntasir/nano-llm-proxy/
 | --- | --- |
 | `-Version vX.Y.Z` | `NANO_INSTALL_VERSION` |
 | `-Port N` | `NANO_INSTALL_PORT` |
+| `-NoObscura` | `NANO_INSTALL_NO_OBSCURA=1` |
 | `-NoAutostart` | `NANO_INSTALL_NO_AUTOSTART=1` |
 | `-NoOpen` | `NANO_INSTALL_NO_OPEN=1` |
 | `-Uninstall` | `NANO_INSTALL_UNINSTALL=1` |
@@ -107,9 +111,12 @@ no `-NoSearch`.
      `*.bak`. That folder is added to your user `PATH`.
 3. Linux/macOS only, unless `--no-search`: sets up SearXNG in the data
    folder (see [Web search](#web-search)).
-4. Runs `nano-llm-proxy local install`, which creates the database, registers
-   the background services, starts them, waits for `/health`, opens the
-   browser, and prints the URLs.
+4. Unless `--no-obscura` (`-NoObscura`): uses the `obscura` on your `PATH`,
+   or downloads the pinned obscura release into `<data folder>/bin` (see
+   [Page rendering](#page-rendering-obscura)).
+5. Runs `nano-llm-proxy local install`, which creates the database, saves
+   the obscura path, registers the background services, starts them, waits
+   for `/health`, opens the browser, and prints the URLs.
 
 Nothing outside your home folder (`%LOCALAPPDATA%` and `HKCU` on Windows) is
 touched.
@@ -132,6 +139,7 @@ nano-llm-proxy/
 ├── gateway.db-wal, -shm  # SQLite WAL files
 ├── .env                  # optional bootstrap overrides, e.g. NANO_PORT (0600)
 ├── nano-llm-proxy.log    # the gateway's log (0600)
+├── bin/                  # obscura + obscura-worker (.exe on Windows), when the installer downloaded them
 └── searxng/              # Linux/macOS, when web search is set up
     ├── src/              # SearXNG checkout (pinned commit)
     ├── venv/             # its Python environment
@@ -235,13 +243,35 @@ On Windows there is no SearXNG setup. Set the URL of a SearXNG you can reach
 in **Settings → Web tools** (its JSON API must be on). `web_read` works
 without it.
 
+`web_read` refuses loopback and private addresses in local mode too, so it
+can't read pages served from your own machine.
+
+### Page rendering (obscura)
+
 `web_read` fetches pages natively and escalates to the
 [obscura](https://github.com/h4ckf0r0day/obscura) headless browser for
-JavaScript-heavy pages. The installer doesn't install obscura; if you
-install it, set its absolute path in **Settings → Web tools** (the
-background service may not have your shell's `PATH`). `web_read` refuses
-loopback and private addresses in local mode too, so it can't read pages
-served from your own machine.
+JavaScript-heavy pages. Without obscura, `web_read` still reads ordinary
+pages; only JavaScript-heavy ones fail.
+
+The installer, unless `--no-obscura` (`-NoObscura`):
+
+1. Uses your own obscura if one is on your `PATH`
+   (`using your obscura at <path>`). It never modifies or deletes it.
+2. Otherwise keeps the copy in `<data folder>/bin` if it is already the
+   pinned version (v0.2.4), or downloads the pinned stealth build for your
+   OS and CPU (about 75 MB): `obscura` and `obscura-worker`. obscura
+   publishes no checksums file, so the installer carries the SHA-256 of each
+   archive and refuses one that doesn't match. Windows gets the x86_64
+   build; there is no Windows arm64 build.
+3. If the download fails, warns and carries on without it. Re-run the
+   installer later to add it.
+
+The background service may not have your shell's `PATH` (systemd user units
+and launchd agents use a minimal one), so the installer saves the absolute
+path it settled on as **Settings → Web tools → Obscura path**. It only
+replaces the default (`obscura`) or a path inside the data folder that an
+earlier install saved. A path you set yourself is kept, and the installer
+says so. The closing summary shows the path in use.
 
 ## Changing the port
 
@@ -260,7 +290,7 @@ your agents' base URLs after a change.
 
 ```text
 nano-llm-proxy local                      run in local mode (foreground)
-nano-llm-proxy local install [--port N] [--no-autostart] [--no-open] [--quiet]
+nano-llm-proxy local install [--port N] [--obscura PATH] [--no-autostart] [--no-open] [--quiet]
 nano-llm-proxy local uninstall [--purge]
 nano-llm-proxy local status
 nano-llm-proxy local datadir
@@ -273,14 +303,19 @@ nano-llm-proxy local datadir
 - `local install` is what the installers run: it creates the database,
   registers and starts the background services (restarting running ones, so
   an upgrade runs the new binary), and opens the browser. `--port` writes
-  `NANO_PORT` to the data folder's `.env`; `--quiet` skips its closing
+  `NANO_PORT` to the data folder's `.env`; `--obscura PATH` (absolute)
+  saves the obscura path under the rule in
+  [Page rendering](#page-rendering-obscura); `--quiet` skips its closing
   summary (the installers print their own).
 - `local uninstall` removes the background services and their sign-in
   entries. `--purge` also deletes the data folder: the database with your
-  provider keys, the log, SearXNG. The binary stays; the installers'
+  provider keys, the log, SearXNG, and the downloaded obscura in `bin/`. An
+  obscura of your own, outside the data folder, is never touched. The binary stays; the installers'
   `--uninstall` removes it too.
 - `local status` prints the data folder, the address, whether it answers on
-  `/health`, and each service's sign-in registration and running state.
+  `/health`, the configured obscura path (`(not found)` when it can't be
+  run from this shell), and each service's sign-in registration and running
+  state.
 - `local datadir` prints the data folder (creating it if needed).
 
 ## Security model
@@ -316,7 +351,8 @@ computer:
 
 Re-run the installer. It downloads the latest release (or `--version`),
 keeps the previous binary as `.bak`, and restarts the running background
-instance on the new binary. Your data folder, settings and SearXNG are kept.
+instance on the new binary. Your data folder, settings and SearXNG are kept;
+obscura is downloaded again only when the pinned version changed.
 On Windows it stops the running copies first, since Windows locks a running
 `.exe`.
 
@@ -346,6 +382,7 @@ add `--purge` (`NANO_INSTALL_PURGE=1`) to delete it as well.
 | `401 Invalid or missing API key` | **Require an API key** is on: use a key from Profile → My API Keys |
 | `401 The built-in local key is disabled` | enable `local (no key)` in Profile → My API Keys, or send a real key |
 | `web_search` fails | Settings → This computer shows whether SearXNG is installed and running; its log is `searxng/searxng.log` and the setup log `searxng/install.log` in the data folder |
+| `web_read` fails on JavaScript-heavy pages | `nano-llm-proxy local status` shows the obscura path; **Settings → Web tools** can test it. Re-run the installer (without `--no-obscura`) to add or fix it |
 | `nano-llm-proxy: command not found` | add `~/.local/bin` to `PATH` (the installer printed the line), or open a new terminal on Windows |
 | Service details (Linux) | `systemctl --user status nano-llm-proxy`, `journalctl --user -u nano-llm-proxy` |
 | Service details (macOS) | `launchctl print gui/$(id -u)/dev.nano-llm-proxy` |

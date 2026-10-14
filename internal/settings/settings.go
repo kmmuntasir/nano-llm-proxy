@@ -6,6 +6,7 @@ import (
 	"net/url"
 	"slices"
 	"strings"
+	"unicode"
 )
 
 // ReasoningOption is one entry of a model's reasoning_options list, mirroring
@@ -395,11 +396,12 @@ func (rs *RuntimeSettings) Validate() string {
 	if wt.MaxChars < 1000 || wt.MaxChars > 200000 {
 		return "Max chars must be between 1000 and 200000"
 	}
-	// ObscuraPath is exec'd (argv-only, never through a shell) — whitespace
-	// or control characters would mean a broken path, not an injection, but
-	// reject them early with a clear message.
-	if wt.ObscuraPath == "" || strings.ContainsAny(wt.ObscuraPath, " \t\r\n\x00") {
-		return "Obscura path must be a non-empty path without whitespace"
+	// ObscuraPath is exec'd argv-only (never through a shell), so spaces are
+	// safe — and needed: macOS keeps local mode's copy under "~/Library/
+	// Application Support". Control characters or surrounding blanks still
+	// mean a broken path; reject them early with a clear message.
+	if p := wt.ObscuraPath; p == "" || p != strings.TrimSpace(p) || strings.ContainsFunc(p, unicode.IsControl) {
+		return "Obscura path must be a non-empty path without control characters or surrounding spaces"
 	}
 	return ""
 }

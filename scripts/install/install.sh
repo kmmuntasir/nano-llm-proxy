@@ -11,13 +11,18 @@
 #   2. installs the binary to ~/.local/bin/nano-llm-proxy (the previous one is
 #      kept as nano-llm-proxy.bak);
 #   3. optionally sets up a private SearXNG (web search) in the data folder;
-#   4. runs `nano-llm-proxy local install`, which registers the background
+#   4. uses your obscura (the headless browser web_read uses for JavaScript-
+#      heavy pages) if one is on PATH, else downloads the pinned release into
+#      the data folder and checks its SHA-256;
+#   5. runs `nano-llm-proxy local install`, which registers the background
 #      services, starts them and opens the browser.
 #
 # Re-running upgrades in place. Nothing outside your home folder is touched.
 #
 # Test overrides: NANO_INSTALL_BASE_URL (a directory URL holding the archives
-# and checksums.txt; skips GitHub), NANO_INSTALL_VERSION (same as --version).
+# and checksums.txt; skips GitHub), NANO_INSTALL_VERSION (same as --version),
+# NANO_INSTALL_OBSCURA_BASE_URL (a directory URL holding the obscura archives;
+# they must still match the pinned hashes below).
 
 set -euo pipefail
 
@@ -30,6 +35,22 @@ BIN="$BIN_DIR/nano-llm-proxy"
 SEARXNG_REF="${SEARXNG_REF:-d8ae3abd59b6cb3970e3380e484c7d4cd8529619}"
 SEARXNG_REPO="https://github.com/searxng/searxng.git"
 SEARXNG_PORT=8899
+
+# v0.2.4 rather than the server script's v0.2.3: both publish the Linux,
+# macOS and Windows builds local mode needs, and v0.2.4 adds SSRF-gate and
+# frame-teardown crash fixes. obscura publishes no checksums file, so the
+# SHA-256 of each stealth archive is pinned here (taken from the GitHub
+# release's asset digests); a bump must update all of them, and install.ps1.
+OBSCURA_VERSION="v0.2.4"
+OBSCURA_REPO="https://github.com/h4ckf0r0day/obscura"
+obscura_sha256() { # asset — the pinned hash, empty for an unknown asset
+    case "$1" in
+        obscura-x86_64-linux-stealth.tar.gz) echo 49b53f74a509764c42a35c8e73a37301399e1500d43564fad4cb641721efc753 ;;
+        obscura-aarch64-linux-stealth.tar.gz) echo 56eacea66e4a5b0ab0f39343183c308816b426f604259b9cc41402488bf998f7 ;;
+        obscura-x86_64-macos-stealth.tar.gz) echo 0fff3953a0484f505bc4445e8fab3d718084c7d0bd704dc05d2958e49b1ad4c7 ;;
+        obscura-aarch64-macos-stealth.tar.gz) echo 183ce21fc9caf421c4e027cd8043970224a24d9921d8bf27105153ca74f0e3ae ;;
+    esac
+}
 
 # --- output -----------------------------------------------------------------
 
@@ -53,6 +74,8 @@ Options:
   --version vX.Y.Z   install this release instead of the latest
   --port N           serve the GUI and API on port N (default 8787)
   --no-search        skip the local SearXNG web-search setup
+  --no-obscura       skip obscura (the headless browser web_read uses for
+                     JavaScript-heavy pages)
   --no-autostart     do not start nano-llm-proxy when you sign in
   --no-open          do not open the browser at the end
   --uninstall        stop and remove the services and the binary
@@ -66,6 +89,7 @@ EOF
 VERSION="${NANO_INSTALL_VERSION:-}"
 PORT=""
 NO_SEARCH=0
+NO_OBSCURA=0
 NO_AUTOSTART=0
 NO_OPEN=0
 UNINSTALL=0
@@ -79,6 +103,7 @@ parse_args() {
             --port) [[ $# -ge 2 ]] || die "--port needs a value"; PORT="$2"; shift ;;
             --port=*) PORT="${1#*=}" ;;
             --no-search) NO_SEARCH=1 ;;
+            --no-obscura) NO_OBSCURA=1 ;;
             --no-autostart) NO_AUTOSTART=1 ;;
             --no-open) NO_OPEN=1 ;;
             --uninstall) UNINSTALL=1 ;;
@@ -410,6 +435,110 @@ setup_search() {
     SEARCH_STATUS="on (local SearXNG, 127.0.0.1:$SEARXNG_PORT)"
 }
 
+# --- obscura (optional page rendering for web_read) ---------------------------
+
+OBSCURA_PATH=""   # absolute path handed to `local install --obscura`
+OBSCURA_STATUS=""
+
+obscura_version_of() { # bin — prints e.g. 0.2.4 ("obscura 0.2.4"), empty if it won't run
+    "$1" --version 2>/dev/null | awk 'NR == 1 { print $2 }' || true
+}
+
+# The user's own obscura on PATH, as an absolute path. One inside our data
+# folder doesn't count: that copy is ours to upgrade.
+find_user_obscura() {
+    local p dir
+    p=$(command -v obscura 2>/dev/null) || return 1
+    [[ $p == /* ]] || p="$(cd "$(dirname "$p")" && pwd)/$(basename "$p")"
+    dir=$(dirname "$p")
+    [[ $dir != "$DATADIR/bin" ]] || return 1
+    printf '%s\n' "$p"
+}
+
+# Called inside `if`, where set -e is off: every step returns explicitly.
+download_obscura() { # bindir
+    local arch os asset expected actual url x="$TMP/obscura"
+    case "$ARCH" in amd64) arch=x86_64 ;; arm64) arch=aarch64 ;; esac
+    case "$OS" in linux) os=linux ;; darwin) os=macos ;; esac
+    asset="obscura-$arch-$os-stealth.tar.gz"
+    expected=$(obscura_sha256 "$asset")
+    [[ -n $expected ]] || { warn "no pinned obscura build for $os/$arch"; return 1; }
+    url="${NANO_INSTALL_OBSCURA_BASE_URL:-$OBSCURA_REPO/releases/download/$OBSCURA_VERSION}"
+    url="${url%/}/$asset"
+
+    say "  downloading obscura $OBSCURA_VERSION ($os/$arch, about 75 MB)"
+    rm -rf "$x" && mkdir -p "$x" || return 1
+    curl -fsSL --retry 3 -o "$x/$asset" "$url" || { warn "download failed: $url"; return 1; }
+    actual=$(sha256_of "$x/$asset")
+    if [[ $actual != "$expected" ]]; then
+        warn "checksum mismatch for $asset; not installing it (expected $expected, got $actual)"
+        return 1
+    fi
+    tar -xzf "$x/$asset" -C "$x" || { warn "could not unpack $asset"; return 1; }
+    [[ -f "$x/obscura" ]] || { warn "$asset does not contain obscura"; return 1; }
+
+    mkdir -p "$1" || return 1
+    # .new + mv: a fetch running the old copy keeps its file until it exits
+    cp "$x/obscura" "$1/obscura.new" && chmod 755 "$1/obscura.new" \
+        && mv -f "$1/obscura.new" "$1/obscura" || return 1
+    if [[ -f "$x/obscura-worker" ]]; then
+        cp "$x/obscura-worker" "$1/obscura-worker.new" && chmod 755 "$1/obscura-worker.new" \
+            && mv -f "$1/obscura-worker.new" "$1/obscura-worker" || return 1
+    else
+        rm -f "$1/obscura-worker" # never pair a new obscura with an old worker
+    fi
+    rm -rf "$x"
+}
+
+setup_obscura() {
+    if [[ $NO_OBSCURA -eq 1 ]]; then
+        OBSCURA_STATUS="not installed (--no-obscura)"
+        return 0
+    fi
+    local p bindir="$DATADIR/bin" want="${OBSCURA_VERSION#v}" have
+    if p=$(find_user_obscura); then
+        say "Page rendering: using your obscura at $p"
+        OBSCURA_PATH="$p"
+        OBSCURA_STATUS="$p (yours)"
+        return 0
+    fi
+
+    have=$(obscura_version_of "$bindir/obscura")
+    if [[ $have == "$want" ]]; then
+        say "Page rendering: obscura $want already installed"
+    else
+        say "Page rendering: installing obscura (the headless browser web_read uses for JavaScript-heavy pages)"
+        if ! download_obscura "$bindir"; then
+            if [[ -n $have ]]; then
+                warn "keeping the obscura $have already in $bindir"
+            else
+                warn "obscura skipped: web_read still reads ordinary pages, only JavaScript-heavy ones fail"
+                warn "re-run the installer later to add it"
+                OBSCURA_STATUS="not installed (download failed)"
+                return 0
+            fi
+        else
+            have=$(obscura_version_of "$bindir/obscura")
+            if [[ -z $have ]]; then
+                rm -f "$bindir/obscura" "$bindir/obscura-worker"
+                warn "the downloaded obscura does not run on this machine; removed it"
+                warn "web_read still reads ordinary pages, only JavaScript-heavy ones fail"
+                OBSCURA_STATUS="not installed (does not run here)"
+                return 0
+            fi
+        fi
+    fi
+    OBSCURA_PATH="$bindir/obscura"
+    OBSCURA_STATUS="$OBSCURA_PATH (obscura $have)"
+}
+
+# --obscura arrived with this installer; an older --version binary lacks it.
+binary_takes_obscura() {
+    local help
+    help=$("$BIN" local help 2>/dev/null) || return 1
+    [[ $help == *"--obscura"* ]]
+}
+
 # --- local install / summary -------------------------------------------------
 
 current_port() { # the port from <datadir>/.env, else the default
@@ -426,8 +555,25 @@ run_local_install() {
     [[ -z $PORT ]] || args+=(--port "$PORT")
     [[ $NO_AUTOSTART -eq 0 ]] || args+=(--no-autostart)
     [[ $NO_OPEN -eq 0 ]] || args+=(--no-open)
+    if [[ -n $OBSCURA_PATH ]]; then
+        if binary_takes_obscura; then
+            args+=(--obscura "$OBSCURA_PATH")
+        else
+            warn "nano-llm-proxy v$VER can't be told where obscura is; set Settings > Web tools > Obscura path to $OBSCURA_PATH"
+        fi
+    fi
     say "Starting nano-llm-proxy"
-    "$BIN" "${args[@]}" || die "'nano-llm-proxy ${args[*]}' failed (see the message above)"
+    # tee: show its output as it comes, and keep it for the summary
+    "$BIN" "${args[@]}" | tee "$TMP/local-install.out" \
+        || die "'nano-llm-proxy ${args[*]}' failed (see the message above)"
+    # a path the user set in Settings wins over ours (see `local install --obscura`)
+    local kept
+    kept=$(sed -n 's/^obscura: keeping your own path \(.*\) (Settings > Web tools).*$/\1/p' \
+        "$TMP/local-install.out")
+    [[ -z $kept ]] || OBSCURA_STATUS="$kept (yours, set in Settings > Web tools)"
+    if grep -q '^warning: obscura path .* not saved' "$TMP/local-install.out"; then
+        OBSCURA_STATUS="$OBSCURA_PATH (installed, but not saved to Settings: see the warning above)"
+    fi
 }
 
 summary() {
@@ -444,6 +590,7 @@ nano-llm-proxy v$VER is installed.
   API key:              any placeholder (e.g. "local") unless you turn on
                         "Require an API key" in Settings
   Web search:           $SEARCH_STATUS
+  obscura:              $OBSCURA_STATUS
   Binary:               $BIN
   Data folder:          $DATADIR
 
@@ -501,6 +648,7 @@ main() {
         || die "'nano-llm-proxy local datadir' failed (v$VER may predate local mode)"
 
     setup_search
+    setup_obscura
     run_local_install
     summary
     path_hint

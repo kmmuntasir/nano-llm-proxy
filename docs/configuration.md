@@ -97,7 +97,8 @@ Ranges enforced on save: `maxKeysPerRequest` 1–100, `cooldownSeconds`
 `webTools.obscuraConcurrency` 1–8, `webTools.fetchTimeoutSeconds` 1–120,
 `webTools.obscuraTimeoutSeconds` 5–300, `webTools.maxChars` 1000–200000,
 `webTools.searxngUrl` an http(s) URL with a host, `webTools.obscuraPath`
-non-empty without whitespace, every `newUsers.disabledProviderIds` entry a
+non-empty with no control characters or surrounding spaces (spaces inside
+are fine), every `newUsers.disabledProviderIds` entry a
 positive integer.
 
 Base URLs are **not** part of this document — providers (and their base
