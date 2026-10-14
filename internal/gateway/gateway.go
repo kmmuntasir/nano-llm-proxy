@@ -63,6 +63,7 @@ type gateway struct {
 	client   *http.Client
 	webtools *webtools.Service // /mcp tool backends (SearXNG + native/obscura reader)
 	google   *googleVerifier   // Google sign-in ID-token verifier; nil when not configured
+	keyCheck keyVerifier       // upstream key verification before save (keycheck.go); nil = skip
 
 	mcpOnce    sync.Once    // builds mcpHandler exactly once
 	mcpHandler http.Handler // SDK streamable-HTTP handler behind /mcp
@@ -112,6 +113,7 @@ func newGateway(cfg *config.Config, rs *settings.RuntimeSettings, kf *config.Key
 func NewGatewayFromStore(cfg *config.Config, rs *settings.RuntimeSettings, st *store.Store) (*gateway, error) {
 	g := newGateway(cfg, rs, &config.KeyFile{})
 	g.store = st
+	g.keyCheck = g.verifyUpstreamKey
 	if err := g.rebuildPools(); err != nil {
 		return nil, err
 	}

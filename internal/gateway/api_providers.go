@@ -210,6 +210,21 @@ func (g *gateway) handleCreateProvider(w http.ResponseWriter, r *http.Request) {
 		}
 		pks = append(pks, store.ProviderKey{Key: key, Label: label})
 	}
+	seen := make(map[string]string, len(pks))
+	for _, k := range pks {
+		if first, dup := seen[k.Key]; dup {
+			apiErr(w, http.StatusBadRequest, fmt.Sprintf("Keys %q and %q are the same upstream key", first, k.Label))
+			return
+		}
+		seen[k.Key] = k.Label
+	}
+	// verify every key against the new provider's endpoints before creating
+	// anything (keycheck.go); the first failing key is named by its label
+	for _, k := range pks {
+		if !g.checkProviderKey(w, r, name, baseURL, anthropicURL, k.Key, fmt.Sprintf("Key %q", k.Label)) {
+			return
+		}
+	}
 	if !g.applyMutation(w, actor, "provider.create", "A provider with this name already exists", func() error { return g.store.CreateProvider(p, pks) }) {
 		return
 	}
@@ -325,6 +340,7 @@ func (g *gateway) handleAddProviderKey(w http.ResponseWriter, r *http.Request) {
 	if !readJSON(w, r, &req) {
 		return
 	}
+	req.Key = strings.TrimSpace(req.Key) // pasted keys often carry a newline
 	if req.Key == "" {
 		apiErr(w, http.StatusBadRequest, "The upstream API key is required")
 		return
@@ -332,6 +348,23 @@ func (g *gateway) handleAddProviderKey(w http.ResponseWriter, r *http.Request) {
 	label, ok := sanitizeKeyLabel(req.Label)
 	if !ok {
 		apiErr(w, http.StatusBadRequest, fmt.Sprintf("A label is required for every upstream API key (1-%d characters)", maxKeyLabelLen))
+		return
+	}
+	// the store doesn't enforce key uniqueness, and a duplicate would get
+	// double weight in rotation — refuse it before spending upstream probes
+	existing, err := g.store.ListProviderKeys(id)
+	if err != nil {
+		apiErr(w, http.StatusInternalServerError, err.Error())
+		return
+	}
+	for _, k := range existing {
+		if k.Key == req.Key {
+			apiErr(w, http.StatusConflict, fmt.Sprintf("This upstream key is already on this provider (as %q)", k.Label))
+			return
+		}
+	}
+	// verify against the provider's endpoints before saving (keycheck.go)
+	if !g.checkProviderKey(w, r, p.Name, p.BaseURL, p.AnthropicBaseURL, req.Key, fmt.Sprintf("Key %q", label)) {
 		return
 	}
 	var pk store.ProviderKey

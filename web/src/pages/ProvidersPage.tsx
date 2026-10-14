@@ -201,7 +201,7 @@ function AddProviderCard({ added }: { added: Set<string> }) {
                 onChange={(e) => setKeyLabel(e.target.value)}
               />
             </Field.Root>
-            <Button type="submit" colorPalette="blue" loading={create.isPending}>
+            <Button type="submit" colorPalette="blue" loading={create.isPending} loadingText="Verifying keys…">
               <Plus /> Add
             </Button>
           </HStack>
@@ -947,7 +947,7 @@ function ProviderCard({ p }: { p: ProviderView }) {
                         fontFamily="mono"
                       />
                     </Field.Root>
-                    <Button size="2xs" type="submit" loading={addKey.isPending}>
+                    <Button size="2xs" type="submit" loading={addKey.isPending} loadingText="Verifying…">
                       <Plus /> Add key
                     </Button>
                   </HStack>

@@ -9,8 +9,22 @@ Release notes are generated from commit prefixes, so `feat:`, `fix:`,
 
 ## [Unreleased]
 
+### Added
+
+- New upstream keys are verified before they are saved. Each key — added to
+  a provider or among a new provider's initial keys — is probed against
+  every endpoint the provider has (OpenAI and/or Anthropic): the model list
+  plus a one-token call for a nonexistent model, so no inference runs and no
+  quota is spent. An upstream 401/403 refuses the key with a 400 naming its
+  label; an unreachable upstream refuses it with a 503. Pasted keys are
+  trimmed of surrounding whitespace.
+
 ### Fixed
 
+- The same upstream key can no longer be added to a provider twice (409),
+  nor appear twice among a new provider's initial keys (400). Nothing
+  enforced it before, despite the existing "already on this provider"
+  message; a duplicate got double weight in key rotation.
 - zen free models work again (2026-10-14). Zen's free-tier gate now
   requires opencode 2.0.29's inference path and real tool schemas: requests
   to `/zen/v1`, or whose `shell`/`read` tools carry empty parameter schemas,

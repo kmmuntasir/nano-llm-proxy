@@ -45,6 +45,9 @@ func testStoreGateway(t *testing.T, upURL string) (*gateway, *store.Store) {
 	if err != nil {
 		t.Fatalf("newGatewayFromStore: %v", err)
 	}
+	// tests use made-up upstream URLs and must stay offline; key
+	// verification is exercised against mock upstreams in keycheck_test.go
+	g.keyCheck = nil
 	return g, st
 }
 
