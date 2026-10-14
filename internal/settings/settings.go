@@ -4,6 +4,7 @@ import (
 	"fmt"
 	"maps"
 	"net/url"
+	"slices"
 	"strings"
 )
 
@@ -192,6 +193,19 @@ type RuntimeSettings struct {
 	Zai       ZaiSettings       `json:"zai"`
 	WebTools  WebToolsSettings  `json:"webTools"`
 	Auth      AuthSettings      `json:"auth"`
+	NewUsers  NewUserSettings   `json:"newUsers"`
+}
+
+// NewUserSettings holds the defaults applied once, when an admin creates an
+// account with the "user" role. Existing users are never touched by a change
+// here — per-user access stays the Users page's job.
+type NewUserSettings struct {
+	// DisabledProviderIDs are the providers a new regular user starts
+	// without (a user_provider_access deny row each). Empty = every
+	// provider. Always serialized as [] (never null) so the GUI can treat it
+	// as a list. Ids of providers deleted since are tolerated: the gateway
+	// prunes them on read and save, and user creation skips them.
+	DisabledProviderIDs []int64 `json:"disabledProviderIds"`
 }
 
 // AuthSettings controls GUI sign-in methods. Google sign-in is on whenever
@@ -220,8 +234,9 @@ func DefaultRuntimeSettings() *RuntimeSettings {
 			InjectTools: true,
 			ModelMeta:   map[string]ModelMeta{},
 		},
-		Kilo: KiloSettings{},
-		Zai:  ZaiSettings{ModelMeta: map[string]ModelMeta{}},
+		Kilo:     KiloSettings{},
+		Zai:      ZaiSettings{ModelMeta: map[string]ModelMeta{}},
+		NewUsers: NewUserSettings{DisabledProviderIDs: []int64{}},
 		WebTools: WebToolsSettings{
 			// Enabled stays false: web tools are opt-in so an upgrade never
 			// implies a working SearXNG/obscura install.
@@ -258,6 +273,14 @@ func (rs *RuntimeSettings) ApplyDefaults() *RuntimeSettings {
 	if rs.Zai.ModelMeta == nil {
 		rs.Zai.ModelMeta = map[string]ModelMeta{}
 	}
+	// sorted + de-duplicated so the stored document is canonical; a
+	// non-positive id survives this for Validate to reject
+	ids := slices.Clone(rs.NewUsers.DisabledProviderIDs)
+	if ids == nil {
+		ids = []int64{}
+	}
+	slices.Sort(ids)
+	rs.NewUsers.DisabledProviderIDs = slices.Compact(ids)
 	wt := &rs.WebTools
 	if wt.SearXNGURL == "" {
 		wt.SearXNGURL = DefaultSearXNGURL
@@ -325,6 +348,11 @@ func (rs *RuntimeSettings) Validate() string {
 			return fmt.Sprintf("Z.ai model meta for %q: max output tokens must be a positive integer", id)
 		}
 	}
+	for _, id := range rs.NewUsers.DisabledProviderIDs {
+		if id <= 0 {
+			return fmt.Sprintf("New-user disabled provider id %d must be a positive integer", id)
+		}
+	}
 	wt := rs.WebTools
 	if wt.ReaderMode != ReaderFast && wt.ReaderMode != ReaderRender {
 		return fmt.Sprintf("Web tools reader mode %q must be %q or %q", wt.ReaderMode, ReaderFast, ReaderRender)
@@ -362,5 +390,9 @@ func (rs *RuntimeSettings) Clone() *RuntimeSettings {
 	maps.Copy(out.Zen.ModelMeta, rs.Zen.ModelMeta)
 	out.Zai.ModelMeta = make(map[string]ModelMeta, len(rs.Zai.ModelMeta))
 	maps.Copy(out.Zai.ModelMeta, rs.Zai.ModelMeta)
+	out.NewUsers.DisabledProviderIDs = slices.Clone(rs.NewUsers.DisabledProviderIDs)
+	if out.NewUsers.DisabledProviderIDs == nil {
+		out.NewUsers.DisabledProviderIDs = []int64{}
+	}
 	return &out
 }

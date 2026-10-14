@@ -18,6 +18,10 @@ func (g *gateway) handleGetSettings(w http.ResponseWriter, r *http.Request) {
 		apiErr(w, http.StatusInternalServerError, err.Error())
 		return
 	}
+	if err := g.pruneNewUserProviders(rs); err != nil {
+		apiErr(w, http.StatusInternalServerError, err.Error())
+		return
+	}
 	writeJSON(w, http.StatusOK, map[string]any{"settings": rs})
 }
 
@@ -52,6 +56,12 @@ func (g *gateway) handlePutSettings(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	rs.Zen.ModelMetaSyncStatus = cur.Zen.ModelMetaSyncStatus
+	// new-user defaults need no pool rebuild (they only matter at user
+	// creation), but stale ids are dropped so the GUI can always re-save
+	if err := g.pruneNewUserProviders(rs); err != nil {
+		apiErr(w, http.StatusInternalServerError, err.Error())
+		return
+	}
 	if !g.applyMutation(w, actor, "settings.update", "", func() error {
 		if err := g.store.SaveRuntimeSettings(rs); err != nil {
 			return err
@@ -124,4 +134,33 @@ func (g *gateway) credentialOffBlocked(actor *store.User) string {
 		return "Password sign-in can't be disabled: your account (" + actor.Email + ") is outside the " + d + " Google domain, so it would lock you out"
 	}
 	return ""
+}
+
+// pruneNewUserProviders drops ids of providers that no longer exist from the
+// new-user defaults. Deleting a provider doesn't rewrite the settings
+// document, so its id may linger there; provider ids are AUTOINCREMENT and
+// never reused, so a stale id can never come to mean a different provider —
+// it is just noise, filtered on read and on save so neither ever fails on it.
+func (g *gateway) pruneNewUserProviders(rs *settings.RuntimeSettings) error {
+	ids := rs.NewUsers.DisabledProviderIDs
+	if len(ids) == 0 {
+		rs.NewUsers.DisabledProviderIDs = []int64{}
+		return nil
+	}
+	provs, err := g.store.ListProviders()
+	if err != nil {
+		return err
+	}
+	exists := make(map[int64]bool, len(provs))
+	for _, p := range provs {
+		exists[p.ID] = true
+	}
+	kept := make([]int64, 0, len(ids))
+	for _, id := range ids {
+		if exists[id] {
+			kept = append(kept, id)
+		}
+	}
+	rs.NewUsers.DisabledProviderIDs = kept
+	return nil
 }

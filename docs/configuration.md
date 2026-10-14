@@ -57,6 +57,7 @@ block is server-owned).
 | `kilo.modelMeta` | empty | Per-model *reasoning* metadata (reasoning flag + reasoning options) for Kilo preset providers, filled by the models.dev sync. Kilo's own catalog already carries context/output limits, modalities and `supported_parameters`, and those always win — only the reasoning facts are taken from here. A model models.dev doesn't document keeps both fields absent rather than an unverified `false` |
 | `zai.modelMeta` | empty | Per-model metadata for Z.ai preset providers (context window, max output, modalities, reasoning, reasoning options, description); filled by the models.dev sync. Unknown models advertise a 1M context window so coding agents don't downshift to 128K |
 | `auth.credentialLogin` | true | Email + password sign-in on the GUI. Can be turned off only when Google sign-in is configured, and only by an admin who could sign back in with Google (inside `GOOGLE_WORKSPACE_DOMAIN` when one is set). Treated as on whenever `GOOGLE_CLIENT_ID` is unset, so removing it is the escape hatch |
+| `newUsers.disabledProviderIds` | `[]` | Providers a new account with the `user` role starts without: when an admin creates such a user, a per-user revocation is written for each listed provider in the same transaction (same effect as revoking it on the Users page). Admin and superadmin accounts get none, existing users are never touched, and later role changes don't re-apply it. Ids are de-duplicated and sorted on save; ids of deleted providers are dropped on save and hidden on read. Needs no pool rebuild |
 | `webTools.enabled` | false | Serve the MCP web tools at `POST /mcp` to every client key. Off after upgrades — the SearXNG/obscura backends must be installed first (see `docs/deployment.md`) |
 | `webTools.searxngUrl` | `http://127.0.0.1:8888` | SearXNG base URL; the JSON API must be enabled there (`search.formats` includes `json`) |
 | `webTools.readerMode` | `fast` | `fast` = native fetch first, escalate to obscura; `render` = obscura first, fall back to native. Either way `web_read`'s `render: true` argument forces the browser leg |
@@ -73,7 +74,8 @@ Ranges enforced on save: `maxKeysPerRequest` 1–100, `cooldownSeconds`
 `webTools.obscuraConcurrency` 1–8, `webTools.fetchTimeoutSeconds` 1–120,
 `webTools.obscuraTimeoutSeconds` 5–300, `webTools.maxChars` 1000–200000,
 `webTools.searxngUrl` an http(s) URL with a host, `webTools.obscuraPath`
-non-empty without whitespace.
+non-empty without whitespace, every `newUsers.disabledProviderIds` entry a
+positive integer.
 
 Base URLs are **not** part of this document — providers (and their base
 URLs) live in their own database table and are edited on the GUI Providers

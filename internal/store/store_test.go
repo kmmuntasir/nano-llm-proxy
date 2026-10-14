@@ -663,3 +663,45 @@ func TestMigrateV9RebuildsUsersSafely(t *testing.T) {
 		t.Fatal("ON DELETE CASCADE lost in the rebuild")
 	}
 }
+
+// TestInsertUserWithDeniedProviders: revocations land with the user in one
+// transaction, only for role "user", skipping ids of missing providers; a
+// failed insert (duplicate email) leaves no revocation behind.
+func TestInsertUserWithDeniedProviders(t *testing.T) {
+	st := openTestStore(t)
+	p := &Provider{Name: "acme", Type: "openai", BaseURL: "https://acme.example/v1", Enabled: true}
+	if err := st.CreateProvider(p, nil); err != nil {
+		t.Fatalf("create provider: %v", err)
+	}
+	u := &User{Name: "U", Email: "u@example.com", PasswordHash: "x", Role: "user"}
+	if err := st.InsertUserWithDeniedProviders(u, []int64{p.ID, p.ID + 1000}); err != nil {
+		t.Fatalf("insert user: %v", err)
+	}
+	got, err := st.DisabledProviderIDs(u.ID)
+	if err != nil {
+		t.Fatalf("disabled ids: %v", err)
+	}
+	if len(got) != 1 || !got[p.ID] {
+		t.Fatalf("revocations = %v, want only %d", got, p.ID)
+	}
+	var n int
+	if err := st.db.QueryRow(`SELECT COUNT(*) FROM user_provider_access WHERE provider_id=?`, p.ID+1000).Scan(&n); err != nil || n != 0 {
+		t.Fatalf("dangling row for a missing provider: n=%d err=%v", n, err)
+	}
+
+	admin := &User{Name: "A", Email: "a@example.com", PasswordHash: "x", Role: "admin"}
+	if err := st.InsertUserWithDeniedProviders(admin, []int64{p.ID}); err != nil {
+		t.Fatalf("insert admin: %v", err)
+	}
+	if err := st.db.QueryRow(`SELECT COUNT(*) FROM user_provider_access WHERE user_id=?`, admin.ID).Scan(&n); err != nil || n != 0 {
+		t.Fatalf("admin got %d revocation rows (err=%v), want 0", n, err)
+	}
+
+	dup := &User{Name: "D", Email: "u@example.com", PasswordHash: "x", Role: "user"}
+	if err := st.InsertUserWithDeniedProviders(dup, []int64{p.ID}); err == nil {
+		t.Fatal("duplicate email must fail")
+	}
+	if err := st.db.QueryRow(`SELECT COUNT(*) FROM user_provider_access`).Scan(&n); err != nil || n != 1 {
+		t.Fatalf("revocation rows after failed insert = %d (err=%v), want 1", n, err)
+	}
+}

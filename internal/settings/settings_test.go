@@ -1,6 +1,8 @@
 package settings
 
 import (
+	"encoding/json"
+	"slices"
 	"strings"
 	"testing"
 )
@@ -101,5 +103,51 @@ func TestRotationDefaultIsPriorityDaily(t *testing.T) {
 	}
 	if got := (&RuntimeSettings{Rotation: RotationPriority}).ApplyDefaults().Rotation; got != RotationPriority {
 		t.Fatalf("explicit priority rewritten to %q", got)
+	}
+}
+
+func TestNewUsersDefaultsSerializeAsEmptyList(t *testing.T) {
+	raw, err := json.Marshal(DefaultRuntimeSettings())
+	if err != nil {
+		t.Fatalf("marshal: %v", err)
+	}
+	if !strings.Contains(string(raw), `"newUsers":{"disabledProviderIds":[]}`) {
+		t.Fatalf("defaults must serialize newUsers.disabledProviderIds as []: %s", raw)
+	}
+	// an explicit null (or a pre-feature doc) normalizes to [] too
+	rs := DefaultRuntimeSettings()
+	if err := json.Unmarshal([]byte(`{"newUsers":{"disabledProviderIds":null}}`), rs); err != nil {
+		t.Fatalf("unmarshal: %v", err)
+	}
+	raw, _ = json.Marshal(rs.ApplyDefaults())
+	if !strings.Contains(string(raw), `"disabledProviderIds":[]`) {
+		t.Fatalf("null ids must become []: %s", raw)
+	}
+	if got := rs.Clone().NewUsers.DisabledProviderIDs; got == nil {
+		t.Fatal("Clone must keep a non-nil slice")
+	}
+}
+
+func TestNewUsersDedupeSortAndValidate(t *testing.T) {
+	rs := DefaultRuntimeSettings()
+	rs.NewUsers.DisabledProviderIDs = []int64{7, 3, 7, 1, 3}
+	rs.ApplyDefaults()
+	if got := rs.NewUsers.DisabledProviderIDs; !slices.Equal(got, []int64{1, 3, 7}) {
+		t.Fatalf("ApplyDefaults ids = %v, want [1 3 7]", got)
+	}
+	if msg := rs.Validate(); msg != "" {
+		t.Fatalf("valid ids rejected: %q", msg)
+	}
+	for _, bad := range []int64{0, -4} {
+		rs := DefaultRuntimeSettings()
+		rs.NewUsers.DisabledProviderIDs = []int64{2, bad}
+		if msg := rs.ApplyDefaults().Validate(); !strings.Contains(msg, "positive integer") {
+			t.Fatalf("id %d: Validate() = %q, want a positive-integer error", bad, msg)
+		}
+	}
+	c := rs.Clone()
+	c.NewUsers.DisabledProviderIDs[0] = 99
+	if rs.NewUsers.DisabledProviderIDs[0] == 99 {
+		t.Fatal("Clone shares the disabledProviderIds backing array")
 	}
 }

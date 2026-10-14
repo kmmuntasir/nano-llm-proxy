@@ -1,6 +1,9 @@
 import { useEffect, useState } from "react"
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query"
 import {
+  Alert,
+  Badge,
+  Box,
   Button,
   Card,
   Code,
@@ -8,12 +11,15 @@ import {
   Heading,
   HStack,
   Input,
+  Link,
   NativeSelect,
+  SimpleGrid,
   Switch,
   Text,
   VStack,
 } from "@chakra-ui/react"
-import { RefreshCw } from "lucide-react"
+import { Info, RefreshCw } from "lucide-react"
+import { Link as RouterLink } from "react-router-dom"
 import { api, post, put, ApiError } from "../api/client"
 import { useAuthConfig } from "../api/useAuthConfig"
 import type {
@@ -23,6 +29,7 @@ import type {
   CatalogModelsView,
   ModelMetaSyncStatusView,
   ModelMetaView,
+  ProviderView,
   RuntimeSettingsView,
   WebToolsSettingsView,
   WebToolsTestResult,
@@ -90,6 +97,12 @@ interface SettingsForm {
   kiloModelMeta: Record<string, ModelMetaView>
   kiloFreeOnly: boolean
   webTools: WebToolsSettingsView
+  /** providers new regular users start without — kept sorted for diffing */
+  newUserDisabledProviderIds: number[]
+}
+
+function sortedIds(ids: number[]): number[] {
+  return [...new Set(ids)].sort((a, b) => a - b)
 }
 
 function hydrate(s: RuntimeSettingsView): SettingsForm {
@@ -109,6 +122,8 @@ function hydrate(s: RuntimeSettingsView): SettingsForm {
     // The PUT replaces the whole document — webTools must always ride
     // along or a save from this page would revert it to defaults.
     webTools: { ...s.webTools },
+    // older servers don't send newUsers — nothing disabled
+    newUserDisabledProviderIds: sortedIds(s.newUsers?.disabledProviderIds ?? []),
   }
 }
 
@@ -130,6 +145,7 @@ function changedSections(saved: SettingsForm, f: SettingsForm): string[] {
     ["Model catalog", saved.modelMetaAutoSync, f.modelMetaAutoSync],
     ["Kilo adapter", saved.kiloFreeOnly, f.kiloFreeOnly],
     ["Web tools", saved.webTools, f.webTools],
+    ["New-user providers", saved.newUserDisabledProviderIds, f.newUserDisabledProviderIds],
   ]
   return sections.filter(([, a, b]) => differs(a, b)).map(([label]) => label)
 }
@@ -159,6 +175,7 @@ function buildPayload(
       kilo: { freeOnly: f.kiloFreeOnly, modelMeta: f.kiloModelMeta },
       zai: { modelMeta: f.zaiModelMeta },
       webTools: f.webTools,
+      newUsers: { disabledProviderIds: f.newUserDisabledProviderIds },
     },
   }
 }
@@ -446,6 +463,237 @@ function WebToolsCard({
   )
 }
 
+// ProviderTile is one provider in the new-user defaults grid. The whole tile
+// is the switch's <label>, so a click anywhere (or Space on the focused
+// switch) toggles it. A deactivated provider stays toggleable — the choice
+// decides access once it's re-activated.
+function ProviderTile({
+  provider: p,
+  on,
+  onToggle,
+}: {
+  provider: ProviderView
+  on: boolean
+  onToggle: (on: boolean) => void
+}) {
+  const keys =
+    p.total === 0
+      ? "No upstream keys"
+      : `${p.healthy}/${p.total} ${p.total === 1 ? "key" : "keys"} healthy`
+
+  return (
+    <Switch.Root
+      checked={on}
+      onCheckedChange={(e) => onToggle(e.checked)}
+      display="flex"
+      w="full"
+      h="full"
+      alignItems="center"
+      justifyContent="space-between"
+      gap={3}
+      px={3}
+      py={2.5}
+      borderWidth="1px"
+      rounded="l3"
+      cursor="pointer"
+      transition="background 0.15s, border-color 0.15s"
+      borderColor={on ? "blue.muted" : "border.muted"}
+      bg={on ? "blue.subtle" : "bg.subtle"}
+      _hover={{ borderColor: on ? "blue.emphasized" : "border.emphasized" }}
+      _focusVisible={{ outline: "2px solid", outlineColor: "blue.focusRing", outlineOffset: "2px" }}
+    >
+      <Switch.HiddenInput aria-label={`Give new users access to ${p.name}`} />
+      <HStack as="span" gap={3} minW={0} flex="1">
+        <Box
+          as="span"
+          flexShrink={0}
+          display="grid"
+          placeItems="center"
+          boxSize={9}
+          rounded="l2"
+          fontWeight="semibold"
+          fontFamily="mono"
+          bg={on ? "blue.solid" : "bg.emphasized"}
+          color={on ? "blue.contrast" : "fg.muted"}
+          aria-hidden
+        >
+          {p.name.charAt(0).toUpperCase() || "?"}
+        </Box>
+        <VStack as="span" align="start" gap={1} minW={0}>
+          <HStack as="span" gap={1.5} flexWrap="wrap" minW={0}>
+            <Text
+              as="span"
+              fontWeight="semibold"
+              fontFamily="mono"
+              fontSize="sm"
+              truncate
+              maxW="100%"
+              title={p.name}
+              color={on ? "fg" : "fg.muted"}
+            >
+              {p.name}
+            </Text>
+            <Badge variant="outline" size="sm">
+              {p.type}
+            </Badge>
+            {!p.enabled && (
+              <Badge
+                variant="subtle"
+                colorPalette="gray"
+                size="sm"
+                title="Deactivated on the Providers page — nobody can route to it right now"
+              >
+                Provider inactive
+              </Badge>
+            )}
+          </HStack>
+          <Text as="span" fontSize="xs" color="fg.muted">
+            {keys}
+          </Text>
+        </VStack>
+      </HStack>
+      <Switch.Control flexShrink={0}>
+        <Switch.Thumb />
+      </Switch.Control>
+    </Switch.Root>
+  )
+}
+
+// NewUserProvidersCard edits which providers a newly created regular user
+// starts with. Stored as a deny list, so providers added later start enabled.
+// Saved with the rest of the settings document.
+function NewUserProvidersCard({
+  disabledIds,
+  onChange,
+}: {
+  disabledIds: number[]
+  onChange: (ids: number[]) => void
+}) {
+  const { data, isLoading, error } = useQuery({
+    queryKey: ["providers"],
+    queryFn: () => api<{ providers: ProviderView[] }>("/api/providers"),
+  })
+  const providers = data?.providers ?? []
+  const disabled = new Set(disabledIds)
+  const enabledCount = providers.filter((p) => !disabled.has(p.id)).length
+  const total = providers.length
+  const allOn = total > 0 && enabledCount === total
+  const allOff = total > 0 && enabledCount === 0
+
+  const toggle = (id: number, on: boolean) =>
+    onChange(on ? disabledIds.filter((d) => d !== id) : [...disabledIds, id])
+
+  return (
+    <Card.Root>
+      <Card.Header>
+        <HStack justify="space-between" align="start" gap={3} flexWrap="wrap">
+          <VStack align="start" gap={1} flex="1" minW={{ base: "full", sm: "260px" }}>
+            <Heading size="sm">Default providers for new users</Heading>
+            <Text fontSize="xs" color="fg.muted">
+              New regular users get access to the providers switched on here. Existing users,
+              admins and superadmins aren't affected.
+            </Text>
+          </VStack>
+          {total > 0 && (
+            <HStack gap={1} flexWrap="wrap">
+              <Badge
+                variant="subtle"
+                rounded="full"
+                px={2.5}
+                colorPalette={allOff ? "orange" : allOn ? "green" : "blue"}
+              >
+                {enabledCount} of {total} enabled
+              </Badge>
+              <Button
+                variant="ghost"
+                size="xs"
+                disabled={allOn}
+                onClick={() => onChange([])}
+              >
+                Enable all
+              </Button>
+              <Button
+                variant="ghost"
+                size="xs"
+                disabled={allOff}
+                onClick={() => onChange(providers.map((p) => p.id))}
+              >
+                Disable all
+              </Button>
+            </HStack>
+          )}
+        </HStack>
+      </Card.Header>
+      <Card.Body>
+        {isLoading ? (
+          <Text fontSize="sm" color="fg.muted">
+            Loading providers…
+          </Text>
+        ) : error ? (
+          <Text fontSize="sm" color="red.fg">
+            Failed to load providers
+          </Text>
+        ) : total === 0 ? (
+          <VStack
+            gap={1}
+            py={6}
+            borderWidth="1px"
+            borderStyle="dashed"
+            borderColor="border.emphasized"
+            rounded="l3"
+            textAlign="center"
+          >
+            <Text fontSize="sm" fontWeight="medium">
+              No providers yet
+            </Text>
+            <Text fontSize="xs" color="fg.muted">
+              Add one on the{" "}
+              <Link asChild colorPalette="blue" variant="underline">
+                <RouterLink to="/providers">Providers page</RouterLink>
+              </Link>{" "}
+              — it starts enabled for new users.
+            </Text>
+          </VStack>
+        ) : (
+          <VStack align="stretch" gap={4}>
+            {allOff && (
+              <Alert.Root status="warning" size="sm">
+                <Alert.Indicator />
+                <Alert.Content>
+                  <Alert.Description>
+                    New users will have no provider access until you grant it on the Users page.
+                  </Alert.Description>
+                </Alert.Content>
+              </Alert.Root>
+            )}
+            <SimpleGrid columns={{ base: 1, md: 2, xl: 3 }} gap={3}>
+              {providers.map((p) => (
+                <ProviderTile
+                  key={p.id}
+                  provider={p}
+                  on={!disabled.has(p.id)}
+                  onToggle={(on) => toggle(p.id, on)}
+                />
+              ))}
+            </SimpleGrid>
+          </VStack>
+        )}
+      </Card.Body>
+      <Card.Footer>
+        <HStack gap={2} align="start" color="fg.muted">
+          <Box as="span" flexShrink={0} mt="1px">
+            <Info size={14} />
+          </Box>
+          <Text fontSize="xs">
+            Providers added later start enabled for new users. Change a specific user's access
+            from Users → Access.
+          </Text>
+        </HStack>
+      </Card.Footer>
+    </Card.Root>
+  )
+}
+
 export default function SettingsPage() {
   const qc = useQueryClient()
   const { data, isLoading, error } = useQuery({
@@ -520,6 +768,11 @@ export default function SettingsPage() {
         value={form.auth}
         onChange={(patch) => set({ auth: { ...form.auth, ...patch } })}
         config={authConfig.data}
+      />
+
+      <NewUserProvidersCard
+        disabledIds={form.newUserDisabledProviderIds}
+        onChange={(ids) => set({ newUserDisabledProviderIds: sortedIds(ids) })}
       />
 
       {/* routing */}

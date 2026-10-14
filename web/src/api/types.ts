@@ -474,6 +474,14 @@ export interface AuthSettingsView {
   credentialLogin: boolean
 }
 
+// Defaults applied when an admin creates a regular user: the new user is
+// denied every provider listed here (empty = every provider allowed).
+// Admins and superadmins always get every provider; existing users are never
+// affected. The server prunes ids of deleted providers.
+export interface NewUsersSettingsView {
+  disabledProviderIds: number[]
+}
+
 export interface RuntimeSettingsView {
   auth: AuthSettingsView
   rotation: "priority-daily" | "priority" | "lru"
@@ -483,6 +491,8 @@ export interface RuntimeSettingsView {
   kilo: KiloSettingsView
   zai: ZaiSettingsView
   webTools: WebToolsSettingsView
+  // always sent by current servers; absent on older ones (treat as [])
+  newUsers?: NewUsersSettingsView
 }
 
 // POST /api/webtools/test response (admin diagnostics).

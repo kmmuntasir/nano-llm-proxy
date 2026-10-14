@@ -69,7 +69,25 @@ func (g *gateway) handleCreateUser(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	u := &store.User{Name: req.Name, Email: req.Email, PasswordHash: hash, Role: req.Role}
-	if !g.applyMutation(w, actor, "user.create", "An account with this email already exists", func() error { return g.store.InsertUser(u) }) {
+	// A regular user starts without the providers the "new users" setting
+	// disables; admins always have every provider, so they get no rows. The
+	// defaults apply once, here: a later role change keeps the existing
+	// behaviour (promotion clears revocations, demotion re-applies nothing).
+	// Read from the store (like GET /api/settings), the authoritative copy.
+	// The store skips ids of providers deleted since the setting was saved;
+	// applyMutation's rebuild reloads the hot-path access cache.
+	var denied []int64
+	if req.Role == roleUser {
+		rs, err := g.store.LoadRuntimeSettings()
+		if err != nil {
+			apiErr(w, http.StatusInternalServerError, err.Error())
+			return
+		}
+		denied = rs.NewUsers.DisabledProviderIDs
+	}
+	if !g.applyMutation(w, actor, "user.create", "An account with this email already exists", func() error {
+		return g.store.InsertUserWithDeniedProviders(u, denied)
+	}) {
 		return
 	}
 	writeJSON(w, http.StatusCreated, map[string]any{"user": userView(u)})

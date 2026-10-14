@@ -57,6 +57,10 @@ Release notes are generated from commit prefixes, so `feat:`, `fix:`,
 
 ### Added
 
+- Default providers for new users: the `newUsers.disabledProviderIds`
+  runtime setting lists providers a newly created `user`-role account starts
+  without (written as per-user revocations together with the account).
+  Admins get every provider as before; existing users are not affected.
 - Cached-input-token tracking. Every adapter now taps the cache-hit count
   upstreams report (chat `prompt_tokens_details.cached_tokens`, Responses
   `input_tokens_details.cached_tokens`, Anthropic `cache_read_input_tokens`)

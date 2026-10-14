@@ -22,7 +22,13 @@ import { api, del, patch, post, put, ApiError } from "../api/client"
 import { assignableRoles, canManageAccount, roleLabel } from "../api/roles"
 import type { Role } from "../api/roles"
 import { useCredentialLogin } from "../api/useAuthConfig"
-import type { ClientKeyView, UserProviderView, UserView } from "../api/types"
+import type {
+  ClientKeyView,
+  ProviderView,
+  RuntimeSettingsView,
+  UserProviderView,
+  UserView,
+} from "../api/types"
 import ConfirmDialog from "../components/ConfirmDialog"
 import { DataTable } from "../components/DataTable"
 import type { Column } from "../components/DataTable"
@@ -69,6 +75,60 @@ function RoleField({
         <NativeSelect.Indicator />
       </NativeSelect.Root>
     </Field.Root>
+  )
+}
+
+// NewUserAccessHint previews the provider access a new user of this role
+// starts with: regular users get the Settings → Default providers set,
+// admins and superadmins always get every provider. Read-only.
+function NewUserAccessHint({ role, open }: { role: Role; open: boolean }) {
+  const forUser = role === "user"
+  const settings = useQuery({
+    queryKey: ["settings"],
+    queryFn: () => api<{ settings: RuntimeSettingsView }>("/api/settings"),
+    enabled: open && forUser,
+  })
+  const providers = useQuery({
+    queryKey: ["providers"],
+    queryFn: () => api<{ providers: ProviderView[] }>("/api/providers"),
+    enabled: open && forUser,
+  })
+
+  if (!forUser) {
+    return (
+      <Text fontSize="xs" color="fg.muted" mt={-1}>
+        Admins have every provider.
+      </Text>
+    )
+  }
+  // the hint is a convenience — stay quiet rather than show a guess
+  if (settings.error || providers.error) return null
+  if (!settings.data || !providers.data) {
+    return (
+      <Text fontSize="xs" color="fg.muted" mt={-1}>
+        Provider access: …
+      </Text>
+    )
+  }
+
+  // older servers don't send newUsers — nothing disabled
+  const disabled = new Set(settings.data.settings.newUsers?.disabledProviderIds ?? [])
+  const names = providers.data.providers.filter((p) => !disabled.has(p.id)).map((p) => p.name)
+
+  return (
+    <Text fontSize="xs" color="fg.muted" mt={-1} wordBreak="break-word">
+      Provider access:{" "}
+      {names.length > 0 ? (
+        <Text as="span" color="fg" fontFamily="mono">
+          {names.join(", ")}
+        </Text>
+      ) : (
+        <Text as="span" color="orange.fg" fontWeight="medium">
+          none
+        </Text>
+      )}{" "}
+      (from Settings → Default providers)
+    </Text>
   )
 }
 
@@ -176,6 +236,7 @@ function AddUserModal({
                 </Text>
               )}
               <RoleField value={role} options={assignableRoles(actor)} onChange={setRole} />
+              <NewUserAccessHint role={role} open={open} />
               {error && (
                 <Text color="red.fg" fontSize="sm">
                   {error}

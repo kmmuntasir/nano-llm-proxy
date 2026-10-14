@@ -819,14 +819,47 @@ func (s *Store) SaveModelBenchmarks(snap *BenchmarkSnapshot) error {
 
 // --- users ---
 
+// InsertUser creates a user with unrestricted provider access.
 func (s *Store) InsertUser(u *User) error {
+	return s.InsertUserWithDeniedProviders(u, nil)
+}
+
+// InsertUserWithDeniedProviders creates a user and, in the same transaction,
+// revokes the given providers for them (the "new users" defaults). Ids of
+// providers that no longer exist are skipped, and nothing is revoked unless
+// the role is "user" — admins always have every provider. Either the user
+// and all their revocations land, or nothing does.
+func (s *Store) InsertUserWithDeniedProviders(u *User, providerIDs []int64) error {
+	tx, err := s.db.Begin()
+	if err != nil {
+		return err
+	}
+	defer tx.Rollback()
 	now := time.Now().Unix()
-	res, err := s.db.Exec(`INSERT INTO users (name, email, password_hash, role, disabled, created_at, updated_at)
+	res, err := tx.Exec(`INSERT INTO users (name, email, password_hash, role, disabled, created_at, updated_at)
 		VALUES (?, ?, ?, ?, ?, ?, ?)`, u.Name, u.Email, u.PasswordHash, u.Role, boolInt(u.Disabled), now, now)
 	if err != nil {
 		return err
 	}
-	u.ID, _ = res.LastInsertId()
+	id, err := res.LastInsertId()
+	if err != nil {
+		return err
+	}
+	if u.Role == "user" {
+		for _, pid := range providerIDs {
+			// INSERT ... SELECT from providers: a deleted provider id inserts
+			// nothing instead of leaving a dangling row
+			if _, err := tx.Exec(`INSERT INTO user_provider_access (user_id, provider_id)
+				SELECT ?, id FROM providers WHERE id=?
+				ON CONFLICT (user_id, provider_id) DO NOTHING`, id, pid); err != nil {
+				return fmt.Errorf("revoke provider %d for new user: %w", pid, err)
+			}
+		}
+	}
+	if err := tx.Commit(); err != nil {
+		return err
+	}
+	u.ID = id
 	u.CreatedAt, u.UpdatedAt = now, now
 	return nil
 }
