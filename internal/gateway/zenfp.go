@@ -4,20 +4,47 @@ import (
 	"crypto/rand"
 	"crypto/sha1"
 	"encoding/hex"
+	"encoding/json"
 	"net/http"
 	"sync"
 	"time"
 )
 
-// zenGateTools are the tool names the free-tier gate expects to see in a
-// request: a body with no tools 403s FreeTierError. Matches the opencode 2.x
-// tool set (1.x called the shell tool "bash"); zen accepts either today.
+// zenGateTools are the tools zen's free-tier gate expects to see in a
+// request. Since 2026-10-14 the gate also inspects their parameter schemas:
+// a body without "shell" and "read" carrying non-empty schemas 403s
+// FreeTierError ("free tier can only be used from within OpenCode"), while
+// descriptions, extra client tools and tool order don't matter (bisected
+// against live zen with a captured opencode 2.0.29 request). The stubs
+// therefore carry opencode 2.0.29's real parameter schemas
+// (zenGateToolParams) under a "never call" description.
 var zenGateTools = []string{"shell", "read", "edit"}
 
+// zenGateToolParams are the opencode 2.0.29 parameter schemas of the gate
+// tools, verbatim from a captured request.
+var zenGateToolParams = map[string]string{
+	"shell": `{"type":"object","properties":{"command":{"type":"string","description":"Shell command string to execute"},"workdir":{"type":"string","description":"Working directory to execute the command in. Defaults to the current working directory. When possible, avoid changing directories in the command and set the working directory here instead."},"timeout":{"type":"integer","minimum":0,"description":"Timeout in milliseconds. Set to 0 to disable the timeout. Defaults to 120000 for foreground commands. Background commands have no timeout by default."},"background":{"type":"boolean","description":"Run the command in the background and return immediately (useful for dev servers and long-running builds). You do not need to use '&' at the end of the command when using this parameter. You will be notified when it completes. DO NOT poll for completion."}},"required":["command"],"additionalProperties":false}`,
+	"read":  `{"type":"object","properties":{"path":{"type":"string","description":"File or directory to read"},"offset":{"type":"integer","minimum":0,"description":"The line or directory entry to start reading from (1-based)"},"limit":{"type":"integer","minimum":0,"description":"The maximum number of lines or directory entries to read (defaults to and capped at 2000)"}},"required":["path"],"additionalProperties":false}`,
+	"edit":  `{"type":"object","properties":{"path":{"type":"string","description":"File to edit"},"oldString":{"type":"string","description":"Exact text to find and replace"},"newString":{"type":"string","description":"Text to replace oldString with (must differ from oldString)"},"replaceAll":{"type":"boolean","description":"Whether to replace every occurrence of oldString. When false, oldString must match exactly once. Defaults to false."}},"required":["path","oldString","newString"],"additionalProperties":false}`,
+}
+
+// zenStubParams returns a fresh copy of a gate tool's parameter schema (each
+// request gets its own map, so nothing downstream can mutate a shared one).
+// Unknown names get an empty object schema.
+func zenStubParams(name string) map[string]any {
+	out := map[string]any{"type": "object", "properties": map[string]any{}}
+	if raw, ok := zenGateToolParams[name]; ok {
+		json.Unmarshal([]byte(raw), &out) //nolint:errcheck // compile-time constant, covered by tests
+	}
+	return out
+}
+
 // The opencode client fingerprint zen's free tier checks. Captured from
-// opencode 2.0.27 (`opencode run --standalone` against a capture server):
+// opencode 2.0.27 (`opencode run --standalone` against a capture server) and
+// re-verified against 2.0.29 (2026-10-14, which posts to
+// https://opencode.ai/inference/v1 — zen/v1 now refuses the free tier):
 //
-//	User-Agent:            opencode/latest/2.0.27/cli
+//	User-Agent:            opencode/latest/2.0.29/cli
 //	x-opencode-client:     cli
 //	x-opencode-project:    <40 hex, stable per project>
 //	x-opencode-session:    ses_ecc15552affe0cq3QbEJCOKyVy

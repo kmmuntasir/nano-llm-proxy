@@ -68,7 +68,7 @@ func stubToolChat(name string) map[string]any {
 		"function": map[string]any{
 			"name":        name,
 			"description": "internal noop tool; never call",
-			"parameters":  map[string]any{"type": "object", "properties": map[string]any{}},
+			"parameters":  zenStubParams(name),
 		},
 	}
 }
@@ -78,7 +78,7 @@ func stubToolFlat(name string) map[string]any {
 		"type":        "function",
 		"name":        name,
 		"description": "internal noop tool; never call",
-		"parameters":  map[string]any{"type": "object", "properties": map[string]any{}},
+		"parameters":  zenStubParams(name),
 	}
 }
 
@@ -244,9 +244,9 @@ func toResponsesBody(chat map[string]any) map[string]any {
 // so the rename is lossless: content and message order are untouched, and a
 // client that sent both roles keeps both messages in place.
 //
-// Only the zen adapter needs this today — kilo's own upstreams tolerate the
-// role (verified). If another provider ever fronts a strict schema, call
-// this from its path too; it is idempotent.
+// The zen adapter always applies it; the generic OpenAI passthrough applies
+// it for every upstream except OpenAI itself (keepsDeveloperRole) — Z.ai
+// rejects the role outright. It is idempotent.
 func normalizeInstructionRoles(body map[string]any) bool {
 	changed := false
 	for _, field := range []string{"messages", "input"} {

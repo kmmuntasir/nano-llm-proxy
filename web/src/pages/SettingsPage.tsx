@@ -904,7 +904,7 @@ export default function SettingsPage() {
               />
               <Field.HelperText>
                 Must be <code>opencode/1.18.0</code> or newer (2.x shape:{" "}
-                <code>opencode/latest/2.0.27/cli</code>) — the whole pool
+                <code>opencode/latest/2.0.29/cli</code>) — the whole pool
                 would get 426s otherwise.
               </Field.HelperText>
             </Field.Root>

@@ -73,17 +73,22 @@ func (g *gateway) handleMessages(w http.ResponseWriter, r *http.Request) {
 		hint, tu = g.messagesViaOpenAI(ref, w, r, chat, upstreamModel, clientWantsStream, start)
 	}
 	if hint != "" {
-		g.recordActivity(r, ref, upstreamModel, "", start, http.StatusBadGateway, hint, tu)
-		writeAnthropicErr(w, http.StatusBadGateway, hint)
+		status := upstreamFailureStatus(r)
+		g.recordActivity(r, ref, upstreamModel, "", start, status, hint, tu)
+		writeAnthropicErr(w, status, hint)
 	}
 }
 
 func writeAnthropicErr(w http.ResponseWriter, status int, msg string) {
+	errType := "api_error"
+	if status == http.StatusBadRequest {
+		errType = "invalid_request_error"
+	}
 	w.Header().Set("Content-Type", "application/json")
 	w.WriteHeader(status)
 	json.NewEncoder(w).Encode(map[string]any{
 		"type":  "error",
-		"error": map[string]any{"type": "api_error", "message": msg},
+		"error": map[string]any{"type": errType, "message": msg},
 	})
 }
 

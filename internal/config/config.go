@@ -70,7 +70,7 @@ func (c *Config) applyDefaults() *Config {
 		c.DBPath = "gateway.db"
 	}
 	if c.Zen.BaseURL == "" {
-		c.Zen.BaseURL = "https://opencode.ai/zen/v1"
+		c.Zen.BaseURL = "https://opencode.ai/inference/v1" // opencode 2.0.29+; zen/v1 refuses the free tier
 	}
 	if c.Kilo.BaseURL == "" {
 		c.Kilo.BaseURL = "https://api.kilo.ai/api/gateway"

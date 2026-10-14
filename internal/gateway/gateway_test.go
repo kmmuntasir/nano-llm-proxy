@@ -140,9 +140,10 @@ func TestAuthErrorDisablesKey(t *testing.T) {
 	g := newGateway(cfg, rs, kf)
 	rec := httptest.NewRecorder()
 	g.handleChat(rec, chatReq("kilo", "some-model"))
-	// both keys get disabled -> no healthy keys -> 502
-	if rec.Code != 502 {
-		t.Fatalf("expected 502 when all keys auth-fail, got %d", rec.Code)
+	// both keys get disabled -> no healthy keys -> 503 (never 502: Cloudflare
+	// replaces 502 bodies, hiding the explanation)
+	if rec.Code != http.StatusServiceUnavailable {
+		t.Fatalf("expected 503 when all keys auth-fail, got %d", rec.Code)
 	}
 	// the operator's key labels must never reach the client
 	if body := rec.Body.String(); strings.Contains(body, "ops-label") {
@@ -172,8 +173,8 @@ func TestFreeTierErrorFailsFastWithoutBurningPool(t *testing.T) {
 	g := newGateway(cfg, rs, kf)
 	rec := httptest.NewRecorder()
 	g.handleChat(rec, chatReq("zen", "mimo-test-free"))
-	if rec.Code != 502 {
-		t.Fatalf("expected 502, got %d", rec.Code)
+	if rec.Code != http.StatusServiceUnavailable {
+		t.Fatalf("expected 503, got %d", rec.Code)
 	}
 	if !strings.Contains(rec.Body.String(), "client-shape") {
 		t.Fatalf("expected client-shape hint in body, got: %s", rec.Body.String())

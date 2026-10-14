@@ -11,6 +11,27 @@ Release notes are generated from commit prefixes, so `feat:`, `fix:`,
 
 ### Fixed
 
+- zen free models work again (2026-10-14). Zen's free-tier gate now
+  requires opencode 2.0.29's inference path and real tool schemas: requests
+  to `/zen/v1`, or whose `shell`/`read` tools carry empty parameter schemas,
+  drew `403 FreeTierError` ("free tier can only be used from within
+  OpenCode"). The built-in zen provider moves to
+  `https://opencode.ai/inference/v1` (migration V10 updates it only if it
+  still holds the old default), the injected gate tools carry opencode
+  2.0.29's real parameter schemas, and the default zen user agent is
+  `opencode/latest/2.0.29/cli`.
+- Z.ai models work from Pi again: Pi sends the `developer` instruction role
+  for reasoning models, which Z.ai rejects (`1214 Incorrect role
+  information`). The OpenAI passthrough now renames it to `system` for every
+  upstream except OpenAI, as the zen adapter already did.
+
+### Changed
+
+- Upstream failures are no longer answered with 502, which Cloudflare
+  replaces with its own "Bad gateway" page (hiding the reason). A request
+  the upstream refused as sent is a 400 (`upstream 4xx: …`); key exhaustion,
+  outages and gate rejections are a 503 with the gateway's hint.
+
 - zen free models work again. Since 2026-10-12 zen validates the
   `x-opencode-session` header as a real opencode identifier, and the
   gateway's random `ses_` ids drew `403 FreeTierError` on every request. The

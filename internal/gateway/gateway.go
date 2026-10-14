@@ -250,7 +250,6 @@ type verdict struct {
 	action   string // "nextkey", "failfast", "flipsurface"
 	cooldown time.Duration
 	hint     string
-	status   int // client status for failfast
 	body     []byte
 }
 
@@ -293,7 +292,6 @@ func (g *gateway) classify(pool *Pool, k *KeyState, resp *http.Response) verdict
 	case 403:
 		if strings.Contains(string(body), "FreeTierError") {
 			v.action = "failfast"
-			v.status = http.StatusBadGateway
 			v.hint = freeTierHint
 		} else if strings.Contains(string(body), "AuthError") || strings.Contains(string(body), "auth") {
 			v.hint = "an upstream key was rejected (403 auth) and disabled"
@@ -304,7 +302,6 @@ func (g *gateway) classify(pool *Pool, k *KeyState, resp *http.Response) verdict
 		}
 	case 426:
 		v.action = "failfast"
-		v.status = http.StatusBadGateway
 		v.hint = upgradeHint
 	case 503:
 		if strings.Contains(string(body), "Endpoint is unavailable") {
@@ -330,11 +327,28 @@ func (g *gateway) classify(pool *Pool, k *KeyState, resp *http.Response) verdict
 			// 4xx model-level error (bad model, bad params) — same result either
 			// way, so no retry: surface it to the client.
 			v.action = "failfast"
-			v.status = http.StatusBadGateway
 			v.hint = fmt.Sprintf("upstream %d: %s", resp.StatusCode, firstLine(body))
 		}
 	}
 	return v
+}
+
+// upstreamFailureStatus is the client-facing status for a request the
+// gateway couldn't complete upstream. It is never 502: Cloudflare, in front
+// of the public deployments, replaces an origin's 502/504 body with its own
+// "Bad gateway" page, so the gateway's explanation never reached the client.
+// An upstream 4xx about the request itself (400, 404, 413, 422, …) means the
+// request was refused as sent → 400, so clients surface it rather than
+// retry; anything else (no healthy key, auth/rate-limit trouble, upstream
+// outages, the zen free-tier gate, an outdated client version) → 503, which
+// clients treat as retryable.
+func upstreamFailureStatus(r *http.Request) int {
+	switch s := traceFrom(r).lastUpstreamStatus(); {
+	case s >= 400 && s < 500 && s != 401 && s != 403 && s != 408 && s != 426 && s != 429:
+		return http.StatusBadRequest
+	default:
+		return http.StatusServiceUnavailable
+	}
 }
 
 // writeErr emits a JSON error to the client.
@@ -423,9 +437,10 @@ func (g *gateway) handleChat(w http.ResponseWriter, r *http.Request) {
 		out = g.chatViaAnthropic(ref, w, r, body, upstreamModel, clientWantsStream, start)
 	}
 	if out != "" {
-		g.recordActivity(r, ref, upstreamModel, "", start, http.StatusBadGateway, out, tokenUsage{})
+		status := upstreamFailureStatus(r)
+		g.recordActivity(r, ref, upstreamModel, "", start, status, out, tokenUsage{})
 		log.Printf("res provider=%s model=%s status=failed %s ttft_ms=%d", provider, upstreamModel, out, time.Since(start).Milliseconds())
-		writeErr(w, http.StatusBadGateway, out)
+		writeErr(w, status, out)
 	}
 }
 

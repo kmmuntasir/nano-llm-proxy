@@ -169,8 +169,8 @@ func TestMigrateV4ConvertsBuiltinKiloToPreset(t *testing.T) {
 	}
 
 	var version int64
-	if err := s.db.QueryRow(`SELECT MAX(version) FROM schema_migrations`).Scan(&version); err != nil || version != 9 {
-		t.Fatalf("schema version = %d, %v; want 9", version, err)
+	if err := s.db.QueryRow(`SELECT MAX(version) FROM schema_migrations`).Scan(&version); err != nil || version != 10 {
+		t.Fatalf("schema version = %d, %v; want 10", version, err)
 	}
 }
 
@@ -381,8 +381,8 @@ func TestMigrateV6EnrichesExistingUsageRows(t *testing.T) {
 		t.Fatalf("Migrate: %v", err)
 	}
 	var version int64
-	if err := s.db.QueryRow(`SELECT MAX(version) FROM schema_migrations`).Scan(&version); err != nil || version != 9 {
-		t.Fatalf("schema version = %d, %v; want 9", version, err)
+	if err := s.db.QueryRow(`SELECT MAX(version) FROM schema_migrations`).Scan(&version); err != nil || version != 10 {
+		t.Fatalf("schema version = %d, %v; want 10", version, err)
 	}
 	for idx, want := range map[string]int{
 		"idx_usage_model_ts":      1,
@@ -540,8 +540,8 @@ func TestMigrateV7AddsCachedTokens(t *testing.T) {
 		t.Fatalf("Migrate: %v", err)
 	}
 	var version int64
-	if err := s.db.QueryRow(`SELECT MAX(version) FROM schema_migrations`).Scan(&version); err != nil || version != 9 {
-		t.Fatalf("schema version = %d, %v; want 9", version, err)
+	if err := s.db.QueryRow(`SELECT MAX(version) FROM schema_migrations`).Scan(&version); err != nil || version != 10 {
+		t.Fatalf("schema version = %d, %v; want 10", version, err)
 	}
 	// idempotent: a second Migrate on V7 is a no-op
 	if err := s.Migrate(); err != nil {
@@ -703,5 +703,43 @@ func TestInsertUserWithDeniedProviders(t *testing.T) {
 	}
 	if err := st.db.QueryRow(`SELECT COUNT(*) FROM user_provider_access`).Scan(&n); err != nil || n != 1 {
 		t.Fatalf("revocation rows after failed insert = %d (err=%v), want 1", n, err)
+	}
+}
+
+// TestMigrateV10MovesBuiltinZenToInference: the built-in zen row still on
+// the legacy default moves to the inference path; an operator-edited URL
+// and other providers are left alone.
+func TestMigrateV10MovesBuiltinZenToInference(t *testing.T) {
+	st := openTestStore(t)
+	if err := st.Bootstrap(testCfg(), &config.KeyFile{}, "admin@example.com", "super-secret-pass"); err != nil {
+		t.Fatal(err)
+	}
+	set := func(url string) {
+		if _, err := st.db.Exec(`UPDATE providers SET base_url=? WHERE builtin=1 AND type='opencode'`, url); err != nil {
+			t.Fatal(err)
+		}
+	}
+	zenURL := func() string {
+		var u string
+		st.db.QueryRow(`SELECT base_url FROM providers WHERE builtin=1 AND type='opencode'`).Scan(&u)
+		return u
+	}
+	rerun := func() {
+		if _, err := st.db.Exec(`DELETE FROM schema_migrations WHERE version=10`); err != nil {
+			t.Fatal(err)
+		}
+		if err := st.migrateV10(); err != nil {
+			t.Fatal(err)
+		}
+	}
+	set(ZenBaseURLLegacy)
+	rerun()
+	if got := zenURL(); got != ZenBaseURL {
+		t.Fatalf("legacy default not moved: %s", got)
+	}
+	set("https://my-zen-mirror.example/v1")
+	rerun()
+	if got := zenURL(); got != "https://my-zen-mirror.example/v1" {
+		t.Fatalf("operator-edited URL changed: %s", got)
 	}
 }

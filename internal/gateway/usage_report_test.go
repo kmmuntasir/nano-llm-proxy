@@ -80,8 +80,8 @@ func TestUsageCaptureV6DetailWhenAllKeysFail(t *testing.T) {
 	req := httptest.NewRequest("POST", "/v1/chat/completions", strings.NewReader(body))
 	req.Header.Set("Authorization", "Bearer "+ck)
 	g.clientOnly(g.handleChat)(rec, req)
-	if rec.Code != http.StatusBadGateway {
-		t.Fatalf("chat: got %d, want 502: %s", rec.Code, rec.Body.String())
+	if rec.Code != http.StatusServiceUnavailable {
+		t.Fatalf("chat: got %d, want 503: %s", rec.Code, rec.Body.String())
 	}
 	var errBody struct {
 		Error struct{ Message string } `json:"error"`
@@ -93,7 +93,7 @@ func TestUsageCaptureV6DetailWhenAllKeysFail(t *testing.T) {
 		t.Fatalf("drained %d events, want 1", len(events))
 	}
 	e := events[0]
-	if e.Status != http.StatusBadGateway || e.Surface != "chat" || e.Stream {
+	if e.Status != http.StatusServiceUnavailable || e.Surface != "chat" || e.Stream {
 		t.Errorf("status/surface/stream wrong: %+v", e)
 	}
 	if e.FailReason == "" || e.FailReason != errBody.Error.Message {

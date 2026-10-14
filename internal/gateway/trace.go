@@ -104,6 +104,17 @@ func (t *reqTrace) upstream(status int) {
 	t.mu.Unlock()
 }
 
+// lastUpstreamStatus is the HTTP status of the most recent upstream attempt
+// (0 = none answered, or no trace attached).
+func (t *reqTrace) lastUpstreamStatus() int {
+	if t == nil {
+		return 0
+	}
+	t.mu.Lock()
+	defer t.mu.Unlock()
+	return t.upstreamStatus
+}
+
 func (t *reqTrace) snapshot() traceSnapshot {
 	if t == nil {
 		return traceSnapshot{}

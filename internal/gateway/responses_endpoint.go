@@ -54,8 +54,9 @@ func (g *gateway) handleResponses(w http.ResponseWriter, r *http.Request) {
 	clientWantsStream := bodyStreamFlag(body)
 
 	if out := g.proxyZenResponses(ref, w, r, body, upstreamModel, clientWantsStream, start); out != "" {
-		g.recordActivity(r, ref, upstreamModel, "", start, http.StatusBadGateway, out, tokenUsage{})
-		writeErr(w, http.StatusBadGateway, out)
+		status := upstreamFailureStatus(r)
+		g.recordActivity(r, ref, upstreamModel, "", start, status, out, tokenUsage{})
+		writeErr(w, status, out)
 	}
 }
 

@@ -187,6 +187,11 @@ func (s *Store) Migrate() error {
 			return err
 		}
 	}
+	if !version.Valid || version.Int64 < 10 {
+		if err := s.migrateV10(); err != nil {
+			return err
+		}
+	}
 	return nil
 }
 
@@ -507,6 +512,33 @@ func (s *Store) migrateV9() error {
 		return fmt.Errorf("migrate v9: foreign key check failed after rebuilding users")
 	}
 	if _, err := tx.Exec(`INSERT INTO schema_migrations (version, applied_at) VALUES (9, ?)`, time.Now().Unix()); err != nil {
+		return err
+	}
+	return tx.Commit()
+}
+
+// Zen base URLs: opencode 2.0.29 moved inference from /zen/v1 to
+// /inference/v1, and on 2026-10-14 zen started refusing the free tier on the
+// old path ("free tier can only be used from within OpenCode").
+const (
+	ZenBaseURLLegacy = "https://opencode.ai/zen/v1"
+	ZenBaseURL       = "https://opencode.ai/inference/v1"
+)
+
+// migrateV10 moves the built-in zen provider to the new inference path —
+// only when it still holds the old default, so an operator-edited base URL
+// is left alone. Both paths serve the same models and endpoints.
+func (s *Store) migrateV10() error {
+	tx, err := s.db.Begin()
+	if err != nil {
+		return err
+	}
+	defer tx.Rollback()
+	if _, err := tx.Exec(`UPDATE providers SET base_url=? WHERE builtin=1 AND type='opencode' AND base_url=?`,
+		ZenBaseURL, ZenBaseURLLegacy); err != nil {
+		return fmt.Errorf("migrate v10: %w", err)
+	}
+	if _, err := tx.Exec(`INSERT INTO schema_migrations (version, applied_at) VALUES (10, ?)`, time.Now().Unix()); err != nil {
 		return err
 	}
 	return tx.Commit()
