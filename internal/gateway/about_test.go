@@ -79,6 +79,11 @@ Second paragraph.
 	if len(r.Sections) != 1 || r.Sections[0].Title != "Security" || r.Sections[0].Items[0] != "Keys are hashed." {
 		t.Errorf("0.1.0 sections wrong: %+v", r.Sections)
 	}
+	// an empty Unreleased right after a release is skipped
+	empty := parseChangelog("## [Unreleased]\n\n## [0.2.0] — 2026-10-14\n\n### Added\n\n- x\n")
+	if len(empty) != 1 || empty[0].Version != "0.2.0" {
+		t.Errorf("empty Unreleased not skipped: %+v", empty)
+	}
 	if out := parseChangelog(""); out == nil || len(out) != 0 {
 		t.Errorf("empty changelog should give an empty, non-nil list: %#v", out)
 	}
@@ -92,8 +97,8 @@ func TestParseRealChangelog(t *testing.T) {
 		t.Fatal(err)
 	}
 	rels := parseChangelog(string(raw))
-	if len(rels) < 3 || rels[0].Version != "Unreleased" {
-		t.Fatalf("releases = %d, first %q", len(rels), rels[0].Version)
+	if len(rels) < 3 {
+		t.Fatalf("releases = %d", len(rels))
 	}
 	for _, r := range rels {
 		if r.Version != "Unreleased" && r.Date == "" {

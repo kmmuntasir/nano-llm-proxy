@@ -132,7 +132,8 @@ func parseChangelog(md string) []releaseNotes {
 	flushRelease := func() {
 		flushPara()
 		item = nil
-		if cur != nil {
+		// an empty "Unreleased" (right after a release) isn't worth a card
+		if cur != nil && !(cur.Version == "Unreleased" && cur.Intro == "" && len(cur.Sections) == 0) {
 			releases = append(releases, *cur)
 		}
 	}

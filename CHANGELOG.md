@@ -9,6 +9,21 @@ Release notes are generated from commit prefixes, so `feat:`, `fix:`,
 
 ## [Unreleased]
 
+## [0.2.0] — 2026-10-14
+
+A large feature release: roles and Google sign-in for teams, a richer
+Models page with benchmarks and comparison, daily key rotation, upstream
+key verification, Zen and Pi compatibility fixes, and an About page with
+this changelog.
+
+**Upgrading from 0.1.x:** migrations V8–V10 run automatically on first
+start (back up `gateway.db` first). The admin endpoints for managing other
+users' client keys (`POST /api/users/{id}/keys`, `PATCH`/`DELETE
+/api/users/{id}/keys/{keyId}`) are gone — keys are managed by their owner.
+The built-in zen provider moves to `https://opencode.ai/inference/v1` unless
+its base URL was customised. Existing deployments keep their stored
+rotation mode; only fresh installs default to `priority-daily`.
+
 ### Added
 
 - Version and About page. The sidebar shows the running version (e.g.
@@ -270,6 +285,7 @@ instance with no shared pool across replicas; and upstream provider keys
 stored reversibly in the SQLite file, so the database must stay at mode
 `0600` on a host you trust.
 
-[Unreleased]: https://github.com/kmmuntasir/nano-llm-proxy/compare/v0.1.1...HEAD
+[Unreleased]: https://github.com/kmmuntasir/nano-llm-proxy/compare/v0.2.0...HEAD
+[0.2.0]: https://github.com/kmmuntasir/nano-llm-proxy/compare/v0.1.1...v0.2.0
 [0.1.1]: https://github.com/kmmuntasir/nano-llm-proxy/compare/v0.1.0...v0.1.1
 [0.1.0]: https://github.com/kmmuntasir/nano-llm-proxy/releases/tag/v0.1.0
