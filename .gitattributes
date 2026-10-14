@@ -1,0 +1,3 @@
+# cmd.exe mis-parses labels and blocks in LF batch files; the release
+# asset is uploaded from the checkout, so check these out with CRLF.
+*.cmd text eol=crlf
