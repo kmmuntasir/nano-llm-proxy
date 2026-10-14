@@ -9,6 +9,51 @@ Release notes are generated from commit prefixes, so `feat:`, `fix:`,
 
 ## [Unreleased]
 
+### Added
+
+- Local mode: run nano-llm-proxy on your own computer for yourself alone
+  (`nano-llm-proxy local`, or `NANO_MODE=local`). No sign-in — the GUI runs
+  as a single implicit owner and the Users page, roles, password and logout
+  are hidden; agents can call `/v1/*` and `/mcp` with any placeholder key,
+  billed to a built-in `local (no key)` client key, unless the new
+  `local.requireApiKey` setting ("Require an API key") is on. Data lives in
+  a per-user folder (`~/.local/share/nano-llm-proxy`,
+  `~/Library/Application Support/nano-llm-proxy`,
+  `%LOCALAPPDATA%\nano-llm-proxy`). With no login, local mode only binds
+  loopback (any other `NANO_BIND` is fatal), checks the `Host` header on
+  every route against DNS rebinding, and refuses foreign `Origin`s (403) and
+  non-JSON `POST`s (415) on `/v1/*` and `/mcp`. A Settings → This computer
+  card toggles start at sign-in, changes the port, and shows the data
+  folder, log file and SearXNG status, backed by `GET /api/local`,
+  `PUT /api/local/autostart` and `PUT /api/local/port` (404 in server mode).
+  `GET /api/auth/config` now always reports `mode` (`server` or `local`).
+  See `docs/local.md`.
+- One-line installers for local mode, attached to every release:
+  `install.sh` (Linux, macOS), `install.ps1` (Windows PowerShell) and
+  `install.cmd` (Windows CMD). No admin rights: they verify the download
+  against `checksums.txt`, install to your home folder, register a per-user
+  background service that starts at sign-in (systemd user unit, XDG
+  autostart fallback, launchd LaunchAgent, or the `HKCU` Run key with the
+  new console-less `nano-llm-proxyw.exe`), and open the GUI. On Linux and
+  macOS they also set up a private SearXNG for web search on
+  `127.0.0.1:8899` (needs Python 3.10+ and git). Re-running upgrades;
+  `--uninstall [--purge]` removes it. New `nano-llm-proxy local install`,
+  `uninstall [--purge]`, `status` and `datadir` subcommands.
+
+### Fixed
+
+- The Windows release zip shipped `nano-llm-proxy.exe.exe`; it now holds
+  `nano-llm-proxy.exe`.
+- The SearXNG settings template never actually trimmed the engine list:
+  `use_default_settings: true` kept all 80+ default engines and the listed
+  ones were only re-enabled. It now uses `use_default_settings.engines.keep_only`,
+  lists `stackoverflow` (there is no `stackexchange` engine), and drops
+  startpage, mojeek and marginalia, which the pinned SearXNG marks inactive.
+  `install-web-tools.sh` never overwrites an existing
+  `/etc/searxng/settings.yml`, so existing server installs keep the full
+  list — replace `use_default_settings: true` there with the `keep_only`
+  block from `scripts/templates/searxng-settings.yml` and restart SearXNG.
+
 ## [0.2.0] — 2026-10-14
 
 A large feature release: roles and Google sign-in for teams, a richer

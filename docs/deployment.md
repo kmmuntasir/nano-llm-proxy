@@ -9,6 +9,9 @@ services](#companion-services--web-search--reader-optional) below. This note
 covers deploying to a Linux machine; bootstrap environment variables are
 documented in [configuration.md](configuration.md).
 
+Running it for yourself on a desktop or laptop instead? Use [local
+mode](local.md): a one-line, no-root installer, no sign-in.
+
 ## Prerequisites
 
 | Requirement | Needed for |

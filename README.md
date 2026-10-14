@@ -157,6 +157,23 @@ Being straight about the gaps, so you don't pick it and find out later:
   endpoints, `claude-*` fallback rewriting, `[1m]` context suffixes, and a
   generated `settings.json`.
 
+## Run it on your own computer
+
+Local mode runs nano-llm-proxy for you alone, on your own machine: no
+server, no sign-in, no admin rights. One line installs it, starts it in the
+background at sign-in, and opens `http://localhost:8787`:
+
+```bash
+curl -fsSL https://github.com/kmmuntasir/nano-llm-proxy/releases/latest/download/install.sh | bash
+```
+
+On Windows: `irm https://github.com/kmmuntasir/nano-llm-proxy/releases/latest/download/install.ps1 | iex`
+in PowerShell. Add provider keys on the Providers page, then point agents at
+`http://localhost:8787/v1` (OpenAI) or `http://localhost:8787` (Anthropic)
+with any placeholder key. It listens on loopback only and anyone with a
+shell on the machine can use it. Full guide, including web search, start at
+sign-in, CMD and uninstall: [docs/local.md](docs/local.md).
+
 ## Quickstart
 
 ### Prebuilt binary
@@ -487,6 +504,7 @@ apply in-request; no restarts.
 | --- | --- |
 | [docs/api.md](docs/api.md) | Every request surface and admin endpoint: authentication, the three protocol endpoints, the merged model catalog, `/health`, `/mcp`, and the error shapes |
 | [docs/configuration.md](docs/configuration.md) | Bootstrap environment variables and the runtime-settings document, field by field |
+| [docs/local.md](docs/local.md) | Local mode on your own computer: the one-line installers, where files live, start at sign-in, pointing agents at it, web search, and its security model |
 | [docs/deployment.md](docs/deployment.md) | First boot, `deploy.sh`, remote updates, the optional web-tool backends, and post-deploy checks |
 | [SECURITY.md](SECURITY.md) | Private disclosure, supported versions, and the deployment trade-offs to understand first |
 | [CONTRIBUTING.md](CONTRIBUTING.md) | Setup, the checks CI runs, and the house rules |

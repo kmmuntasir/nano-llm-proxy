@@ -20,16 +20,38 @@ environment (so `systemd EnvironmentFile=` and exported variables work unchanged
 | Variable | Default | Meaning |
 | --- | --- | --- |
 | `ADMIN_EMAIL` / `ADMIN_PASSWORD` | — | First superadmin's credentials. Required at first boot (bootstrap fails fast without them); they seed the superadmin only while the database has no users and are ignored after that — changing them later creates nothing. Also used by `-reset-admin-password` |
+| `NANO_MODE` | `server` | `server` or `local` ([local mode](local.md): one person's computer, no sign-in). Read from the real environment only, never from `.env`. `nano-llm-proxy local` sets it too |
 | `NANO_PORT` | 8787 | HTTP listen port (1–65535) |
 | `NANO_BIND` | `127.0.0.1` | Listen address. Use `0.0.0.0` in a VM |
 | `NANO_DB_PATH` | `gateway.db` | SQLite database (created and migrated at boot, 0600) |
 | `NANO_COOKIE_SECURE` | true | `Secure` flag on GUI session cookies. Set false only for plain-HTTP local use |
-| `NANO_TRUSTED_ORIGINS` | empty | Comma-separated extra Origin hosts accepted on state-changing `/api` requests. Same-host is always allowed. Set your public host here when serving the GUI behind a reverse proxy |
+| `NANO_TRUSTED_ORIGINS` | empty | Comma-separated extra Origin hosts accepted on state-changing `/api` requests. Same-host is always allowed. Set your public host here when serving the GUI behind a reverse proxy. Ignored in local mode |
 | `GOOGLE_CLIENT_ID` | empty | Enables Google sign-in on the GUI login page (OAuth 2.0 *Web* client id). The GUI's public origin must be listed under the client's *Authorized JavaScript origins*. No client secret is used — the gateway verifies Google's signed ID token itself. Google sign-in only signs in users an admin added on the Users page (matched by email); it never creates accounts |
 | `GOOGLE_WORKSPACE_DOMAIN` | empty | Restricts Google sign-in to one Workspace domain (bare domain, e.g. `example.com`; requires `GOOGLE_CLIENT_ID`). Set: only accounts in that domain can sign in with Google (they still need a user added on the Users page). Unset: any Google account whose email matches an existing user |
 
 Malformed values are fatal at boot (`invalid NANO_PORT "…"`), never silently
 ignored. See `.env.example` for a commented template.
+
+### Local mode
+
+In local mode (`nano-llm-proxy local` or `NANO_MODE=local`, see
+[local.md](local.md)) the same variables apply, with these differences:
+
+- `.env` is read from the per-user data folder
+  (`nano-llm-proxy local datadir`), not the working directory.
+- `NANO_DB_PATH` defaults to `gateway.db` in the data folder.
+- `NANO_COOKIE_SECURE` defaults to false (the GUI is plain
+  `http://localhost`; local mode has no sessions anyway).
+- `NANO_BIND` must be `127.0.0.1`, `localhost` or `::1`; anything else is
+  fatal at boot.
+- `ADMIN_EMAIL` / `ADMIN_PASSWORD`, `GOOGLE_CLIENT_ID` and
+  `GOOGLE_WORKSPACE_DOMAIN` are not used: there is no sign-in.
+- The port set in Settings → This computer, or by `local install --port`, is
+  written to the data folder's `.env` as `NANO_PORT` (1024–65535).
+
+A fresh local database also starts with different runtime defaults:
+`webTools.enabled` true and `webTools.searxngUrl` `http://127.0.0.1:8899`
+(the installer's per-user SearXNG).
 
 ## Runtime settings (database + GUI)
 
@@ -67,6 +89,7 @@ block is server-owned).
 | `webTools.fetchTimeoutSeconds` | 15 | Native fetch leg timeout (1–120) |
 | `webTools.obscuraTimeoutSeconds` | 30 | obscura process timeout (5–300) |
 | `webTools.maxChars` | 20000 | Default clamp on `web_read` output; per-call `maxChars` can lower it (1000–200000) |
+| `local.requireApiKey` | false | Local mode only (ignored in server mode). Off: `/v1/*` and `/mcp` accept any placeholder key or none, billed to the built-in `local (no key)` client key. On: they need a valid client key, as in server mode. Shown as **Require an API key** under Settings → This computer |
 
 Ranges enforced on save: `maxKeysPerRequest` 1–100, `cooldownSeconds`
 0–86400, `maxRequestsPerKeyPerDay` 0 or 1–1000000, `fallbackModel` shaped
@@ -156,6 +179,18 @@ nano-llm-proxy [keys.json] [-reset-admin-password] [-version]
   service afterwards.
 - `-version` (or `--version`) prints the version, commit and build date and
   exits.
+
+Local mode has its own subcommands (details in [local.md](local.md#the-local-command)):
+
+```text
+nano-llm-proxy local                      run in local mode (foreground)
+nano-llm-proxy local install [--port N] [--no-autostart] [--no-open]
+nano-llm-proxy local uninstall [--purge]
+nano-llm-proxy local status
+nano-llm-proxy local datadir
+```
+
+`keys.json` and `-reset-admin-password` don't apply in local mode.
 
 ## Resetting settings
 
