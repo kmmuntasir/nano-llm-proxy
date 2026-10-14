@@ -4,6 +4,8 @@
 # expected to be built already — `web/dist` is embedded under the `prod` build
 # tag, so the binary step below would fail on a clean checkout without it.
 
+version: 2
+
 project_name: nano-llm-proxy
 
 before:
@@ -41,10 +43,40 @@ builds:
     # disambiguation belongs on the archive (see name_template below), not on
     # the extracted binary — a user who untars should be able to run
     # ./nano-llm-proxy, which is what the release notes tell them to do.
-    binary: '{{ .ProjectName }}{{ if eq .Os "windows" }}.exe{{ end }}'
+    # GoReleaser appends .exe on Windows itself (adding it here shipped
+    # nano-llm-proxy.exe.exe in v0.2.0).
+    binary: '{{ .ProjectName }}'
+
+  # Windows GUI-subsystem twin of the main binary: identical code, but linked
+  # with -H=windowsgui so local mode's background instance (started at sign-in
+  # from the HKCU Run key) has no console window. Ships only in the Windows zip.
+  - id: nano-llm-proxyw
+    env:
+      - CGO_ENABLED=0
+    mod_timestamp: '{{ .CommitTimestamp }}'
+    flags:
+      - -tags=prod
+      - -trimpath
+    ldflags:
+      - -s -w -H=windowsgui
+      - -X main.version={{ .Version }}
+      - -X main.commit={{ .Commit }}
+      - -X main.date={{ .CommitDate }}
+    goos:
+      - windows
+    goarch:
+      - amd64
+    binary: nano-llm-proxyw   # .exe is appended by GoReleaser
 
 archives:
   - id: default
+    # Binaries are grouped per platform: windows_amd64 gets both .exe files,
+    # linux/darwin only nano-llm-proxy (nano-llm-proxyw has no such targets).
+    ids:
+      - nano-llm-proxy
+      - nano-llm-proxyw
+    # Intentional: two binaries on windows_amd64, one everywhere else.
+    allow_different_binary_count: true
     formats: [tar.gz]
     format_overrides:
       - goos: windows
@@ -80,8 +112,37 @@ changelog:
 release:
   draft: false
   prerelease: auto
+  # The one-line installers fetch these from releases/latest/download/, so a
+  # script always pairs with the binaries it was released with.
+  extra_files:
+    - glob: scripts/install/install.*
   header: |
-    ## Installing
+    ## Install on your own computer (local mode)
+
+    macOS, Linux, WSL:
+
+    ```bash
+    curl -fsSL https://github.com/kmmuntasir/nano-llm-proxy/releases/latest/download/install.sh | bash
+    ```
+
+    Windows PowerShell:
+
+    ```powershell
+    irm https://github.com/kmmuntasir/nano-llm-proxy/releases/latest/download/install.ps1 | iex
+    ```
+
+    Windows CMD:
+
+    ```bat
+    curl -fsSL https://github.com/kmmuntasir/nano-llm-proxy/releases/latest/download/install.cmd -o install.cmd && install.cmd && del install.cmd
+    ```
+
+    No admin rights needed. The installer verifies the download against
+    `checksums.txt`, starts nano-llm-proxy in the background and opens
+    `http://localhost:8787`. Re-run it to upgrade; `--uninstall` (`-Uninstall`
+    on Windows) removes it.
+
+    ## Installing on a server
 
     Download the binary for your platform, make it executable, and run it.
 
