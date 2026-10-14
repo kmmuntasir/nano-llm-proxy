@@ -1,5 +1,6 @@
 import { useMemo } from "react"
 import { Link as RouterLink } from "react-router-dom"
+import { useQuery } from "@tanstack/react-query"
 import {
   Alert,
   Badge,
@@ -12,6 +13,8 @@ import {
   Text,
   VStack,
 } from "@chakra-ui/react"
+import { api } from "../api/client"
+import type { RuntimeSettingsView } from "../api/types"
 import { useIsLocal } from "../api/useAuthConfig"
 import JsonBlock from "../components/JsonBlock"
 import { DataTable } from "../components/DataTable"
@@ -19,16 +22,19 @@ import { DataTable } from "../components/DataTable"
 // DocsPage — the user guide. Everything renders from window.location.origin
 // so the same binary serves correct snippets whether the gateway is reached
 // over LAN or a public domain. Purely client-side: keys shown here are
-// placeholders, never fetched.
+// placeholders, never fetched. Local mode (one person's computer, no
+// sign-in) gets its own wording: no admins, no accounts, and — unless
+// "Require an API key" is on — a placeholder key instead of an fg- key.
 
 const FG_PLACEHOLDER = "fg-paste-your-client-key"
+const LOCAL_PLACEHOLDER = "local"
 
 interface TroubleshootingRow {
   symptom: string
   meaning: string
 }
 
-const TROUBLESHOOTING: TroubleshootingRow[] = [
+const SERVER_TROUBLESHOOTING: TroubleshootingRow[] = [
   {
     symptom: "401 Invalid or missing API key",
     meaning:
@@ -85,6 +91,76 @@ const TROUBLESHOOTING: TroubleshootingRow[] = [
   },
 ]
 
+const LOCAL_TROUBLESHOOTING: TroubleshootingRow[] = [
+  {
+    symptom: "Connection refused / nothing answers",
+    meaning:
+      "nano-llm-proxy isn't running. Run nano-llm-proxy local status; start it with nano-llm-proxy local, or sign out and back in if it starts at sign-in. Its log file is listed in Settings → This computer.",
+  },
+  {
+    symptom: "401 Invalid or missing API key",
+    meaning:
+      "“Require an API key” is on in Settings and the key is missing or revoked — create one in Profile → My API Keys.",
+  },
+  {
+    symptom: "401 The built-in local key is disabled",
+    meaning:
+      "The built-in “local (no key)” key was turned off in Profile → My API Keys, which blocks keyless requests. Turn it back on, or send one of your own keys.",
+  },
+  {
+    symptom: "403 this address is not allowed",
+    meaning:
+      "The request used a host name other than localhost, 127.0.0.1 or [::1] (with the right port). Local mode only answers to this computer's own names.",
+  },
+  {
+    symptom: "403 Requests from web pages are not allowed",
+    meaning:
+      "A web page from another site called /v1 or /mcp from the browser. Local mode refuses that so websites can't spend your credits; agents and scripts don't send an Origin and aren't affected.",
+  },
+  {
+    symptom: "415 Content-Type must be application/json",
+    meaning: "Send POST bodies with the header Content-Type: application/json.",
+  },
+  {
+    symptom: '400 Model must be "<provider>/<id>"',
+    meaning:
+      "Use the full provider/model id from the Models page (e.g. zen/…). On /v1/messages a bare claude-* name only works when an Anthropic fallback model is set in Settings.",
+  },
+  {
+    symptom: "400 Unknown provider",
+    meaning:
+      "The provider prefix is misspelled, or that provider is turned off on the Providers page. The Models page lists every usable provider.",
+  },
+  {
+    symptom: "400 upstream 4xx: …",
+    meaning:
+      "The upstream rejected the request — usually a wrong model id under a valid provider, or a parameter that model doesn't accept.",
+  },
+  {
+    symptom: "503 No healthy <provider> keys available",
+    meaning:
+      "The provider has no keys yet, or every key was rate-limited, cooling down or disabled. Add keys on the Providers page; cooling keys recover on their own.",
+  },
+  {
+    symptom: "Reply cut off (finish reason length / max_tokens)",
+    meaning:
+      "The model used up the client's output budget, often on hidden reasoning. Raise the client's max output tokens (Pi: maxTokens per model, default 16384), switch models, or say continue. The gateway adds no output cap of its own.",
+  },
+  {
+    symptom: "404 from /mcp",
+    meaning: "Web tools are disabled in Settings → Web tools (MCP).",
+  },
+  {
+    symptom: "web_search fails or returns no results",
+    meaning:
+      "Check the SearXNG line in Settings → This computer: it must be running. If it is, search engines may be CAPTCHA-blocking your IP — edit searxng/settings.yml in the data folder and restart.",
+  },
+  {
+    symptom: "web_read returns empty/JS-shell text",
+    meaning: "Re-run with render: true — the page needs a real browser (obscura; set its path in Settings → Web tools).",
+  },
+]
+
 function Section({
   title,
   children,
@@ -117,6 +193,14 @@ function PageLink({ to, children }: { to: string; children: React.ReactNode }) {
 export default function DocsPage() {
   const origin = window.location.origin
   const isLocal = useIsLocal()
+  // the owner is a superadmin, so local mode can read the settings document
+  const settings = useQuery({
+    queryKey: ["settings"],
+    queryFn: () => api<{ settings: RuntimeSettingsView }>("/api/settings"),
+    enabled: isLocal,
+  })
+  const keyRequired = !isLocal || (settings.data?.settings.local?.requireApiKey ?? false)
+  const key = keyRequired ? FG_PLACEHOLDER : LOCAL_PLACEHOLDER
 
   const snippets = useMemo(
     () => ({
@@ -124,7 +208,7 @@ export default function DocsPage() {
         {
           env: {
             ANTHROPIC_BASE_URL: origin,
-            ANTHROPIC_AUTH_TOKEN: FG_PLACEHOLDER,
+            ANTHROPIC_AUTH_TOKEN: key,
             ANTHROPIC_DEFAULT_OPUS_MODEL: "provider/model-opus",
             ANTHROPIC_DEFAULT_SONNET_MODEL: "provider/model-sonnet",
             ANTHROPIC_DEFAULT_HAIKU_MODEL: "provider/model-haiku",
@@ -133,7 +217,7 @@ export default function DocsPage() {
         null,
         2,
       ),
-      claudeMcp: `claude mcp add -s user -t http nano-web ${origin}/mcp --header "Authorization: Bearer ${FG_PLACEHOLDER}"`,
+      claudeMcp: `claude mcp add -s user -t http nano-web ${origin}/mcp --header "Authorization: Bearer ${key}"`,
       piModels: JSON.stringify(
         {
           $schema: "https://pi.dev/schemas/models.schema.json",
@@ -142,7 +226,7 @@ export default function DocsPage() {
               name: "Nano",
               baseUrl: `${origin}/v1`,
               api: "openai-completions",
-              apiKey: FG_PLACEHOLDER,
+              apiKey: key,
               models: [
                 {
                   id: "provider/model-id",
@@ -158,13 +242,13 @@ export default function DocsPage() {
         null,
         2,
       ),
-      piMcpAdd: `pi mcp add nano-web --url ${origin}/mcp --header "Authorization=Bearer ${FG_PLACEHOLDER}" --exposure direct --description "Web search and page reading"`,
+      piMcpAdd: `pi mcp add nano-web --url ${origin}/mcp --header "Authorization=Bearer ${key}" --exposure direct --description "Web search and page reading"`,
       piMcpJson: JSON.stringify(
         {
           mcpServers: {
             "nano-web": {
               url: `${origin}/mcp`,
-              headers: { Authorization: `Bearer ${FG_PLACEHOLDER}` },
+              headers: { Authorization: `Bearer ${key}` },
               exposure: "direct",
               description: "Web search and page reading",
             },
@@ -174,49 +258,79 @@ export default function DocsPage() {
         2,
       ),
       curl: `curl ${origin}/v1/chat/completions \\
-  -H "Authorization: Bearer ${FG_PLACEHOLDER}" \\
+  -H "Authorization: Bearer ${key}" \\
   -H "Content-Type: application/json" \\
   -d '{
     "model": "provider/model-id",
     "messages": [{ "role": "user", "content": "hello" }]
   }'`,
     }),
-    [origin],
+    [origin, key],
   )
 
   return (
     <VStack align="stretch" gap={6}>
       <Heading size="lg">Guide</Heading>
-      <Text fontSize="sm" color="fg.muted">
-        Everything on this page is generated for this deployment — every URL
-        below points at <Code fontFamily="mono">{origin}</Code>. Grab a key
-        from <PageLink to="/profile">Profile → My API Keys</PageLink> and paste
-        it wherever a snippet says <Code fontFamily="mono">{FG_PLACEHOLDER}</Code>.
-      </Text>
+      {isLocal ? (
+        <Text fontSize="sm" color="fg.muted">
+          Everything on this page is generated for this computer — every URL
+          below points at <Code fontFamily="mono">{origin}</Code>.
+        </Text>
+      ) : (
+        <Text fontSize="sm" color="fg.muted">
+          Everything on this page is generated for this deployment — every URL
+          below points at <Code fontFamily="mono">{origin}</Code>. Grab a key
+          from <PageLink to="/profile">Profile → My API Keys</PageLink> and paste
+          it wherever a snippet says <Code fontFamily="mono">{FG_PLACEHOLDER}</Code>.
+        </Text>
+      )}
       {isLocal && (
         <Alert.Root status="info" size="sm">
           <Alert.Indicator />
           <Alert.Content>
             <Alert.Description>
-              Running locally — no API key needed unless you turn on “Require an API key”
-              in <PageLink to="/settings">Settings</PageLink>; use any placeholder key
-              like <Code fontFamily="mono">local</Code>. OpenAI base URL{" "}
-              <Code fontFamily="mono" wordBreak="break-all">{origin}/v1</Code>, Anthropic base
-              URL <Code fontFamily="mono" wordBreak="break-all">{origin}</Code>.
+              {keyRequired ? (
+                <>
+                  “Require an API key” is on in{" "}
+                  <PageLink to="/settings">Settings</PageLink>: create a key in{" "}
+                  <PageLink to="/profile">Profile → My API Keys</PageLink> and paste it
+                  wherever a snippet says <Code fontFamily="mono">{FG_PLACEHOLDER}</Code>.
+                </>
+              ) : (
+                <>
+                  Running on this computer — no API key needed. Agents that insist on one
+                  can use any placeholder; the snippets use{" "}
+                  <Code fontFamily="mono">{LOCAL_PLACEHOLDER}</Code>. Turn on “Require an
+                  API key” in <PageLink to="/settings">Settings</PageLink> to keep other
+                  programs on this computer out.
+                </>
+              )}
             </Alert.Description>
           </Alert.Content>
         </Alert.Root>
       )}
 
       <Section title="What this is">
-        <Text fontSize="sm">
-          One endpoint in front of many LLM providers. You get a single{" "}
-          <Code fontFamily="mono">fg-…</Code> key, every model from the
-          providers your account can use under one catalog, automatic upstream
-          key rotation and failover, per-user usage tracking, and self-hosted
-          MCP web tools (<Code fontFamily="mono">web_search</Code>,{" "}
-          <Code fontFamily="mono">web_read</Code>) — no paid search APIs.
-        </Text>
+        {isLocal ? (
+          <Text fontSize="sm">
+            One endpoint in front of many LLM providers, running on this
+            computer for you alone: every model from your providers under one
+            catalog, automatic upstream key rotation and failover, usage
+            tracking, and MCP web tools (<Code fontFamily="mono">web_search</Code>{" "}
+            through a private SearXNG, <Code fontFamily="mono">web_read</Code>) —
+            no paid search APIs. Add your provider keys on the{" "}
+            <PageLink to="/providers">Providers page</PageLink>.
+          </Text>
+        ) : (
+          <Text fontSize="sm">
+            One endpoint in front of many LLM providers. You get a single{" "}
+            <Code fontFamily="mono">fg-…</Code> key, every model from the
+            providers your account can use under one catalog, automatic upstream
+            key rotation and failover, per-user usage tracking, and self-hosted
+            MCP web tools (<Code fontFamily="mono">web_search</Code>,{" "}
+            <Code fontFamily="mono">web_read</Code>) — no paid search APIs.
+          </Text>
+        )}
         <HStack gap={2} flexWrap="wrap">
           <Badge variant="outline">OpenAI — <Code fontFamily="mono">{origin}/v1</Code></Badge>
           <Badge variant="outline">Anthropic — <Code fontFamily="mono">{origin}</Code></Badge>
@@ -231,8 +345,9 @@ export default function DocsPage() {
           <Code fontFamily="mono">/v1/responses</Code> (OpenAI Responses — only
           zen models served on the Responses API), and{" "}
           <Code fontFamily="mono">POST /mcp</Code>. The same key works
-          everywhere, sent as <Code fontFamily="mono">Authorization: Bearer fg-…</Code>{" "}
-          or <Code fontFamily="mono">x-api-key: fg-…</Code>.
+          everywhere, sent as <Code fontFamily="mono">Authorization: Bearer {key}</Code>{" "}
+          or <Code fontFamily="mono">x-api-key: {key}</Code>
+          {isLocal && !keyRequired ? " — or no key at all." : "."}
         </Text>
         <Text fontSize="sm" color="fg.muted">
           The version label at the bottom of the sidebar opens the{" "}
@@ -244,7 +359,7 @@ export default function DocsPage() {
       <Section title="Pick models">
         <Text fontSize="sm">
           The <PageLink to="/models">Models page</PageLink> lists every model
-          your account can use, with its exact{" "}
+          {isLocal ? " your providers offer" : " your account can use"}, with its exact{" "}
           <Code fontFamily="mono">provider/model</Code> id (copy button next to
           it), context window, output limit, reasoning flags and effort levels.
           Use that full id as the <Code fontFamily="mono">model</Code> value in
@@ -252,9 +367,10 @@ export default function DocsPage() {
         </Text>
         <Text fontSize="sm">
           Benchmark scores (Artificial Analysis indexes, Design Arena) come from
-          OpenRouter. They refresh daily when an admin has the catalog auto-sync
-          on, or when an admin presses Sync now; free and stealth models often
-          have none.
+          OpenRouter. They refresh daily when {isLocal ? "the" : "an admin has the"} catalog
+          auto-sync {isLocal ? "is on in Settings" : "on"}, or when{" "}
+          {isLocal ? "you press" : "an admin presses"} Sync now; free and stealth
+          models often have none.
         </Text>
         <List.Root fontSize="sm" pl={4}>
           <List.Item>
@@ -269,7 +385,8 @@ export default function DocsPage() {
             On <Code fontFamily="mono">/v1/messages</Code> only, a bare{" "}
             <Code fontFamily="mono">claude-*</Code> model name (no{" "}
             <Code fontFamily="mono">provider/</Code> prefix) is rerouted to the
-            admin-configured Anthropic fallback model — handy for Claude Code
+            {isLocal ? " Anthropic fallback model set in Settings" : " admin-configured Anthropic fallback model"}{" "}
+            — handy for Claude Code
             background tasks. With no fallback set, it fails with 400.
           </List.Item>
         </List.Root>
@@ -326,7 +443,8 @@ export default function DocsPage() {
       <Section title="Anything else (OpenAI-compatible)">
         <Text fontSize="sm">
           Any client speaking OpenAI chat completions works: base URL{" "}
-          <Code fontFamily="mono">{origin}/v1</Code>, your key as a Bearer
+          <Code fontFamily="mono">{origin}/v1</Code>,{" "}
+          {isLocal && !keyRequired ? "any key (or none)" : "your key"} as a Bearer
           token, and a <Code fontFamily="mono">provider/model</Code> id.
         </Text>
         <JsonBlock code={snippets.curl} title="curl" copyLabel="copy" />
@@ -335,7 +453,8 @@ export default function DocsPage() {
       <Section title="MCP web tools">
         <Text fontSize="sm">
           Two tools at <Code fontFamily="mono">{origin}/mcp</Code>:{" "}
-          <Code fontFamily="mono">web_search</Code> (self-hosted SearXNG;{" "}
+          <Code fontFamily="mono">web_search</Code> (
+          {isLocal ? "the private SearXNG the installer set up" : "self-hosted SearXNG"};{" "}
           <Code fontFamily="mono">maxResults</Code> 1–25) and{" "}
           <Code fontFamily="mono">web_read</Code> (fast native fetch, with a
           headless-browser fallback for JavaScript-heavy or bot-protected
@@ -349,14 +468,34 @@ export default function DocsPage() {
           <Code fontFamily="mono">web-tools</Code> (models{" "}
           <Code fontFamily="mono">web_search</Code> /{" "}
           <Code fontFamily="mono">web_read</Code>, surface{" "}
-          <Code fontFamily="mono">mcp</Code>). An admin must have web tools
-          enabled in Settings → Web tools (MCP) — otherwise the endpoint
-          answers 404. Any MCP-capable client works the same way.
+          <Code fontFamily="mono">mcp</Code>).{" "}
+          {isLocal
+            ? "Web tools are on by default here; turning them off in Settings → Web tools (MCP) makes the endpoint answer 404. Settings → This computer shows whether SearXNG is running."
+            : "An admin must have web tools enabled in Settings → Web tools (MCP) — otherwise the endpoint answers 404."}{" "}
+          Any MCP-capable client works the same way.
         </Text>
       </Section>
 
-      <Section title="Accounts & keys">
+      <Section title={isLocal ? "Keys" : "Accounts & keys"}>
         <List.Root fontSize="sm" pl={4} gap={1}>
+          {isLocal ? (
+            <>
+              <List.Item>
+                There is no sign-in: anyone who can use this computer can open this
+                page. Requests without a key are counted under the built-in{" "}
+                <Code fontFamily="mono">local (no key)</Code> key in{" "}
+                <PageLink to="/profile">Profile → My API Keys</PageLink>; turning
+                that key off blocks keyless requests.
+              </List.Item>
+              <List.Item>
+                Create your own <Code fontFamily="mono">fg-</Code> keys there to
+                tell agents apart on the Usage page — a valid key is always
+                credited, even when keys aren't required. With “Require an API
+                key” on, only those keys work.
+              </List.Item>
+            </>
+          ) : (
+            <>
           <List.Item>
             Accounts are created by an admin. Google sign-in (when enabled)
             only works for an email that already has an account — it never
@@ -372,6 +511,8 @@ export default function DocsPage() {
             If an admin deactivates your account, your sessions end and every
             one of your keys starts returning 401.
           </List.Item>
+            </>
+          )}
           <List.Item>
             The gateway rotates its upstream keys for you: each provider
             sticks with one healthy key (good for prompt caching) and fails over
@@ -385,8 +526,8 @@ export default function DocsPage() {
         <Text fontSize="sm">
           The <PageLink to="/usage">Usage page</PageLink> shows your requests,
           errors, tokens, latency and cache hits over any time range, with
-          Overview, Models and Requests tabs (admins also get Users and
-          Users × Models). Every request is listed with its status, the failure
+          Overview, Models and Requests tabs
+          {isLocal ? "" : " (admins also get Users and Users × Models)"}. Every request is listed with its status, the failure
           reason when it failed, and its token counts.
         </Text>
         <Text fontSize="sm">
@@ -402,7 +543,7 @@ export default function DocsPage() {
 
       <Section title="Troubleshooting">
         <DataTable
-          rows={TROUBLESHOOTING}
+          rows={isLocal ? LOCAL_TROUBLESHOOTING : SERVER_TROUBLESHOOTING}
           rowKey={(r) => r.symptom}
           columns={[
             {
