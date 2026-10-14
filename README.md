@@ -285,7 +285,7 @@ presets](#provider-presets)), served by the generic passthrough:
 
 | Adapter | Upstream | What it handles |
 | --- | --- | --- |
-| `zen` (built in) | OpenCode Zen (`opencode.ai/zen/v1`) | Injects the client headers and tool stubs the API requires, routes each model to its Chat or Responses surface (self-correcting on the signature 503), and translates between the two shapes — including tool calls |
+| `zen` (built in) | OpenCode Zen (`opencode.ai/inference/v1`) | Injects the client headers and tool stubs the API requires, routes each model to its Chat or Responses surface (self-correcting on the signature 503), and translates between the two shapes — including tool calls |
 | presets (Kilo, DeepSeek, Z.ai, …) | per preset | OpenAI/Anthropic passthrough with rotation; presets with special catalogs map their metadata (Kilo's rich catalog, Z.ai's models.dev merge) |
 | generic | any OpenAI- and/or Anthropic-compatible base URL | GUI-added providers — no code needed |
 
@@ -541,9 +541,9 @@ cd web && npm ci && npm run dev       # GUI dev server
 | Symptom | Cause | Fix |
 | --- | --- | --- |
 | 401 on `/v1/*` | missing or wrong client key | create one in the GUI (Profile → My API Keys) |
-| 502 with a client-shape hint | provider rejected the adapted request | check the adapter's config (`userAgent`, injection flags) |
-| zen model 502s from pi/oh-my-pi only, with `unknown variant 'developer'` in the log | the client sends the newer `developer` instruction role; that model's upstream validates the role enum strictly | already handled — the zen adapter renames it to `system`; a `developer` message in your own code should use `system` |
-| 502 "no healthy keys" | all keys cooling or disabled | check the Providers page; re-enable or wait out cooldowns |
+| 503 with a client-shape hint | provider rejected the adapted request | check the adapter's config (`userAgent`, injection flags) |
+| zen or Z.ai models fail from pi/oh-my-pi only (`unknown variant 'developer'`, Z.ai `1214 Incorrect role information`) | the client sends the newer `developer` instruction role for reasoning models; those upstreams validate the role strictly | already handled — the gateway renames it to `system` for every upstream except OpenAI |
+| 503 "no healthy keys" | all keys cooling or disabled | check the Providers page; re-enable or wait out cooldowns |
 | Boot refuses to start: "zen.userAgent ... fails the 1.18.0 floor" | the DB holds a too-old user agent | fix it in Settings → Zen, or reset all settings: `sqlite3 gateway.db "DELETE FROM settings WHERE key='runtime_settings'"` |
 | GUI login loop over plain HTTP | `NANO_COOKIE_SECURE=true` without TLS | set it false locally, or serve over HTTPS |
 | GUI mutations 403 behind a reverse proxy | browser Origin differs from backend Host | add your public host to `NANO_TRUSTED_ORIGINS` |

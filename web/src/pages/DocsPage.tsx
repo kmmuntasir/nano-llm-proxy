@@ -43,19 +43,19 @@ const TROUBLESHOOTING: TroubleshootingRow[] = [
       "The provider prefix is misspelled, or an admin hasn't given your account access to that provider. The Models page lists only the providers you can use.",
   },
   {
-    symptom: "502 upstream 4xx: …",
+    symptom: "400 upstream 4xx: …",
     meaning:
       "The upstream rejected the request — usually a wrong model id under a valid provider, or a parameter that model doesn't accept.",
   },
   {
-    symptom: "502 No healthy <provider> keys available",
+    symptom: "503 No healthy <provider> keys available",
     meaning:
       "Every upstream key tried was rate-limited, cooling down or disabled. Cooling keys recover on their own — retry in a minute; if it persists an admin checks the Providers page.",
   },
   {
     symptom: "Cloudflare-branded 502 page",
     meaning:
-      "Can be the gateway's own 502 above: Cloudflare replaces the gateway's error body with its own page. Check Usage → Requests for the real failure reason before assuming the host is down.",
+      "The gateway itself didn't answer (stopped, restarting or unreachable) — it never returns 502 on its own, precisely because Cloudflare would replace its explanation. Retry in a minute; if it persists an admin checks the service.",
   },
   {
     symptom: "520–526 (e.g. 523) from the public URL",
