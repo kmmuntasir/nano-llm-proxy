@@ -9,6 +9,25 @@ Release notes are generated from commit prefixes, so `feat:`, `fix:`,
 
 ## [Unreleased]
 
+## [0.3.1] — 2026-10-15
+
+A fix release for dead upstream keys.
+
+### Fixed
+
+- A revoked key whose 401 says so in other words — Zen's `Invalid
+  credential`, Kilo's `INVALID_TOKEN` — is now disabled like one that
+  answers `AuthError`. It used to be cooled for 10 seconds and retried
+  forever, costing every request a wasted upstream call. A 401 that only
+  wraps an upstream flake still just cools the key.
+- The models.dev catalog sync and the `/v1/models` catalog fetch no longer
+  rely on a single key: they move on to the next key (up to
+  `retry.maxKeysPerRequest`) when one is rejected, forbidden or rate
+  limited. Before, one dead key that daily rotation made "first" failed the
+  sync with `zen /models HTTP 401` and dropped that provider from
+  `/v1/models` while its other keys worked. Endpoint-wide failures (5xx,
+  404, network) still fail at once, and catalog failures never cool a key.
+
 ## [0.3.0] — 2026-10-15
 
 Local mode: nano-llm-proxy on your own computer, installed with one
@@ -374,7 +393,8 @@ instance with no shared pool across replicas; and upstream provider keys
 stored reversibly in the SQLite file, so the database must stay at mode
 `0600` on a host you trust.
 
-[Unreleased]: https://github.com/kmmuntasir/nano-llm-proxy/compare/v0.3.0...HEAD
+[Unreleased]: https://github.com/kmmuntasir/nano-llm-proxy/compare/v0.3.1...HEAD
+[0.3.1]: https://github.com/kmmuntasir/nano-llm-proxy/compare/v0.3.0...v0.3.1
 [0.3.0]: https://github.com/kmmuntasir/nano-llm-proxy/compare/v0.2.0...v0.3.0
 [0.2.0]: https://github.com/kmmuntasir/nano-llm-proxy/compare/v0.1.1...v0.2.0
 [0.1.1]: https://github.com/kmmuntasir/nano-llm-proxy/compare/v0.1.0...v0.1.1
