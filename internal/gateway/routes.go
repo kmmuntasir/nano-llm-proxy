@@ -205,46 +205,73 @@ func (g *gateway) fetchUpstreamModels(ref providerRef) ([]any, error) {
 }
 
 func (g *gateway) fetchModelsOpenAI(ref providerRef) ([]any, error) {
-	key := ref.pool.pick(nil)
-	if key == nil {
-		return nil, fmt.Errorf("No healthy %s keys available — every key is cooling or disabled", ref.name)
-	}
-	req, err := http.NewRequestWithContext(context.Background(), http.MethodGet, ref.baseURL+"/models", nil)
-	if err != nil {
-		return nil, err
-	}
-	req.Header.Set("Authorization", "Bearer "+key.Key)
-	resp, err := g.client.Do(req)
+	resp, err := g.catalogGet(context.Background(), ref, ref.baseURL+"/models", func(req *http.Request, key string) {
+		req.Header.Set("Authorization", "Bearer "+key)
+	})
 	if err != nil {
 		return nil, err
 	}
 	defer resp.Body.Close()
-	if resp.StatusCode != http.StatusOK {
-		return nil, fmt.Errorf("%s /models HTTP %d", ref.name, resp.StatusCode)
-	}
 	return g.decodeModelList(ref, resp)
 }
 
 func (g *gateway) fetchModelsAnthropic(ref providerRef) ([]any, error) {
-	key := ref.pool.pick(nil)
-	if key == nil {
-		return nil, fmt.Errorf("No healthy %s keys available — every key is cooling or disabled", ref.name)
-	}
-	req, err := http.NewRequestWithContext(context.Background(), http.MethodGet, ref.anthropicBaseURL+"/v1/models", nil)
-	if err != nil {
-		return nil, err
-	}
-	req.Header.Set("x-api-key", key.Key)
-	req.Header.Set("anthropic-version", "2023-06-01")
-	resp, err := g.client.Do(req)
+	resp, err := g.catalogGet(context.Background(), ref, ref.anthropicBaseURL+"/v1/models", func(req *http.Request, key string) {
+		req.Header.Set("x-api-key", key)
+		req.Header.Set("anthropic-version", "2023-06-01")
+	})
 	if err != nil {
 		return nil, err
 	}
 	defer resp.Body.Close()
-	if resp.StatusCode != http.StatusOK {
-		return nil, fmt.Errorf("%s /v1/models HTTP %d", ref.name, resp.StatusCode)
-	}
 	return g.decodeModelList(ref, resp)
+}
+
+// catalogGet GETs a provider's model list, failing over across up to
+// maxKeysPerRequest pool keys: one dead or rate-limited key must not empty
+// the catalog (or fail the models.dev sync) while its siblings work. Only
+// key-specific answers (401/403/429) move on to the next key; a network
+// error, 404 or 5xx is the endpoint's, the same for every key, so it fails
+// at once (and dual-endpoint providers fall back to their other root).
+// Catalog failures never cool a key — only a 401 the upstream explicitly
+// blames on the key disables it (classify), as on the request path. The
+// caller closes the body of the 200 response it gets back.
+func (g *gateway) catalogGet(ctx context.Context, ref providerRef, url string, auth func(*http.Request, string)) (*http.Response, error) {
+	exclude := map[string]bool{}
+	var lastErr error
+	for range max(1, g.rs().Retry.MaxKeysPerRequest) {
+		k := ref.pool.pick(exclude)
+		if k == nil {
+			break
+		}
+		exclude[k.Hash] = true
+		req, err := http.NewRequestWithContext(ctx, http.MethodGet, url, nil)
+		if err != nil {
+			return nil, err
+		}
+		auth(req, k.Key)
+		resp, err := g.client.Do(req)
+		if err != nil {
+			return nil, fmt.Errorf("%s catalog: %w", ref.name, err)
+		}
+		if resp.StatusCode == http.StatusOK {
+			return resp, nil
+		}
+		lastErr = fmt.Errorf("%s %s HTTP %d", ref.name, req.URL.Path, resp.StatusCode)
+		switch resp.StatusCode {
+		case http.StatusUnauthorized:
+			g.classify(ref.pool, k, resp) // disables the key if the body blames it
+		case http.StatusForbidden, http.StatusTooManyRequests:
+		default:
+			resp.Body.Close()
+			return nil, lastErr
+		}
+		resp.Body.Close()
+	}
+	if lastErr == nil {
+		lastErr = fmt.Errorf("No healthy %s keys available — every key is cooling or disabled", ref.name)
+	}
+	return nil, lastErr
 }
 
 // decodeModelList parses an upstream catalog ({"data":[{"id":...}, ...]}) and

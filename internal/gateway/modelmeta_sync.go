@@ -167,30 +167,21 @@ func decodeOpencodeModels(r io.Reader) (map[string]modelsDevModel, error) {
 	return models, nil
 }
 
-// liveZenModelIDs fetches Zen's own /models with the first healthy pool key —
-// the same shape fetchUpstreamModels uses, minus the enrichment.
+// liveZenModelIDs fetches Zen's own /models, failing over across pool keys
+// (catalogGet) — the same shape fetchUpstreamModels uses, minus the
+// enrichment.
 func (g *gateway) liveZenModelIDs(ctx context.Context) ([]string, error) {
 	ref, ok := g.provider("zen")
 	if !ok {
 		return nil, fmt.Errorf("no zen provider")
 	}
-	key := ref.pool.pick(nil)
-	if key == nil {
-		return nil, fmt.Errorf("no healthy zen keys")
-	}
-	req, err := http.NewRequestWithContext(ctx, http.MethodGet, ref.baseURL+"/models", nil)
-	if err != nil {
-		return nil, err
-	}
-	req.Header.Set("Authorization", "Bearer "+key.Key)
-	resp, err := g.client.Do(req)
+	resp, err := g.catalogGet(ctx, ref, ref.baseURL+"/models", func(req *http.Request, key string) {
+		req.Header.Set("Authorization", "Bearer "+key)
+	})
 	if err != nil {
 		return nil, err
 	}
 	defer resp.Body.Close()
-	if resp.StatusCode != http.StatusOK {
-		return nil, fmt.Errorf("zen /models HTTP %d", resp.StatusCode)
-	}
 	var parsed struct {
 		Data []struct {
 			ID string `json:"id"`

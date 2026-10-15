@@ -128,13 +128,16 @@ func oneLine(body []byte) string {
 	return s
 }
 
-// keyErrorPhrases are how upstreams that answer 400 (not 401) for a wrong
-// key say so — xAI: "Incorrect API key provided". Matched case-insensitively
-// and kept specific, so an ordinary 400 (unknown model, bad parameter) still
-// counts as "the key authenticated".
+// keyErrorPhrases are how upstreams say a key is wrong: in a 400 (xAI:
+// "Incorrect API key provided") and in a 401 body (zen: "Invalid credential";
+// kilo: "INVALID_TOKEN … Your authentication token is invalid"). Matched
+// case-insensitively and kept specific, so an ordinary 400 (unknown model,
+// bad parameter) still counts as "the key authenticated", and a 401 that
+// only wraps an upstream flake doesn't disable a good key (classify).
 var keyErrorPhrases = []string{
 	"incorrect api key", "invalid api key", "invalid_api_key", "api key is invalid",
 	"api key not valid", "invalid x-api-key", "invalid authentication",
+	"invalid credential", "invalid_token", "authentication token is invalid",
 }
 
 // saysKeyIsWrong reports whether a 400 body blames the key.

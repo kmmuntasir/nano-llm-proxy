@@ -283,8 +283,10 @@ func (g *gateway) classify(pool *Pool, k *KeyState, resp *http.Response) verdict
 		}
 	case 401:
 		// zen occasionally wraps upstream flakes as 401 server_error — only a
-		// genuine auth rejection disables the key; everything else just cools.
-		if strings.Contains(string(body), "AuthError") || strings.Contains(string(body), "Invalid API key") {
+		// genuine auth rejection (zen's AuthError type, or a body that says
+		// the key is wrong — keycheck.go's phrases, e.g. zen's "Invalid
+		// credential") disables the key; everything else just cools.
+		if strings.Contains(string(body), "AuthError") || saysKeyIsWrong(body) {
 			// the hint reaches the client and fail_reason: never name the
 			// operator's key there — pool.disable logs the label server-side
 			v.hint = "an upstream key was rejected (401 auth) and disabled"
