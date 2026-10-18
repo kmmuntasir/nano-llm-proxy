@@ -21,11 +21,25 @@ import {
   Text,
   VStack,
 } from "@chakra-ui/react"
-import { Activity, ChevronDown, ChevronUp, FileUp, List, Pencil, Plus, Trash2 } from "lucide-react"
+import {
+  Activity,
+  CalendarX,
+  ChevronDown,
+  ChevronUp,
+  FileUp,
+  List,
+  Pencil,
+  Plus,
+  ShieldX,
+  Trash2,
+  TriangleAlert,
+} from "lucide-react"
+import type { LucideIcon } from "lucide-react"
 import { api, del, patch, post, put, ApiError } from "../api/client"
 import ModelCard from "../components/ModelCard"
 import type {
   PresetSpecView,
+  ProviderKeyDisabledReason,
   ProviderKeyView,
   ProviderView,
   ReasoningOptionView,
@@ -237,6 +251,53 @@ function AddProviderCard({ added }: { added: Set<string> }) {
   )
 }
 
+// Keys the gateway disabled after the upstream refused them. Shown per key
+// (badge + helper) and summarized on the provider card header.
+const DISABLED_REASONS: Record<
+  ProviderKeyDisabledReason,
+  { label: string; palette: string; icon: LucideIcon; help: string; summary: string }
+> = {
+  expired: {
+    label: "Expired",
+    palette: "red",
+    icon: CalendarX,
+    help: "The provider says this key has expired. Create a new key in the provider's console, add it here, and delete this one.",
+    summary: "expired",
+  },
+  auth: {
+    label: "Rejected",
+    palette: "orange",
+    icon: ShieldX,
+    help: "The provider rejected this key as invalid. Replace it.",
+    summary: "rejected",
+  },
+}
+
+const DISABLED_REASON_ORDER: ProviderKeyDisabledReason[] = ["expired", "auth"]
+
+function DisabledReasonSummary({ keys }: { keys: ProviderKeyView[] }) {
+  const lines = DISABLED_REASON_ORDER.map((reason) => ({
+    reason,
+    count: keys.filter((k) => k.disabledReason === reason).length,
+  })).filter((l) => l.count > 0)
+  if (lines.length === 0) return null
+  return (
+    <Stack gap={1}>
+      {lines.map(({ reason, count }) => (
+        <HStack key={reason} gap={1.5} fontSize="xs" color="orange.fg" align="start">
+          <Box flexShrink={0} pt="1px">
+            <TriangleAlert size="14" />
+          </Box>
+          <Text>
+            {count} {count === 1 ? "key" : "keys"} {DISABLED_REASONS[reason].summary} — replace{" "}
+            {count === 1 ? "it" : "them"}
+          </Text>
+        </HStack>
+      ))}
+    </Stack>
+  )
+}
+
 function ProviderKeyRow({ provider, k }: { provider: ProviderView; k: ProviderKeyView }) {
   const qc = useQueryClient()
   const [toDelete, setToDelete] = useState(false)
@@ -275,89 +336,112 @@ function ProviderKeyRow({ provider, k }: { provider: ProviderView; k: ProviderKe
       toaster.create({ title: e instanceof ApiError ? e.message : "Failed to remove the key", type: "error" }),
   })
 
+  const reason = k.disabledReason ? DISABLED_REASONS[k.disabledReason] : undefined
+  const ReasonIcon = reason?.icon
+
   return (
-    <HStack gap={3} fontSize="sm" py={1}>
-      {renaming ? (
-        <>
-          <Input autoComplete="off"
-            size="xs"
-            fontFamily="mono"
-            value={labelDraft}
-            onChange={(e) => setLabelDraft(e.target.value)}
-            maxW="160px"
-            autoFocus
-          />
-          <Button
-            size="2xs"
-            colorPalette="blue"
-            loading={rename.isPending}
-            onClick={() => rename.mutate()}
+    <Stack gap={0.5} py={1}>
+      <HStack gap={3} fontSize="sm">
+        {renaming ? (
+          <>
+            <Input autoComplete="off"
+              size="xs"
+              fontFamily="mono"
+              value={labelDraft}
+              onChange={(e) => setLabelDraft(e.target.value)}
+              maxW="160px"
+              autoFocus
+            />
+            <Button
+              size="2xs"
+              colorPalette="blue"
+              loading={rename.isPending}
+              onClick={() => rename.mutate()}
+            >
+              Save
+            </Button>
+            <Button size="2xs" variant="ghost" onClick={() => setRenaming(false)}>
+              Cancel
+            </Button>
+          </>
+        ) : (
+          <>
+            <Code fontFamily="mono" fontSize="xs">
+              {k.label || k.hash || `#${k.id}`}
+            </Code>
+            <IconButton
+              variant="ghost"
+              size="2xs"
+              aria-label={`rename key ${k.label || k.hash || `#${k.id}`}`}
+              onClick={() => {
+                setLabelDraft(k.label)
+                setRenaming(true)
+              }}
+            >
+              <Pencil />
+            </IconButton>
+          </>
+        )}
+        {reason && ReasonIcon ? (
+          <Badge
+            variant="subtle"
+            colorPalette={reason.palette}
+            rounded="full"
+            px={2}
+            flexShrink={0}
+            title={reason.help}
           >
-            Save
-          </Button>
-          <Button size="2xs" variant="ghost" onClick={() => setRenaming(false)}>
-            Cancel
-          </Button>
-        </>
-      ) : (
-        <>
-          <Code fontFamily="mono" fontSize="xs">
-            {k.label || k.hash || `#${k.id}`}
-          </Code>
+            <ReasonIcon size="12" /> {reason.label}
+          </Badge>
+        ) : (
+          k.status && <StatusBadge status={k.status} />
+        )}
+        {k.cooldownRemaining && (
+          <Text fontSize="xs" color="fg.muted">
+            {k.cooldownRemaining}
+          </Text>
+        )}
+        <Text color="fg.muted" fontSize="xs">
+          {k.requests ?? 0} reqs · {k.rateLimited ?? 0} 429s · {k.errors ?? 0} err
+        </Text>
+        <HStack ml="auto">
+          <Switch.Root
+            size="sm"
+            checked={!k.disabled}
+            onCheckedChange={(e) => toggle.mutate(!e.checked)}
+          >
+            <Switch.HiddenInput />
+            <Switch.Control>
+              <Switch.Thumb />
+            </Switch.Control>
+          </Switch.Root>
           <IconButton
             variant="ghost"
-            size="2xs"
-            aria-label={`rename key ${k.label || k.hash || `#${k.id}`}`}
-            onClick={() => {
-              setLabelDraft(k.label)
-              setRenaming(true)
-            }}
+            size="xs"
+            aria-label="delete key"
+            colorPalette="red"
+            onClick={() => setToDelete(true)}
           >
-            <Pencil />
+            <Trash2 />
           </IconButton>
-        </>
-      )}
-      {k.status && <StatusBadge status={k.status} />}
-      {k.cooldownRemaining && (
-        <Text fontSize="xs" color="fg.muted">
-          {k.cooldownRemaining}
+        </HStack>
+        <ConfirmDialog
+          open={toDelete}
+          onOpenChange={() => setToDelete(false)}
+          title="Remove upstream key?"
+          body={<Text>The pool rebuilds immediately without this key.</Text>}
+          confirmText="Remove"
+          destructive
+          busy={remove.isPending}
+          onConfirm={() => remove.mutate()}
+        />
+      </HStack>
+      {reason && (
+        <Text fontSize="xs" color={`${reason.palette}.fg`}>
+          {reason.help}
         </Text>
       )}
-      <Text color="fg.muted" fontSize="xs">
-        {k.requests ?? 0} reqs · {k.rateLimited ?? 0} 429s · {k.errors ?? 0} err
-      </Text>
-      <HStack ml="auto">
-        <Switch.Root
-          size="sm"
-          checked={!k.disabled}
-          onCheckedChange={(e) => toggle.mutate(!e.checked)}
-        >
-          <Switch.HiddenInput />
-          <Switch.Control>
-            <Switch.Thumb />
-          </Switch.Control>
-        </Switch.Root>
-        <IconButton
-          variant="ghost"
-          size="xs"
-          aria-label="delete key"
-          colorPalette="red"
-          onClick={() => setToDelete(true)}
-        >
-          <Trash2 />
-        </IconButton>
-      </HStack>
-      <ConfirmDialog
-        open={toDelete}
-        onOpenChange={() => setToDelete(false)}
-        title="Remove upstream key?"
-        body={<Text>The pool rebuilds immediately without this key.</Text>}
-        confirmText="Remove"
-        destructive
-        busy={remove.isPending}
-        onConfirm={() => remove.mutate()}
-      />
-    </HStack>
+    </Stack>
   )
 }
 
@@ -824,6 +908,7 @@ function ProviderCard({ p }: { p: ProviderView }) {
             </Switch.Root>
           </HStack>
         </HStack>
+        <DisabledReasonSummary keys={p.keys} />
 
         {/* endpoint roots: whichever are set route the matching surface */}
         <Stack fontSize="xs" color="fg.muted" gap={1}>
