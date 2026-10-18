@@ -176,11 +176,18 @@ func TestFreeTierErrorFailsFastWithoutBurningPool(t *testing.T) {
 	if rec.Code != http.StatusServiceUnavailable {
 		t.Fatalf("expected 503, got %d", rec.Code)
 	}
-	if !strings.Contains(rec.Body.String(), "client-shape") {
-		t.Fatalf("expected client-shape hint in body, got: %s", rec.Body.String())
+	body := rec.Body.String()
+	if !strings.Contains(body, "client emulation") || !strings.Contains(body, "this server's IP") {
+		t.Fatalf("expected emulation-or-IP hint in body, got: %s", body)
 	}
 	if calls != 1 {
 		t.Fatalf("FreeTierError must fail fast (1 call), got %d calls", calls)
+	}
+	// not a per-key problem: no key cools or disables
+	for _, k := range g.zen.snapshot() {
+		if k.Status != statusHealthy || k.CoolingModels != 0 {
+			t.Fatalf("key %s = %s (cooling models %d), want healthy", k.Label, k.Status, k.CoolingModels)
+		}
 	}
 }
 

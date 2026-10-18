@@ -59,7 +59,7 @@ docs/                    # api.md, configuration.md, deployment.md, local.md, ar
 
 - Return errors with context (`fmt.Errorf("…: %w", err)`); no swallowed errors. The few intentional ignores carry a comment (`//nolint:errcheck`-style, as in `writeJSON`).
 - Log with the standard `log` package. Never log client keys, upstream keys, session tokens, passwords, or full request/response bodies — log identifiers/labels (`key=<label>`), status, and timing.
-- Failure classification is a contract: genuine auth failures disable a key (in memory — a pool rebuild or restart re-enables it; the Providers page switch is the persistent disable); rate limits/flakes cool down (honor `Retry-After`); client-shape errors fail fast with a hint; failover stops at the first byte streamed. Preserve these when touching `pool.go` / adapters.
+- Failure classification is a contract: genuine auth failures (rejected or expired keys) disable a key (in memory — it survives pool rebuilds; a restart, deleting the key, or an admin switching it on again re-enables it; the Providers page switch is the persistent disable); rate limits/flakes cool down (honor `Retry-After`); client-shape errors fail fast with a hint; failover stops at the first byte streamed. Preserve these when touching `pool.go` / adapters.
 
 ## Concurrency & streaming
 

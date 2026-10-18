@@ -55,6 +55,12 @@ export interface UserProviderView {
   disabledForUser: boolean
 }
 
+// Why the gateway disabled an upstream key in memory after the upstream
+// rejected it: "expired" = the provider says the key has expired, "auth" =
+// rejected as invalid. Omitted when the gateway has not disabled the key (and
+// by older servers). Distinct from disabled, the admin's persistent switch.
+export type ProviderKeyDisabledReason = "auth" | "expired"
+
 export interface ProviderKeyView {
   id: number
   label: string
@@ -63,6 +69,9 @@ export interface ProviderKeyView {
   createdAt: number
   hash?: string
   status?: string
+  disabledReason?: ProviderKeyDisabledReason
+  // models this key is rate-limited for (a 429 cools a key per model)
+  coolingModels?: number
   cooldownRemaining?: string
   requests?: number
   rateLimited?: number

@@ -9,6 +9,40 @@ Release notes are generated from commit prefixes, so `feat:`, `fix:`,
 
 ## [Unreleased]
 
+### Fixed
+
+- A 429 now cools the key for the rate-limited model only, not for every
+  model. When zen rate-limited a few hot models across all keys at once,
+  every key went "cooling" and every model answered "No healthy zen keys".
+- A model rate-limited across keys stops rotating: once two distinct keys
+  answer 429 for the same model within 15 seconds, the request stops trying
+  further keys, and until the backoff ends (the longest `Retry-After` seen,
+  at least `retry.cooldownSeconds`, at most 5 minutes) each request for
+  that model makes a single attempt on a key not cooling for it. A success
+  ends the backoff, another 429 extends it (doubling, capped). When every
+  key is cooling for the model, requests fail fast with no upstream call.
+  Rotating through every key on each request tripled upstream calls and got
+  a deployment's IP flagged.
+- A Z.ai 429 that states its reset time cools the whole key until then:
+  that quota is the account's, so every model is out, not just one.
+- Rate-limited requests answer 429 with a `Retry-After` header and a
+  `rate_limit_error` type (OpenAI and Anthropic shapes) instead of 503, so
+  clients back off instead of retrying at once. Logged in usage as 429.
+- An expired upstream key (a 401/403 whose JSON error code is
+  `api_key_expired`, as OpenCode sends) is disabled like a rejected one
+  instead of being cooled for 10 seconds and retried forever. The match is
+  on the structured code only — error bodies can echo client text, so
+  wording alone never disables a key. The Providers API reports why a key
+  was disabled (`disabledReason`: `auth` or `expired`), and adding an
+  expired key is refused with "the key has expired".
+- Runtime key disables (rejected or expired) now survive the pool rebuild
+  every GUI save does; before, an expired key came back on each save and
+  cost a failed call. They end on restart, key deletion, or when an admin
+  switches the key on again.
+- The zen `FreeTierError` hint now names the other likely cause: zen
+  blocking free usage from the server's IP, not only drifted client
+  emulation. Still fails fast without cooling any key.
+
 ## [0.3.1] — 2026-10-15
 
 A fix release for dead upstream keys.

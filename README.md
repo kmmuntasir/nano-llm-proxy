@@ -281,9 +281,11 @@ Failure handling per request:
 
 | Upstream response | Key action | Request action |
 | --- | --- | --- |
-| 429 with `Retry-After` | cooldown for that duration | next key |
-| 429 without | 30 s cooldown — Z.ai coding-plan 429s state the reset in the body, and the key cools until that instant | next key |
-| 401 genuine auth error | disabled in memory (until the next restart or GUI change; switch it off on the Providers page to make it permanent) | next key |
+| 429 with `Retry-After` | the key cools for that duration — for the requested model only; it keeps serving other models | next key, unless the model is rate-limited across keys (below) |
+| 429 without | as above, 30 s (`retry.cooldownSeconds`) | as above |
+| 429 from Z.ai with a stated reset (code 1308) | the whole key cools until that instant — the quota is the account's, shared by every model | next key |
+| 401/403 with error code `api_key_expired` (OpenCode) | disabled in memory, reason "expired" — replace the key | next key |
+| 401 genuine auth error | disabled in memory, reason "auth" — survives GUI changes; ends on restart or when an admin switches the key on again (switch it off on the Providers page to make it permanent) | next key |
 | 401 anything else | 10 s cooldown (some providers wrap flakes as 401) | next key |
 | 403 `FreeTierError` (zen's client-shape gate) | none — not the key's fault | fail fast with a hint |
 | 403 mentioning auth | disabled in memory, as for 401 | next key |
@@ -302,6 +304,16 @@ Two structural rules:
 - Cooldowns are timestamps, not counters. When the primary key's cooldown
   lapses it is simply first-healthy again — one probe request per cycle,
   self-correcting.
+- A model rate-limited across keys stops rotating. When two distinct keys
+  answer 429 for the same model within 15 s, the limit is likely the
+  model's or the server IP's: the request stops trying keys (429), and for
+  a backoff — the longest `Retry-After` seen, at least
+  `retry.cooldownSeconds`, at most 5 min — each request for that model
+  tries at most one key that isn't cooling for it and never rotates. Keys
+  that never answered 429 keep serving; a success ends the backoff, another
+  429 extends it (doubling, cap 5 min). Only when every key is cooling for
+  the model does a request fail fast — 429 with `Retry-After`, no upstream
+  call.
 
 An optional daily cap per key (Settings → Retries) cools an exhausted key
 until midnight; off by default.
@@ -583,6 +595,9 @@ cd web && npm ci && npm run dev       # GUI dev server
 | --- | --- | --- |
 | 401 on `/v1/*` | missing or wrong client key | create one in the GUI (Profile → My API Keys) |
 | 503 with a client-shape hint | provider rejected the adapted request | check the adapter's config (`userAgent`, injection flags) |
+| 503 `upstream FreeTierError` | zen refused free-tier access: the client emulation drifted, or zen blocks free usage from this server's IP | test the same key from another network; if it works there, it's the IP |
+| 429 "`<provider>` is rate-limiting `<model>`" | the upstream rate-limits that model across keys (or this server's IP) | wait for `Retry-After`; other models keep working |
+| 503 "an upstream key has expired" | the provider expired the key; it is disabled (Providers page shows "expired") | create a new key with the provider and replace it |
 | zen or Z.ai models fail from pi/oh-my-pi only (`unknown variant 'developer'`, Z.ai `1214 Incorrect role information`) | the client sends the newer `developer` instruction role for reasoning models; those upstreams validate the role strictly | already handled — the gateway renames it to `system` for every upstream except OpenAI |
 | 503 "no healthy keys" | all keys cooling or disabled | check the Providers page; re-enable or wait out cooldowns |
 | Boot refuses to start: "zen.userAgent ... fails the 1.18.0 floor" | the DB holds a too-old user agent | fix it in Settings → Zen, or reset all settings: `sqlite3 gateway.db "DELETE FROM settings WHERE key='runtime_settings'"` |

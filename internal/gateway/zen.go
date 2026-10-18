@@ -3,7 +3,6 @@ package gateway
 import (
 	"bytes"
 	"encoding/json"
-	"fmt"
 	"log"
 	"maps"
 	"net/http"
@@ -269,8 +268,8 @@ func normalizeInstructionRoles(body map[string]any) bool {
 }
 
 // proxyZen runs the rotation loop for zen models across both surfaces.
-func (g *gateway) proxyZen(ref providerRef, w http.ResponseWriter, r *http.Request, body map[string]any, model string, clientWantsStream bool, start time.Time) string {
-	exclude := map[string]bool{}
+func (g *gateway) proxyZen(ref providerRef, w http.ResponseWriter, r *http.Request, body map[string]any, model string, clientWantsStream bool, start time.Time) *upstreamFailure {
+	rot := g.newRotation(ref, model)
 	surface := g.surfaceFor(model)
 	var lastHint string
 
@@ -280,11 +279,10 @@ func (g *gateway) proxyZen(ref providerRef, w http.ResponseWriter, r *http.Reque
 
 	tr := traceFrom(r)
 	for attempt := 0; attempt < g.rs().Retry.MaxKeysPerRequest; attempt++ {
-		k := ref.pool.pick(exclude)
+		k := rot.next()
 		if k == nil {
 			break
 		}
-		exclude[k.Hash] = true
 		tr.attempt(k.Label)
 
 		upBody := body
@@ -307,7 +305,7 @@ func (g *gateway) proxyZen(ref providerRef, w http.ResponseWriter, r *http.Reque
 		req, err := http.NewRequestWithContext(r.Context(), http.MethodPost,
 			ref.baseURL+path, bytes.NewReader(raw))
 		if err != nil {
-			return "internal: " + err.Error()
+			return failHint("internal: " + err.Error())
 		}
 		req.Header.Set("Authorization", "Bearer "+k.Key)
 		req.Header.Set("Content-Type", "application/json")
@@ -322,14 +320,11 @@ func (g *gateway) proxyZen(ref providerRef, w http.ResponseWriter, r *http.Reque
 		}
 		tr.upstream(resp.StatusCode)
 		if resp.StatusCode != http.StatusOK {
-			v := g.classify(ref.pool, k, resp)
+			v := rot.rejected(k, resp)
 			resp.Body.Close()
-			if v.cooldown > 0 {
-				ref.pool.cooldown(k, v.cooldown, fmt.Sprintf("HTTP %d", resp.StatusCode))
-			}
 			switch v.action {
 			case "failfast":
-				return v.hint
+				return failHint(v.hint)
 			case "flipsurface":
 				other := "chat"
 				if surface == "chat" {
@@ -337,13 +332,14 @@ func (g *gateway) proxyZen(ref providerRef, w http.ResponseWriter, r *http.Reque
 				}
 				g.learnSurface(model, other)
 				surface = other
-				exclude[k.Hash] = false // same key is fine on the right surface
+				rot.retrySame(k) // same key is fine on the right surface
 				attempt--
 			}
 			lastHint = v.hint
 			continue
 		}
 
+		rot.succeeded()
 		var tu tokenUsage
 		if surface == "responses" {
 			tu = translateResponses(w, resp, model, clientWantsStream)
@@ -353,10 +349,7 @@ func (g *gateway) proxyZen(ref providerRef, w http.ResponseWriter, r *http.Reque
 			tu = aggregateChatSSE(w, resp, model)
 		}
 		g.recordActivity(r, ref, model, k.Hash, start, http.StatusOK, "", tu)
-		return ""
+		return nil
 	}
-	if lastHint == "" {
-		lastHint = "No healthy zen keys available — every key is cooling or disabled"
-	}
-	return lastHint
+	return rot.exhausted(lastHint)
 }

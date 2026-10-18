@@ -240,7 +240,7 @@ func (g *gateway) catalogGet(ctx context.Context, ref providerRef, url string, a
 	exclude := map[string]bool{}
 	var lastErr error
 	for range max(1, g.rs().Retry.MaxKeysPerRequest) {
-		k := ref.pool.pick(exclude)
+		k := ref.pool.pick(exclude, "") // catalog GETs aren't model-scoped
 		if k == nil {
 			break
 		}

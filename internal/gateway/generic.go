@@ -3,7 +3,6 @@ package gateway
 import (
 	"bytes"
 	"encoding/json"
-	"fmt"
 	"log"
 	"net/http"
 	"net/url"
@@ -14,27 +13,26 @@ import (
 // proxyOpenAI is the rotation loop for plain OpenAI-compatible providers
 // (a kilo preset or any GUI-added provider): pick/classify/retry against
 // <base_url>/chat/completions with a Bearer upstream key.
-func (g *gateway) proxyOpenAI(ref providerRef, w http.ResponseWriter, r *http.Request, body map[string]any, clientWantsStream bool, start time.Time) string {
+func (g *gateway) proxyOpenAI(ref providerRef, w http.ResponseWriter, r *http.Request, body map[string]any, clientWantsStream bool, start time.Time) *upstreamFailure {
 	model, _ := body["model"].(string)
+	rot := g.newRotation(ref, model)
 	if !keepsDeveloperRole(ref) && normalizeInstructionRoles(body) {
 		log.Printf("%s model=%s: renamed developer role to system for upstream", ref.name, model)
 	}
 	raw, _ := json.Marshal(body)
-	exclude := map[string]bool{}
 	var lastHint string
 
 	tr := traceFrom(r)
 	for attempt := 0; attempt < g.rs().Retry.MaxKeysPerRequest; attempt++ {
-		k := ref.pool.pick(exclude)
+		k := rot.next()
 		if k == nil {
 			break
 		}
-		exclude[k.Hash] = true
 		tr.attempt(k.Label)
 		req, err := http.NewRequestWithContext(r.Context(), http.MethodPost,
 			ref.baseURL+"/chat/completions", bytes.NewReader(raw))
 		if err != nil {
-			return "internal: " + err.Error()
+			return failHint("internal: " + err.Error())
 		}
 		req.Header.Set("Authorization", "Bearer "+k.Key)
 		req.Header.Set("Content-Type", "application/json")
@@ -47,14 +45,11 @@ func (g *gateway) proxyOpenAI(ref providerRef, w http.ResponseWriter, r *http.Re
 		}
 		tr.upstream(resp.StatusCode)
 		if resp.StatusCode != http.StatusOK {
-			v := g.classify(ref.pool, k, resp)
+			v := rot.rejected(k, resp)
 			resp.Body.Close()
-			if v.cooldown > 0 {
-				ref.pool.cooldown(k, v.cooldown, fmt.Sprintf("HTTP %d", resp.StatusCode))
-			}
 			switch v.action {
 			case "failfast":
-				return v.hint
+				return failHint(v.hint)
 			case "flipsurface":
 				// surface flips are zen machinery; for plain providers this
 				// 503 just means the endpoint is gone
@@ -64,14 +59,12 @@ func (g *gateway) proxyOpenAI(ref providerRef, w http.ResponseWriter, r *http.Re
 			lastHint = v.hint
 			continue
 		}
+		rot.succeeded()
 		tu := streamKilo(w, resp)
 		g.recordActivity(r, ref, model, k.Hash, start, http.StatusOK, "", tu)
-		return ""
+		return nil
 	}
-	if lastHint == "" {
-		lastHint = fmt.Sprintf("No healthy %s keys available — every key is cooling or disabled", ref.name)
-	}
-	return lastHint
+	return rot.exhausted(lastHint)
 }
 
 // keepsDeveloperRole reports whether an OpenAI-compatible upstream accepts

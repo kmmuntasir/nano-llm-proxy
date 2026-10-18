@@ -64,8 +64,8 @@ block is server-owned).
 | Path | Default | Meaning |
 | --- | --- | --- |
 | `rotation` | `priority-daily` | `priority-daily` (stick with failover from a starting key that advances one position per day, per provider), `priority` (stick with failover from the first key, prompt-cache friendly) or `lru` (spread load). Rebuilds every pool on save |
-| `retry.maxKeysPerRequest` | 3 | Failover attempts per request (1–100) |
-| `retry.cooldownSeconds` | 30 | Default 429 cooldown (0 = only honor `Retry-After`) |
+| `retry.maxKeysPerRequest` | 3 | Failover attempts per request (1–100). While a model is rate-limited across keys (two distinct keys 429 within 15 s) its requests make a single attempt instead (see `cooldownSeconds`) |
+| `retry.cooldownSeconds` | 30 | Default 429 cooldown (0 = only honor `Retry-After`). A 429 cools the key for the requested model only (Z.ai's account-wide 429 cools the whole key until its stated reset). Also the minimum backoff when a model is rate-limited across keys: for max(longest `Retry-After` seen, this, 5 s), capped at 5 min, each request for it tries one key not cooling for it, without rotating; another 429 extends it (doubling at most every 15 s), a success ends it |
 | `retry.respectRetryAfter` | true | Prefer the upstream `Retry-After` duration |
 | `retry.maxRequestsPerKeyPerDay` | 0 (off) | Optional per-key daily cap; an exhausted key cools until midnight |
 | `anthropic.fallbackModel` | empty | Target for literal `claude-*` requests (background tasks clients self-issue) on `/v1/messages`; empty = a bare `claude-*` model name is rejected (400 — it has no `provider/` prefix) |

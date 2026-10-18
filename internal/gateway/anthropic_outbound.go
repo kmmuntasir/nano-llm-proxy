@@ -16,25 +16,24 @@ import (
 // chat shapes, so OpenAI-protocol agents can use Anthropic-only providers.
 
 // chatViaAnthropic is the rotation loop for anthropic-only providers.
-func (g *gateway) chatViaAnthropic(ref providerRef, w http.ResponseWriter, r *http.Request, chat map[string]any, model string, clientWantsStream bool, start time.Time) string {
+func (g *gateway) chatViaAnthropic(ref providerRef, w http.ResponseWriter, r *http.Request, chat map[string]any, model string, clientWantsStream bool, start time.Time) *upstreamFailure {
+	rot := g.newRotation(ref, model)
 	// translation is key-independent — do it once, outside the retry loop
 	anth := chatToAnthropicBody(chat, clientWantsStream)
 	raw, _ := json.Marshal(anth)
-	exclude := map[string]bool{}
 	var lastHint string
 
 	tr := traceFrom(r)
 	for attempt := 0; attempt < g.rs().Retry.MaxKeysPerRequest; attempt++ {
-		k := ref.pool.pick(exclude)
+		k := rot.next()
 		if k == nil {
 			break
 		}
-		exclude[k.Hash] = true
 		tr.attempt(k.Label)
 		req, err := http.NewRequestWithContext(r.Context(), http.MethodPost,
 			ref.anthropicBaseURL+"/v1/messages", bytes.NewReader(raw))
 		if err != nil {
-			return "internal: " + err.Error()
+			return failHint("internal: " + err.Error())
 		}
 		req.Header.Set("x-api-key", k.Key)
 		req.Header.Set("anthropic-version", "2023-06-01")
@@ -48,24 +47,22 @@ func (g *gateway) chatViaAnthropic(ref providerRef, w http.ResponseWriter, r *ht
 		}
 		tr.upstream(resp.StatusCode)
 		if resp.StatusCode != http.StatusOK {
-			v := g.classify(ref.pool, k, resp)
+			v := rot.rejected(k, resp)
 			resp.Body.Close()
-			if v.cooldown > 0 {
-				ref.pool.cooldown(k, v.cooldown, fmt.Sprintf("HTTP %d", resp.StatusCode))
-			}
 			if v.action == "failfast" {
-				return v.hint
+				return failHint(v.hint)
 			}
 			lastHint = v.hint
 			continue
 		}
+		rot.succeeded()
 		var tu tokenUsage
 		if clientWantsStream {
 			tu = streamAnthropicSSEToChat(w, resp.Body, model)
 		} else {
 			var msg map[string]any
 			if err := json.NewDecoder(io.LimitReader(resp.Body, 20<<20)).Decode(&msg); err != nil {
-				return "upstream returned invalid JSON"
+				return failHint("upstream returned invalid JSON")
 			}
 			tu = usageFromAnthropicMsg(msg)
 			out, _ := json.Marshal(anthropicJSONToChat(msg, model))
@@ -74,12 +71,9 @@ func (g *gateway) chatViaAnthropic(ref providerRef, w http.ResponseWriter, r *ht
 			w.Write(out)
 		}
 		g.recordActivity(r, ref, model, k.Hash, start, http.StatusOK, "", tu)
-		return ""
+		return nil
 	}
-	if lastHint == "" {
-		lastHint = fmt.Sprintf("No healthy %s keys available — every key is cooling or disabled", ref.name)
-	}
-	return lastHint
+	return rot.exhausted(lastHint)
 }
 
 // chatToAnthropicBody converts an OpenAI chat-completions request into an

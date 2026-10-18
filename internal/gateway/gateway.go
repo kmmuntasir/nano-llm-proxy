@@ -19,8 +19,16 @@ import (
 
 var startTime = time.Now()
 
-const freeTierHint = "upstream FreeTierError: the request failed the provider's client-shape check; " +
-	"check the provider's client emulation settings (userAgent, headers, body shape)"
+// freeTierHint is the fail-fast answer to zen's FreeTierError. It is not
+// per key — the client emulation or this server's IP is the problem — so
+// no key cools for it.
+const freeTierHint = "upstream FreeTierError: zen refused free-tier access — either the client " +
+	"emulation (userAgent, headers, body shape) no longer matches, or zen is blocking free usage " +
+	"from this server's IP; test the same key from another network"
+
+// keyExpiredHint reaches the client and fail_reason when an upstream says
+// a key expired. It never names the key; pool.disable logs the label.
+const keyExpiredHint = "an upstream key has expired and was disabled — an admin must replace it"
 
 const upgradeHint = "upstream UpgradeRequired: the configured zen.userAgent is below the " +
 	"1.18.0 floor; raise it in the admin GUI (Settings → Zen)"
@@ -80,6 +88,8 @@ type gateway struct {
 	bench atomic.Pointer[benchIndex] // model benchmarks for /api/models (benchmarks.go)
 
 	usageBuf usageBuffer // per-request usage events, drained to the DB by the maintenance loop
+
+	breaker rateBreaker // per (provider, model) rate-limit breaker (ratelimit.go)
 }
 
 // conf returns the bootstrap config; never nil after either constructor.
@@ -151,13 +161,13 @@ func (g *gateway) rebuildPools() error {
 	prev := map[string]*KeyState{}
 	g.regMu.RLock()
 	for _, ref := range g.registry {
-		for _, ks := range ref.pool.rawKeys() {
+		for _, ks := range ref.pool.stateCopies() {
 			prev[ks.Hash] = ks
 		}
 	}
 	for _, p := range []*Pool{g.zen, g.kilo} {
 		if p != nil {
-			for _, ks := range p.rawKeys() {
+			for _, ks := range p.stateCopies() {
 				prev[ks.Hash] = ks
 			}
 		}
@@ -253,16 +263,37 @@ func (g *gateway) allProviders() []providerRef {
 type verdict struct {
 	action   string // "nextkey", "failfast", "flipsurface"
 	cooldown time.Duration
-	hint     string
-	body     []byte
+	// rateLimited marks a 429: cooldown applies to (key, model) only, and
+	// the answer feeds the rate-limit breaker (keyRotation.rejected).
+	rateLimited bool
+	// accountWide marks a 429 for the key's whole account (zai's stated
+	// reset): the key cools for every model and the breaker isn't fed — it
+	// says nothing about the model.
+	accountWide bool
+	// keyDisabled marks a genuine auth failure (rejected or expired key):
+	// a key problem, so the client gets 503 whatever status carried it.
+	keyDisabled bool
+	hint        string
+	body        []byte
 }
 
 func (g *gateway) classify(pool *Pool, k *KeyState, resp *http.Response) verdict {
 	body, _ := io.ReadAll(io.LimitReader(resp.Body, 8<<10))
 	v := verdict{action: "nextkey", body: body}
 
+	// An expired key is a genuine auth failure (OpenCode: 401 code
+	// api_key_expired); without this check its body matched no auth phrase
+	// and the key was cooled and retried forever. Structured match only —
+	// see saysKeyExpired.
+	if saysKeyExpired(resp.StatusCode, body) {
+		v.hint, v.keyDisabled = keyExpiredHint, true
+		pool.disable(k, disabledExpired, fmt.Sprintf("%d key expired", resp.StatusCode))
+		return v
+	}
+
 	switch resp.StatusCode {
 	case 429:
+		v.rateLimited = true
 		pool.recordRateLimit(k)
 		if ra := resp.Header.Get("Retry-After"); ra != "" && g.rs().Retry.RespectRetryAfter {
 			var secs int
@@ -270,11 +301,13 @@ func (g *gateway) classify(pool *Pool, k *KeyState, resp *http.Response) verdict
 				v.cooldown = time.Duration(secs) * time.Second
 			}
 		}
-		if v.cooldown == 0 {
-			// Z.ai coding plans state the reset instant in the 429 body
-			// (no Retry-After). Cooling until then beats re-probing a key
-			// whose window may be hours from resetting.
-			if t, ok := zaiRateLimitReset(body, time.Now()); ok {
+		// Z.ai coding plans state the reset instant in the 429 body (no
+		// Retry-After). That limit is the account's — every model shares
+		// it — so the whole key cools until then; re-probing it per model
+		// only burns calls on a window that may be hours from resetting.
+		if t, ok := zaiRateLimitReset(body, time.Now()); ok {
+			v.rateLimited, v.accountWide = false, true
+			if v.cooldown == 0 {
 				v.cooldown = time.Until(t)
 			}
 		}
@@ -289,8 +322,8 @@ func (g *gateway) classify(pool *Pool, k *KeyState, resp *http.Response) verdict
 		if strings.Contains(string(body), "AuthError") || saysKeyIsWrong(body) {
 			// the hint reaches the client and fail_reason: never name the
 			// operator's key there — pool.disable logs the label server-side
-			v.hint = "an upstream key was rejected (401 auth) and disabled"
-			pool.disable(k, "401 auth")
+			v.hint, v.keyDisabled = "an upstream key was rejected (401 auth) and disabled", true
+			pool.disable(k, disabledAuth, "401 auth")
 		} else {
 			v.cooldown = 10 * time.Second
 			pool.recordError(k)
@@ -300,8 +333,8 @@ func (g *gateway) classify(pool *Pool, k *KeyState, resp *http.Response) verdict
 			v.action = "failfast"
 			v.hint = freeTierHint
 		} else if strings.Contains(string(body), "AuthError") || strings.Contains(string(body), "auth") {
-			v.hint = "an upstream key was rejected (403 auth) and disabled"
-			pool.disable(k, "403 auth")
+			v.hint, v.keyDisabled = "an upstream key was rejected (403 auth) and disabled", true
+			pool.disable(k, disabledAuth, "403 auth")
 		} else {
 			v.cooldown = 10 * time.Second
 			pool.recordError(k)
@@ -359,9 +392,19 @@ func upstreamFailureStatus(r *http.Request) int {
 
 // writeErr emits a JSON error to the client.
 func writeErr(w http.ResponseWriter, status int, msg string) {
+	writeTypedErr(w, status, msg, "")
+}
+
+// writeTypedErr is writeErr with an OpenAI error type (e.g.
+// "rate_limit_error"); an empty type is omitted.
+func writeTypedErr(w http.ResponseWriter, status int, msg, errType string) {
+	e := map[string]string{"message": msg}
+	if errType != "" {
+		e["type"] = errType
+	}
 	w.Header().Set("Content-Type", "application/json")
 	w.WriteHeader(status)
-	json.NewEncoder(w).Encode(map[string]any{"error": map[string]string{"message": msg}})
+	json.NewEncoder(w).Encode(map[string]any{"error": e})
 }
 
 // firstLine condenses an upstream error body to a single short line.
@@ -432,21 +475,18 @@ func (g *gateway) handleChat(w http.ResponseWriter, r *http.Request) {
 
 	log.Printf("req provider=%s model=%s stream=%v", provider, upstreamModel, clientWantsStream)
 
-	var out string
+	var fail *upstreamFailure
 	switch {
 	case ref.typ == "opencode":
-		out = g.proxyZen(ref, w, r, body, upstreamModel, clientWantsStream, start)
+		fail = g.proxyZen(ref, w, r, body, upstreamModel, clientWantsStream, start)
 	case ref.baseURL != "":
-		out = g.proxyOpenAI(ref, w, r, body, clientWantsStream, start)
+		fail = g.proxyOpenAI(ref, w, r, body, clientWantsStream, start)
 	default:
 		// anthropic-only provider: translate chat completions to Messages
-		out = g.chatViaAnthropic(ref, w, r, body, upstreamModel, clientWantsStream, start)
+		fail = g.chatViaAnthropic(ref, w, r, body, upstreamModel, clientWantsStream, start)
 	}
-	if out != "" {
-		status := upstreamFailureStatus(r)
-		g.recordActivity(r, ref, upstreamModel, "", start, status, out, tokenUsage{})
-		log.Printf("res provider=%s model=%s status=failed %s ttft_ms=%d", provider, upstreamModel, out, time.Since(start).Milliseconds())
-		writeErr(w, status, out)
+	if fail != nil {
+		g.writeUpstreamFailure(w, r, ref, upstreamModel, start, fail, tokenUsage{}, false)
 	}
 }
 

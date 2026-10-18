@@ -33,6 +33,8 @@ import (
 // The fake model means the upstream refuses the call before running
 // anything — no tokens, no quota. The verdict, per probe:
 //
+//   - 401 or 403 whose JSON error code is "api_key_expired": the key is
+//     invalid, reported as expired.
 //   - 401, or a 400 whose message says the key is wrong: the key is invalid.
 //   - 403: the key is refused — it may be genuine, but this server can't use
 //     it (region, IP allowlist, permissions, a blocked team or budget). Zen's
@@ -55,6 +57,7 @@ type keyRejectedError struct {
 	status  int
 	detail  string
 	refused bool // 403: authenticated but not permitted (vs. an invalid key)
+	expired bool // the upstream says the key has expired
 }
 
 func (e *keyRejectedError) Error() string {
@@ -103,6 +106,9 @@ func (g *gateway) verifyUpstreamKey(ctx context.Context, baseURL, anthropicBaseU
 		switch {
 		case err != nil:
 			unverifiable = fmt.Errorf("%s endpoint unreachable (%s %s): %v", p.surface, p.method, p.url, err)
+		case saysKeyExpired(status, body):
+			detail := strings.ReplaceAll(oneLine(body), key, "<key>")
+			return &keyRejectedError{surface: p.surface, status: status, detail: detail, expired: true}
 		case status == http.StatusUnauthorized ||
 			(status == http.StatusBadRequest && saysKeyIsWrong(body)) ||
 			(status == http.StatusForbidden && !strings.Contains(string(body), "FreeTierError")):
@@ -149,6 +155,33 @@ func saysKeyIsWrong(body []byte) bool {
 		}
 	}
 	return false
+}
+
+// keyExpiredCode is OpenCode zen's machine-readable expiry marker: HTTP 401
+// {"error":{"type":"authentication_error","code":"api_key_expired",…}}.
+const keyExpiredCode = "api_key_expired"
+
+// saysKeyExpired reports whether an upstream answer means the key expired:
+// a 401 or 403 whose JSON error object carries code (or type)
+// "api_key_expired". Structured on purpose — never a substring search:
+// error bodies can echo client prompts, so a phrase match would let a
+// client plant "key has expired" and get the operator's keys disabled. A
+// 400 is never a key verdict for the same reason.
+func saysKeyExpired(status int, body []byte) bool {
+	if status != http.StatusUnauthorized && status != http.StatusForbidden {
+		return false
+	}
+	var e struct {
+		Error struct {
+			Code any    `json:"code"`
+			Type string `json:"type"`
+		} `json:"error"`
+	}
+	if json.Unmarshal(body, &e) != nil {
+		return false
+	}
+	code, _ := e.Error.Code.(string) // some upstreams send numeric codes
+	return code == keyExpiredCode || e.Error.Type == keyExpiredCode
 }
 
 // keyInfoEndpoints maps an upstream host to its key-info endpoint (relative
@@ -210,6 +243,9 @@ const (
 func classifyKeyCheck(err error, provider, what string) (status, message string) {
 	var rejected *keyRejectedError
 	if errors.As(err, &rejected) {
+		if rejected.expired {
+			return keyCheckInvalid, fmt.Sprintf("%s was rejected: the key has expired — %s's %s. Create a new key with the provider and add that instead.", what, provider, rejected)
+		}
 		if rejected.refused {
 			return keyCheckRefused, fmt.Sprintf("%s was refused — %s's %s. The key may be genuine, but this server can't use it (region, IP allowlist, permissions, or a blocked account or budget).", what, provider, rejected)
 		}

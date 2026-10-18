@@ -57,32 +57,33 @@ func (g *gateway) handleMessages(w http.ResponseWriter, r *http.Request) {
 	clientWantsStream, _ := req["stream"].(bool)
 	log.Printf("req anthropic provider=%s model=%s stream=%v", ref.name, upstreamModel, clientWantsStream)
 
-	var hint string
+	var fail *upstreamFailure
 	var tu tokenUsage
 	switch {
 	case ref.typ == "opencode":
 		chat := anthropicToChatBody(req)
 		chat["model"] = upstreamModel
-		hint, tu = g.messagesViaZen(ref, w, r, chat, upstreamModel, clientWantsStream, start)
+		fail, tu = g.messagesViaZen(ref, w, r, chat, upstreamModel, clientWantsStream, start)
 	case ref.anthropicBaseURL != "":
 		// native Anthropic endpoint: forward verbatim, no translation loss
-		hint, tu = g.messagesViaAnthropic(ref, w, r, req, upstreamModel, clientWantsStream, start)
+		fail, tu = g.messagesViaAnthropic(ref, w, r, req, upstreamModel, clientWantsStream, start)
 	default:
 		chat := anthropicToChatBody(req)
 		chat["model"] = upstreamModel
-		hint, tu = g.messagesViaOpenAI(ref, w, r, chat, upstreamModel, clientWantsStream, start)
+		fail, tu = g.messagesViaOpenAI(ref, w, r, chat, upstreamModel, clientWantsStream, start)
 	}
-	if hint != "" {
-		status := upstreamFailureStatus(r)
-		g.recordActivity(r, ref, upstreamModel, "", start, status, hint, tu)
-		writeAnthropicErr(w, status, hint)
+	if fail != nil {
+		g.writeUpstreamFailure(w, r, ref, upstreamModel, start, fail, tu, true)
 	}
 }
 
 func writeAnthropicErr(w http.ResponseWriter, status int, msg string) {
 	errType := "api_error"
-	if status == http.StatusBadRequest {
+	switch status {
+	case http.StatusBadRequest:
 		errType = "invalid_request_error"
+	case http.StatusTooManyRequests:
+		errType = "rate_limit_error"
 	}
 	w.Header().Set("Content-Type", "application/json")
 	w.WriteHeader(status)
@@ -127,19 +128,18 @@ func usageFromChatJSON(chat map[string]any) tokenUsage {
 
 // messagesViaOpenAI serves anthropic messages via a plain OpenAI-compatible
 // provider (a kilo preset or any GUI-added generic).
-func (g *gateway) messagesViaOpenAI(ref providerRef, w http.ResponseWriter, r *http.Request, chat map[string]any, model string, stream bool, start time.Time) (string, tokenUsage) {
+func (g *gateway) messagesViaOpenAI(ref providerRef, w http.ResponseWriter, r *http.Request, chat map[string]any, model string, stream bool, start time.Time) (*upstreamFailure, tokenUsage) {
+	rot := g.newRotation(ref, model)
 	chat["stream"] = stream
 	raw, _ := json.Marshal(chat)
-	exclude := map[string]bool{}
 	var lastHint string
 
 	tr := traceFrom(r)
 	for attempt := 0; attempt < g.rs().Retry.MaxKeysPerRequest; attempt++ {
-		k := ref.pool.pick(exclude)
+		k := rot.next()
 		if k == nil {
 			break
 		}
-		exclude[k.Hash] = true
 		tr.attempt(k.Label)
 		resp, ok := g.postUpstream(r, ref.baseURL+"/chat/completions", k.Key, raw, false)
 		if !ok {
@@ -150,17 +150,15 @@ func (g *gateway) messagesViaOpenAI(ref providerRef, w http.ResponseWriter, r *h
 		}
 		tr.upstream(resp.StatusCode)
 		if resp.StatusCode != http.StatusOK {
-			v := g.classify(ref.pool, k, resp)
+			v := rot.rejected(k, resp)
 			resp.Body.Close()
-			if v.cooldown > 0 {
-				ref.pool.cooldown(k, v.cooldown, fmt.Sprintf("HTTP %d", resp.StatusCode))
-			}
 			if v.action == "failfast" {
-				return v.hint, tokenUsage{}
+				return failHint(v.hint), tokenUsage{}
 			}
 			lastHint = v.hint
 			continue
 		}
+		rot.succeeded()
 		a := &anthropicStreamWriter{w: w, model: model}
 		var tu tokenUsage
 		if stream {
@@ -170,32 +168,28 @@ func (g *gateway) messagesViaOpenAI(ref providerRef, w http.ResponseWriter, r *h
 		} else {
 			var chatResp map[string]any
 			if err := json.NewDecoder(resp.Body).Decode(&chatResp); err != nil {
-				return "upstream returned invalid JSON", tu
+				return failHint("upstream returned invalid JSON"), tu
 			}
 			tu = usageFromChatJSON(chatResp)
 			writeAnthropicJSON(w, chatJSONToAnthropic(chatResp, model))
 		}
 		g.recordActivity(r, ref, model, k.Hash, start, http.StatusOK, "", tu)
-		return "", tu
+		return nil, tu
 	}
-	if lastHint == "" {
-		lastHint = fmt.Sprintf("No healthy %s keys available — every key is cooling or disabled", ref.name)
-	}
-	return lastHint, tokenUsage{}
+	return rot.exhausted(lastHint), tokenUsage{}
 }
 
-func (g *gateway) messagesViaZen(ref providerRef, w http.ResponseWriter, r *http.Request, chat map[string]any, model string, stream bool, start time.Time) (string, tokenUsage) {
-	exclude := map[string]bool{}
+func (g *gateway) messagesViaZen(ref providerRef, w http.ResponseWriter, r *http.Request, chat map[string]any, model string, stream bool, start time.Time) (*upstreamFailure, tokenUsage) {
+	rot := g.newRotation(ref, model)
 	surface := g.surfaceFor(model)
 	var lastHint string
 
 	tr := traceFrom(r)
 	for attempt := 0; attempt < g.rs().Retry.MaxKeysPerRequest; attempt++ {
-		k := ref.pool.pick(exclude)
+		k := rot.next()
 		if k == nil {
 			break
 		}
-		exclude[k.Hash] = true
 		tr.attempt(k.Label)
 
 		upBody := chat
@@ -221,14 +215,11 @@ func (g *gateway) messagesViaZen(ref providerRef, w http.ResponseWriter, r *http
 		}
 		tr.upstream(resp.StatusCode)
 		if resp.StatusCode != http.StatusOK {
-			v := g.classify(ref.pool, k, resp)
+			v := rot.rejected(k, resp)
 			resp.Body.Close()
-			if v.cooldown > 0 {
-				ref.pool.cooldown(k, v.cooldown, fmt.Sprintf("HTTP %d", resp.StatusCode))
-			}
 			switch v.action {
 			case "failfast":
-				return v.hint, tokenUsage{}
+				return failHint(v.hint), tokenUsage{}
 			case "flipsurface":
 				other := "chat"
 				if surface == "chat" {
@@ -236,13 +227,14 @@ func (g *gateway) messagesViaZen(ref providerRef, w http.ResponseWriter, r *http
 				}
 				g.learnSurface(model, other)
 				surface = other
-				exclude[k.Hash] = false
+				rot.retrySame(k)
 				attempt--
 			}
 			lastHint = v.hint
 			continue
 		}
 
+		rot.succeeded()
 		a := &anthropicStreamWriter{w: w, model: model}
 		var tu tokenUsage
 		if surface == "responses" {
@@ -265,12 +257,9 @@ func (g *gateway) messagesViaZen(ref providerRef, w http.ResponseWriter, r *http
 			writeAnthropicJSON(w, msg)
 		}
 		g.recordActivity(r, ref, model, k.Hash, start, http.StatusOK, "", tu)
-		return "", tu
+		return nil, tu
 	}
-	if lastHint == "" {
-		lastHint = "No healthy zen keys available — every key is cooling or disabled"
-	}
-	return lastHint, tokenUsage{}
+	return rot.exhausted(lastHint), tokenUsage{}
 }
 
 // postUpstream POSTs one upstream attempt. zenFingerprint injects the

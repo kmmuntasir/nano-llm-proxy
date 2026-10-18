@@ -4,7 +4,6 @@ import (
 	"bufio"
 	"bytes"
 	"encoding/json"
-	"fmt"
 	"io"
 	"net/http"
 	"strings"
@@ -22,24 +21,23 @@ import (
 // messagesViaAnthropic serves POST /v1/messages via a provider's
 // Anthropic-compatible endpoint. The body has already had its model prefix
 // stripped by handleMessages; stream is set explicitly to match the client.
-func (g *gateway) messagesViaAnthropic(ref providerRef, w http.ResponseWriter, r *http.Request, req map[string]any, model string, stream bool, start time.Time) (string, tokenUsage) {
+func (g *gateway) messagesViaAnthropic(ref providerRef, w http.ResponseWriter, r *http.Request, req map[string]any, model string, stream bool, start time.Time) (*upstreamFailure, tokenUsage) {
+	rot := g.newRotation(ref, model)
 	req["stream"] = stream
 	raw, _ := json.Marshal(req)
-	exclude := map[string]bool{}
 	var lastHint string
 
 	tr := traceFrom(r)
 	for attempt := 0; attempt < g.rs().Retry.MaxKeysPerRequest; attempt++ {
-		k := ref.pool.pick(exclude)
+		k := rot.next()
 		if k == nil {
 			break
 		}
-		exclude[k.Hash] = true
 		tr.attempt(k.Label)
 		httpReq, err := http.NewRequestWithContext(r.Context(), http.MethodPost,
 			ref.anthropicBaseURL+"/v1/messages", bytes.NewReader(raw))
 		if err != nil {
-			return "internal: " + err.Error(), tokenUsage{}
+			return failHint("internal: " + err.Error()), tokenUsage{}
 		}
 		forwardAnthropicHeaders(httpReq.Header, r.Header)
 		httpReq.Header.Set("x-api-key", k.Key)
@@ -52,25 +50,20 @@ func (g *gateway) messagesViaAnthropic(ref providerRef, w http.ResponseWriter, r
 		}
 		tr.upstream(resp.StatusCode)
 		if resp.StatusCode != http.StatusOK {
-			v := g.classify(ref.pool, k, resp)
+			v := rot.rejected(k, resp)
 			resp.Body.Close()
-			if v.cooldown > 0 {
-				ref.pool.cooldown(k, v.cooldown, fmt.Sprintf("HTTP %d", resp.StatusCode))
-			}
 			if v.action == "failfast" {
-				return v.hint, tokenUsage{}
+				return failHint(v.hint), tokenUsage{}
 			}
 			lastHint = v.hint
 			continue
 		}
+		rot.succeeded()
 		tu := passthroughAnthropic(w, resp)
 		g.recordActivity(r, ref, model, k.Hash, start, http.StatusOK, "", tu)
-		return "", tu
+		return nil, tu
 	}
-	if lastHint == "" {
-		lastHint = fmt.Sprintf("No healthy %s keys available — every key is cooling or disabled", ref.name)
-	}
-	return lastHint, tokenUsage{}
+	return rot.exhausted(lastHint), tokenUsage{}
 }
 
 // forwardAnthropicHeaders copies the client's anthropic-protocol headers

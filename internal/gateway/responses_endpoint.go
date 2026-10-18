@@ -53,10 +53,8 @@ func (g *gateway) handleResponses(w http.ResponseWriter, r *http.Request) {
 	}
 	clientWantsStream := bodyStreamFlag(body)
 
-	if out := g.proxyZenResponses(ref, w, r, body, upstreamModel, clientWantsStream, start); out != "" {
-		status := upstreamFailureStatus(r)
-		g.recordActivity(r, ref, upstreamModel, "", start, status, out, tokenUsage{})
-		writeErr(w, status, out)
+	if fail := g.proxyZenResponses(ref, w, r, body, upstreamModel, clientWantsStream, start); fail != nil {
+		g.writeUpstreamFailure(w, r, ref, upstreamModel, start, fail, tokenUsage{}, false)
 	}
 }
 
@@ -80,8 +78,8 @@ func containsFlatTool(tools []any, name string) bool {
 }
 
 // proxyZenResponses runs the rotation loop against /responses.
-func (g *gateway) proxyZenResponses(ref providerRef, w http.ResponseWriter, r *http.Request, body map[string]any, model string, clientWantsStream bool, start time.Time) string {
-	exclude := map[string]bool{}
+func (g *gateway) proxyZenResponses(ref providerRef, w http.ResponseWriter, r *http.Request, body map[string]any, model string, clientWantsStream bool, start time.Time) *upstreamFailure {
+	rot := g.newRotation(ref, model)
 	var lastHint string
 
 	// same strict-role upstream as the chat surface (see normalizeInstructionRoles)
@@ -91,11 +89,10 @@ func (g *gateway) proxyZenResponses(ref providerRef, w http.ResponseWriter, r *h
 
 	tr := traceFrom(r)
 	for attempt := 0; attempt < g.rs().Retry.MaxKeysPerRequest; attempt++ {
-		k := ref.pool.pick(exclude)
+		k := rot.next()
 		if k == nil {
 			break
 		}
-		exclude[k.Hash] = true
 		tr.attempt(k.Label)
 
 		// fingerprint: stream always on upstream, gate stubs in flat shape
@@ -107,7 +104,7 @@ func (g *gateway) proxyZenResponses(ref providerRef, w http.ResponseWriter, r *h
 		req, err := http.NewRequestWithContext(r.Context(), http.MethodPost,
 			ref.baseURL+"/responses", bytes.NewReader(raw))
 		if err != nil {
-			return "internal: " + err.Error()
+			return failHint("internal: " + err.Error())
 		}
 		req.Header.Set("Authorization", "Bearer "+k.Key)
 		req.Header.Set("Content-Type", "application/json")
@@ -122,21 +119,19 @@ func (g *gateway) proxyZenResponses(ref providerRef, w http.ResponseWriter, r *h
 		}
 		tr.upstream(resp.StatusCode)
 		if resp.StatusCode != http.StatusOK {
-			v := g.classify(ref.pool, k, resp)
+			v := rot.rejected(k, resp)
 			resp.Body.Close()
-			if v.cooldown > 0 {
-				ref.pool.cooldown(k, v.cooldown, fmt.Sprintf("HTTP %d", resp.StatusCode))
-			}
 			if v.action == "failfast" {
-				return v.hint
+				return failHint(v.hint)
 			}
 			if v.action == "flipsurface" {
-				return fmt.Sprintf("Model %s moved off the Responses surface — use /v1/chat/completions", model)
+				return failHint(fmt.Sprintf("Model %s moved off the Responses surface — use /v1/chat/completions", model))
 			}
 			lastHint = v.hint
 			continue
 		}
 
+		rot.succeeded()
 		var tu tokenUsage
 		if clientWantsStream {
 			// native SSE verbatim — full fidelity passthrough
@@ -145,12 +140,9 @@ func (g *gateway) proxyZenResponses(ref providerRef, w http.ResponseWriter, r *h
 			tu = aggregateResponsesSSE(w, resp, model)
 		}
 		g.recordActivity(r, ref, model, k.Hash, start, http.StatusOK, "", tu)
-		return ""
+		return nil
 	}
-	if lastHint == "" {
-		lastHint = "No healthy zen keys available — every key is cooling or disabled"
-	}
-	return lastHint
+	return rot.exhausted(lastHint)
 }
 
 // aggregateResponsesSSE buffers a streamed Responses result into a single

@@ -672,14 +672,17 @@ func TestSettingsPutCooldownTakesEffect(t *testing.T) {
 	if rec.Code != 200 {
 		t.Fatalf("chat after failover: got %d: %s", rec.Code, rec.Body.String())
 	}
+	// a 429 cools (key a, this model) only: the key stays healthy overall
 	for _, k := range g.zen.snapshot() {
-		if k.Label == "key-a" {
-			if k.Status != statusCooling {
-				t.Fatalf("key a status = %s, want cooling", k.Status)
-			}
-			if k.CooldownFor == "" || !strings.HasPrefix(k.CooldownFor, "1m") {
-				t.Fatalf("cooldown remaining = %q, want ~1m", k.CooldownFor)
-			}
+		if k.Label != "key-a" {
+			continue
+		}
+		if k.Status != statusHealthy || k.CoolingModels != 1 {
+			t.Fatalf("key a status = %s, cooling models %d; want healthy with 1 (model-scoped cooldown)", k.Status, k.CoolingModels)
+		}
+		d := modelCooldownFor(g.zen, k.Hash, "mimo-test-free")
+		if d <= 60*time.Second || d > 61*time.Second {
+			t.Fatalf("model cooldown remaining = %v, want ~61s", d)
 		}
 	}
 }

@@ -7,6 +7,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"io"
+	"log"
 	"net/http"
 	"net/url"
 	"regexp"
@@ -57,12 +58,18 @@ func (g *gateway) handleListProviders(w http.ResponseWriter, r *http.Request) {
 	}
 	type pkJSON struct {
 		providerKeyJSON
-		Hash        string `json:"hash"`
-		Status      string `json:"status"`
-		CooldownFor string `json:"cooldownRemaining,omitempty"`
-		Requests    int64  `json:"requests"`
-		RateLimited int64  `json:"rateLimited"`
-		Errors      int64  `json:"errors"`
+		Hash   string `json:"hash"`
+		Status string `json:"status"`
+		// DisabledReason explains a runtime disable: "auth" (rejected) or
+		// "expired" (must be replaced); omitted otherwise.
+		DisabledReason string `json:"disabledReason,omitempty"`
+		CooldownFor    string `json:"cooldownRemaining,omitempty"`
+		// CoolingModels counts models the key is rate-limited for (429);
+		// the key still serves every other model.
+		CoolingModels int   `json:"coolingModels,omitempty"`
+		Requests      int64 `json:"requests"`
+		RateLimited   int64 `json:"rateLimited"`
+		Errors        int64 `json:"errors"`
 	}
 	type provJSON struct {
 		ID               int64    `json:"id"`
@@ -97,6 +104,7 @@ func (g *gateway) handleListProviders(w http.ResponseWriter, r *http.Request) {
 			// hash of the upstream key matches Pool.KeyState.Hash
 			if v, ok := stats[upstreamKeyHash(k.Key)]; ok {
 				kj.Hash, kj.Status, kj.CooldownFor = v.Hash, v.Status, v.CooldownFor
+				kj.DisabledReason, kj.CoolingModels = v.DisabledReason, v.CoolingModels
 				kj.Requests, kj.RateLimited, kj.Errors = v.Requests, v.RateLimited, v.Errors
 				if !k.Disabled && v.Status == "healthy" {
 					pj.Healthy++
@@ -407,7 +415,36 @@ func (g *gateway) handlePatchProviderKey(w http.ResponseWriter, r *http.Request)
 	}) {
 		return
 	}
+	// The admin switching a key on is the explicit "try it again": drop a
+	// runtime auth/expiry disable, which otherwise survives rebuilds.
+	if req.Disabled != nil && !*req.Disabled {
+		if err := g.clearRuntimeDisable(keyID); err != nil {
+			log.Printf("admin user=%s action=provider.key.update clear runtime disable: %v", actorEmail(actor), err)
+		}
+	}
 	writeJSON(w, http.StatusOK, map[string]any{"ok": true})
+}
+
+// clearRuntimeDisable re-enables, in every live pool, the upstream key
+// stored under keyID.
+func (g *gateway) clearRuntimeDisable(keyID int64) error {
+	_, keyLists, err := g.store.ListProvidersWithKeys()
+	if err != nil {
+		return fmt.Errorf("list provider keys: %w", err)
+	}
+	for _, keys := range keyLists {
+		for _, k := range keys {
+			if k.ID != keyID {
+				continue
+			}
+			hash := upstreamKeyHash(k.Key)
+			for _, ref := range g.allProviders() {
+				ref.pool.setEnabled(hash, true)
+			}
+			return nil
+		}
+	}
+	return nil
 }
 
 func (g *gateway) handleDeleteProviderKey(w http.ResponseWriter, r *http.Request) {
