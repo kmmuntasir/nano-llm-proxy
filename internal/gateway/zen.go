@@ -1,12 +1,12 @@
 package gateway
 
 import (
-	"bytes"
 	"encoding/json"
 	"log"
 	"maps"
 	"net/http"
 	"slices"
+	"strings"
 	"time"
 )
 
@@ -45,9 +45,13 @@ func (g *gateway) learnSurface(model, surface string) {
 }
 
 // injectChatFingerprint mutates a chat-completions body to pass the gate:
-// stream:true + the zenGateTools present.
+// stream:true, the zenGateTools present, and a system message carrying an
+// <env> block (see ensureZenEnv).
 func injectChatFingerprint(body map[string]any, injectTools bool) {
 	body["stream"] = true
+	if msgs, ok := body["messages"].([]any); ok {
+		body["messages"] = ensureZenEnv(msgs)
+	}
 	if !injectTools {
 		return
 	}
@@ -59,6 +63,39 @@ func injectChatFingerprint(body map[string]any, injectTools bool) {
 		}
 	}
 	body["tools"] = tools
+}
+
+// ensureZenEnv guarantees the transcript carries a system-role message with
+// a complete <env>…</env> block. Bisected against live zen (2026-11-25):
+// the free-tier gate rejects requests whose messages have no such block
+// (a truncated block is rejected too), whatever else is right about them.
+// Real opencode always sends its environment block; the position in the
+// transcript is not checked, so an env-only system message is prepended
+// when the client didn't send one — ~40 tokens of overhead per request.
+func ensureZenEnv(messages []any) []any {
+	for _, m := range messages {
+		mm, ok := m.(map[string]any)
+		if !ok {
+			continue
+		}
+		if role, _ := mm["role"].(string); role == "system" {
+			if c, _ := mm["content"].(string); strings.Contains(c, "</env>") {
+				return messages // already carries an env block
+			}
+		}
+	}
+	envMsg := map[string]any{"role": "system", "content": zenEnvContent()}
+	return append([]any{envMsg}, messages...)
+}
+
+// zenEnvContent renders the environment block opencode inlines into its
+// system prompt. The field set mirrors a captured opencode 1.19.6 request;
+// the date is refreshed per call (the captured block carried the request
+// day's date, and a stale or missing block was rejected).
+func zenEnvContent() string {
+	return "<env>\n  Working directory: /\n  Workspace root folder: /\n" +
+		"Is directory a git repo: no\n  Platform: linux\n" +
+		"Today's date: " + time.Now().Format("Mon Jan 2 2006") + "\n</env>"
 }
 
 func stubToolChat(name string) map[string]any {
@@ -198,7 +235,7 @@ func toResponsesBody(chat map[string]any) map[string]any {
 		"stream": true,
 	}
 	if v, ok := chat["messages"].([]any); ok {
-		out["input"] = chatMessagesToResponsesInput(v)
+		out["input"] = ensureZenEnv(chatMessagesToResponsesInput(v))
 	}
 	if v, ok := chat["max_tokens"]; ok {
 		out["max_output_tokens"] = v
@@ -302,16 +339,8 @@ func (g *gateway) proxyZen(ref providerRef, w http.ResponseWriter, r *http.Reque
 		if surface == "responses" {
 			path = "/responses"
 		}
-		req, err := http.NewRequestWithContext(r.Context(), http.MethodPost,
-			ref.baseURL+path, bytes.NewReader(raw))
-		if err != nil {
-			return failHint("internal: " + err.Error())
-		}
-		req.Header.Set("Authorization", "Bearer "+k.Key)
-		req.Header.Set("Content-Type", "application/json")
-		setZenFingerprint(req, g.rs().Zen.UserAgent, k.Key)
-
-		resp, err := g.client.Do(req)
+		// zenDo sends the opencode wire fingerprint (TLS hello + h1.1 head)
+		resp, err := g.zenDo(r.Context(), ref.baseURL+path, k.Key, raw)
 		if err != nil {
 			tr.upstream(0)
 			ref.pool.cooldown(k, 10*time.Second, "network: "+err.Error())

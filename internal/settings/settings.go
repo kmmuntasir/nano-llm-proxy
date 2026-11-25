@@ -56,18 +56,26 @@ type ModelMeta struct {
 	Cost             *ModelCost        `json:"cost,omitempty"`
 }
 
-// DefaultZenUserAgent mirrors the opencode release the zen fingerprint was
-// last captured from (see internal/gateway/zenfp.go).
-const DefaultZenUserAgent = "opencode/latest/2.0.29/cli"
+// DefaultZenUserAgent mirrors the opencode release the zen wire fingerprint
+// was last captured from (see internal/gateway/zenwire.go). The 1.19.x CLI
+// sends its runtime suffixes in the UA; zen's gate matches the wire, not the
+// UA string, but the default stays faithful to the captured release.
+const DefaultZenUserAgent = "opencode/1.19.6 ai-sdk/provider-utils/4.0.23 runtime/bun/1.4.4"
 
 // UAVersionOK validates an opencode user agent against the server's 1.18.0
-// floor. Enforced on settings saves and at boot. Accepts both the 1.x shape
-// "opencode/<semver>" and the 2.x shape "opencode/<channel>/<semver>/<client>"
-// (e.g. "opencode/latest/2.0.29/cli").
+// floor. Enforced on settings saves and at boot. Accepts the 1.x shapes
+// "opencode/<semver>" (bare, or with runtime suffixes as in
+// "opencode/1.19.6 ai-sdk/… runtime/bun/…") and the 2.x shape
+// "opencode/<channel>/<semver>/<client>" (e.g. "opencode/latest/2.0.29/cli").
 func UAVersionOK(ua string) bool {
 	rest, ok := strings.CutPrefix(ua, "opencode/")
 	if !ok {
 		return false
+	}
+	// runtime-suffixed shape: "1.19.6 ai-sdk/… runtime/bun/…" — the version
+	// is the first space-delimited token
+	if i := strings.IndexByte(rest, ' '); i >= 0 {
+		rest = rest[:i]
 	}
 	parts := strings.Split(rest, "/")
 	switch len(parts) {

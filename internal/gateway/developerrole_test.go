@@ -113,10 +113,17 @@ func TestZenChatRenamesDeveloperRoleForStrictUpstream(t *testing.T) {
 	select {
 	case sent := <-seen:
 		msgs := sent["messages"].([]any)
+		// [0] is the injected env system message (zen gate), [1] the renamed
+		// developer message, [2] the untouched user message
 		if role, _ := msgs[0].(map[string]any)["role"].(string); role != "system" {
+			t.Errorf("first message role %q, want the injected env system message", role)
+		} else if c, _ := msgs[0].(map[string]any)["content"].(string); !strings.Contains(c, "</env>") {
+			t.Errorf("first message is not an env block: %q", c)
+		}
+		if role, _ := msgs[1].(map[string]any)["role"].(string); role != "system" {
 			t.Errorf("upstream saw role %q, want system", role)
 		}
-		if role, _ := msgs[1].(map[string]any)["role"].(string); role != "user" {
+		if role, _ := msgs[2].(map[string]any)["role"].(string); role != "user" {
 			t.Errorf("second message role changed: %q", role)
 		}
 	default:

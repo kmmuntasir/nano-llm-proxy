@@ -876,6 +876,9 @@ func TestUAVersionFloor(t *testing.T) {
 		"opencode": false, "myapp/1.0": false, "opencode/1.18": true,
 		"opencode/latest/2.0.27/cli": true, "opencode/latest/1.17.9/cli": false,
 		"opencode/latest/2.0.27": false, "opencode//2.0.27/cli": false,
+		// the 1.19.x runtime-suffixed shape (bun UA)
+		"opencode/1.19.6 ai-sdk/provider-utils/4.0.23 runtime/bun/1.4.4": true,
+		"opencode/1.17.0 ai-sdk/provider-utils/4.0.23 runtime/bun/1.4.4": false,
 	}
 	for ua, want := range cases {
 		if got := settings.UAVersionOK(ua); got != want {

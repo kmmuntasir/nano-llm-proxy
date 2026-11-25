@@ -462,13 +462,13 @@ func TestPostUpstreamFingerprintByType(t *testing.T) {
 	g, _ := testStoreGateway(t, up.URL)
 	req := anonReq()
 
-	// zen-style: UA floor + session header both present
-	resp, ok := g.postUpstream(req, up.URL+"/chat/completions", "k", []byte("{}"), true)
-	if !ok {
-		t.Fatal("postUpstream failed")
+	// zen-style: UA floor + session header both present (zenDo wire)
+	resp, err := g.zenDo(req.Context(), up.URL+"/chat/completions", "k", []byte("{}"))
+	if err != nil {
+		t.Fatal("zenDo failed:", err)
 	}
 	resp.Body.Close()
-	resp, ok = g.postUpstream(req, up.URL+"/chat/completions", "k", []byte("{}"), false)
+	resp, ok := g.postUpstream(req, up.URL+"/chat/completions", "k", []byte("{}"))
 	if !ok {
 		t.Fatal("postUpstream 2 failed")
 	}

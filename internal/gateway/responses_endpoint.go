@@ -99,18 +99,13 @@ func (g *gateway) proxyZenResponses(ref providerRef, w http.ResponseWriter, r *h
 		body["stream"] = true
 		tools, _ := body["tools"].([]any)
 		body["tools"] = ensureFlatStubs(tools)
+		if input, ok := body["input"].([]any); ok {
+			body["input"] = ensureZenEnv(input)
+		}
 		raw, _ := json.Marshal(body)
 
-		req, err := http.NewRequestWithContext(r.Context(), http.MethodPost,
-			ref.baseURL+"/responses", bytes.NewReader(raw))
-		if err != nil {
-			return failHint("internal: " + err.Error())
-		}
-		req.Header.Set("Authorization", "Bearer "+k.Key)
-		req.Header.Set("Content-Type", "application/json")
-		setZenFingerprint(req, g.rs().Zen.UserAgent, k.Key)
-
-		resp, err := g.client.Do(req)
+		// zenDo sends the opencode wire fingerprint (TLS hello + h1.1 head)
+		resp, err := g.zenDo(r.Context(), ref.baseURL+"/responses", k.Key, raw)
 		if err != nil {
 			tr.upstream(0)
 			ref.pool.cooldown(k, 10*time.Second, "network: "+err.Error())

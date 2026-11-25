@@ -127,6 +127,9 @@ func TestChatImageReachesResponsesSurfaceIntact(t *testing.T) {
 		input, _ := body["input"].([]any)
 		for _, it := range input {
 			im, _ := it.(map[string]any)
+			if _, isStr := im["content"].(string); isStr {
+				continue // the injected env system message (zen gate)
+			}
 			for _, p := range im["content"].([]any) {
 				pm, _ := p.(map[string]any)
 				if pm["type"] == "input_image" {
@@ -168,7 +171,8 @@ func TestChatImageReachesResponsesSurfaceIntact(t *testing.T) {
 	case sent := <-seen:
 		found := false
 		for _, it := range sent["input"].([]any) {
-			for _, p := range it.(map[string]any)["content"].([]any) {
+			content, _ := it.(map[string]any)["content"].([]any) // string content = the env system message
+			for _, p := range content {
 				pm, _ := p.(map[string]any)
 				if pm["type"] == "input_image" {
 					if u, _ := pm["image_url"].(string); u == uri {

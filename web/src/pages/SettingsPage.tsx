@@ -930,9 +930,10 @@ export default function SettingsPage() {
                 onChange={(e) => set({ userAgent: e.target.value })}
               />
               <Field.HelperText>
-                Must be <code>opencode/1.18.0</code> or newer (2.x shape:{" "}
-                <code>opencode/latest/2.0.29/cli</code>) — the whole pool
-                would get 426s otherwise.
+                Must be <code>opencode/1.18.0</code> or newer (e.g. the default
+                <code> opencode/1.19.6 ai-sdk/… runtime/bun/…</code>, or 2.x
+                shape <code>opencode/latest/2.0.29/cli</code>) — the whole
+                pool would get 426s otherwise.
               </Field.HelperText>
             </Field.Root>
             <HStack gap={6} flexWrap="wrap">

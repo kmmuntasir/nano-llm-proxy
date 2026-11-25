@@ -2,8 +2,12 @@ package gateway
 
 import (
 	"encoding/hex"
+	"io"
+	"net/http"
 	"net/http/httptest"
 	"regexp"
+	"strings"
+	"sync"
 	"testing"
 	"time"
 )
@@ -52,30 +56,89 @@ func TestZenSessionIDMatchesOpencodeEncoding(t *testing.T) {
 	}
 }
 
-func TestZenFingerprintHeaders(t *testing.T) {
-	req := httptest.NewRequest("POST", "/chat/completions", nil)
-	setZenFingerprint(req, "opencode/latest/2.0.27/cli", "sk-a")
-	h := req.Header
-	sid := h.Get("x-opencode-session")
-	if !validZenSession(sid) {
-		t.Fatalf("session %q", sid)
-	}
-	for _, k := range []string{"x-opencode-session-id", "x-session-affinity", "x-session-id"} {
-		if h.Get(k) != sid {
-			t.Errorf("%s = %q, want %q", k, h.Get(k), sid)
+func TestZenRequestIDShape(t *testing.T) {
+	re := regexp.MustCompile(`^msg_[0-9a-f]{12}[0-9A-Za-z]{14}$`)
+	for range 10 {
+		if id := newZenRequestID(); !re.MatchString(id) {
+			t.Fatalf("request id %q does not match the opencode msg_ shape", id)
 		}
 	}
-	if h.Get("User-Agent") != "opencode/latest/2.0.27/cli" || h.Get("x-opencode-client") != "cli" {
-		t.Errorf("ua/client: %q %q", h.Get("User-Agent"), h.Get("x-opencode-client"))
+}
+
+// TestZenDoWire checks the bun-shaped request zenDo writes: the header set
+// and the opencode identifiers. (Header casing and order can't be asserted
+// through net/http's test server — it canonicalizes on read — they are
+// pinned by the live bisect behind internal/gateway/zenwire.go.)
+func TestZenDoWire(t *testing.T) {
+	var mu sync.Mutex
+	var gotUA, gotSession, gotRequest, gotBody string
+	up := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		b, _ := io.ReadAll(r.Body)
+		mu.Lock()
+		gotUA = r.Header.Get("User-Agent")
+		gotSession = r.Header.Get("x-opencode-session")
+		gotRequest = r.Header.Get("x-opencode-request")
+		gotBody = string(b)
+		mu.Unlock()
+		w.Header().Set("Content-Type", "application/json")
+		w.WriteHeader(200)
+		io.WriteString(w, `{"ok":true}`) //nolint:errcheck
+	}))
+	defer up.Close()
+
+	g, _ := testStoreGateway(t, up.URL)
+	resp, err := g.zenDo(httptest.NewRequest("POST", "/v1/chat/completions", nil).Context(),
+		up.URL+"/chat/completions", "sk-zen-a", []byte(`{"ping":1}`))
+	if err != nil {
+		t.Fatal("zenDo:", err)
 	}
-	if p := h.Get("x-opencode-project"); !regexp.MustCompile(`^[0-9a-f]{40}$`).MatchString(p) || p != zenProjectID("sk-a") || p == zenProjectID("sk-b") {
-		t.Errorf("project id %q not stable per key", p)
+	body, _ := io.ReadAll(resp.Body)
+	resp.Body.Close()
+
+	mu.Lock()
+	defer mu.Unlock()
+	if gotBody != `{"ping":1}` {
+		t.Fatalf("upstream body %q", gotBody)
 	}
-	tp := regexp.MustCompile(`^00-([0-9a-f]{32})-([0-9a-f]{16})-01$`).FindStringSubmatch(h.Get("traceparent"))
-	if tp == nil {
-		t.Fatalf("traceparent %q", h.Get("traceparent"))
+	if string(body) != `{"ok":true}` {
+		t.Fatalf("response body %q", string(body))
 	}
-	if !regexp.MustCompile(`^` + tp[1] + `-` + tp[2] + `-1-[0-9a-f]{16}$`).MatchString(h.Get("b3")) {
-		t.Errorf("b3 %q does not match traceparent %q", h.Get("b3"), h.Get("traceparent"))
+	if gotUA != g.rs().Zen.UserAgent {
+		t.Fatalf("UA %q, want %q", gotUA, g.rs().Zen.UserAgent)
+	}
+	if !validZenSession(gotSession) {
+		t.Fatalf("session header %q", gotSession)
+	}
+	if !strings.HasPrefix(gotRequest, "msg_") || len(gotRequest) != len("msg_")+26 {
+		t.Fatalf("request header %q", gotRequest)
+	}
+}
+
+// TestZenDoChunked makes sure the raw HTTP/1.1 client decodes chunked
+// bodies (zen streams SSE with Transfer-Encoding: chunked).
+func TestZenDoChunked(t *testing.T) {
+	up := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "text/event-stream")
+		w.Header().Set("Transfer-Encoding", "chunked")
+		w.WriteHeader(200)
+		io.WriteString(w, "data: one\n\n") //nolint:errcheck
+		io.WriteString(w, "data: two\n\n") //nolint:errcheck
+	}))
+	defer up.Close()
+
+	g, _ := testStoreGateway(t, up.URL)
+	resp, err := g.zenDo(httptest.NewRequest("POST", "/v1/chat/completions", nil).Context(),
+		up.URL+"/chat/completions", "sk-zen-a", []byte(`{}`))
+	if err != nil {
+		t.Fatal("zenDo:", err)
+	}
+	defer resp.Body.Close()
+	body, err := io.ReadAll(resp.Body)
+	if err != nil {
+		t.Fatal("read:", err)
+	}
+	want := "data: one\n\ndata: two\n\n"
+	if string(body) != want {
+		t.Fatalf("chunked body not decoded: %q, want %q", string(body), want)
 	}
 }

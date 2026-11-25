@@ -11,6 +11,20 @@ Release notes are generated from commit prefixes, so `feat:`, `fix:`,
 
 ### Fixed
 
+- zen free models work again. Zen's free-tier gate now fingerprints the
+  client's wire, not just the request shape: a perfectly-formed body still
+  answers `429 FreeUsageLimitError` unless it arrives exactly the way the
+  opencode CLI (the bun runtime) sends it. The gateway's zen upstream now
+  speaks raw HTTP/1.1 over a uTLS connection replaying opencode 1.19.6's
+  TLS ClientHello, with bun's header order and casing, and injects the
+  `<env>` block a system message must carry (bisected against live zen:
+  TLS hello, HTTP/1.1 head, `stream:true`, a tool named `read`, a
+  structurally valid `x-opencode-session`, and the env block are all
+  checked; the UA string is not). The default `zen.userAgent` becomes the
+  1.19.6 CLI's own value, and the 1.18.0 floor check accepts the
+  runtime-suffixed shape. Free-tier usage is budgeted per client IP and
+  fingerprint, so keys that looked "usage-limited" from a non-opencode
+  client still have their full allowance through the new wire.
 - A 429 now cools the key for the rate-limited model only, not for every
   model. When zen rate-limited a few hot models across all keys at once,
   every key went "cooling" and every model answered "No healthy zen keys".

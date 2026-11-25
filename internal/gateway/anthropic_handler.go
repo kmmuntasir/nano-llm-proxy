@@ -141,7 +141,7 @@ func (g *gateway) messagesViaOpenAI(ref providerRef, w http.ResponseWriter, r *h
 			break
 		}
 		tr.attempt(k.Label)
-		resp, ok := g.postUpstream(r, ref.baseURL+"/chat/completions", k.Key, raw, false)
+		resp, ok := g.postUpstream(r, ref.baseURL+"/chat/completions", k.Key, raw)
 		if !ok {
 			tr.upstream(0)
 			lastHint = "upstream network error"
@@ -206,8 +206,9 @@ func (g *gateway) messagesViaZen(ref providerRef, w http.ResponseWriter, r *http
 		}
 		raw, _ := json.Marshal(upBody)
 
-		resp, ok := g.postUpstream(r, ref.baseURL+path, k.Key, raw, true)
-		if !ok {
+		// zenDo sends the opencode wire fingerprint (TLS hello + h1.1 head)
+		resp, err := g.zenDo(r.Context(), ref.baseURL+path, k.Key, raw)
+		if err != nil {
 			tr.upstream(0)
 			ref.pool.cooldown(k, 10*time.Second, "network")
 			lastHint = "upstream network error"
@@ -262,19 +263,15 @@ func (g *gateway) messagesViaZen(ref providerRef, w http.ResponseWriter, r *http
 	return rot.exhausted(lastHint), tokenUsage{}
 }
 
-// postUpstream POSTs one upstream attempt. zenFingerprint injects the
-// opencode client fingerprint (see setZenFingerprint) — decided by provider
-// type, never by URL substring.
-func (g *gateway) postUpstream(r *http.Request, url, key string, body []byte, zenFingerprint bool) (*http.Response, bool) {
+// postUpstream POSTs one upstream attempt for plain OpenAI-compatible
+// providers (zen goes through zenDo instead — its wire is fingerprinted).
+func (g *gateway) postUpstream(r *http.Request, url, key string, body []byte) (*http.Response, bool) {
 	req, err := http.NewRequestWithContext(r.Context(), http.MethodPost, url, bytes.NewReader(body))
 	if err != nil {
 		return nil, false
 	}
 	req.Header.Set("Authorization", "Bearer "+key)
 	req.Header.Set("Content-Type", "application/json")
-	if zenFingerprint {
-		setZenFingerprint(req, g.rs().Zen.UserAgent, key)
-	}
 	resp, err := g.client.Do(req)
 	if err != nil {
 		return nil, false

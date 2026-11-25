@@ -69,7 +69,7 @@ block is server-owned).
 | `retry.respectRetryAfter` | true | Prefer the upstream `Retry-After` duration |
 | `retry.maxRequestsPerKeyPerDay` | 0 (off) | Optional per-key daily cap; an exhausted key cools until midnight |
 | `anthropic.fallbackModel` | empty | Target for literal `claude-*` requests (background tasks clients self-issue) on `/v1/messages`; empty = a bare `claude-*` model name is rejected (400 — it has no `provider/` prefix) |
-| `zen.userAgent` | `opencode/latest/2.0.29/cli` | Client user agent, `opencode/X.Y.Z` or `opencode/<channel>/X.Y.Z/<client>`; must satisfy the upstream's 1.18.0 floor. Validated on save (HTTP 400) and at boot (fatal) |
+| `zen.userAgent` | `opencode/1.19.6 ai-sdk/provider-utils/4.0.23 runtime/bun/1.4.4` | Client user agent, `opencode/X.Y.Z` (optionally with runtime suffixes) or `opencode/<channel>/X.Y.Z/<client>`; must satisfy the upstream's 1.18.0 floor. Validated on save (HTTP 400) and at boot (fatal) |
 | `zen.injectTools` | true | Append the client-shape tool stubs to every zen request |
 | `zen.responsesModels` | — | *Removed.* Responses support is a per-model flag on `modelMeta` entries; toggle it per model on the Providers page (zen models). Sync preserves the flag across catalog refreshes |
 | `zen.freeOnly` | false | Restrict the zen catalog in `/v1/models` to models flagged as free upstream |
