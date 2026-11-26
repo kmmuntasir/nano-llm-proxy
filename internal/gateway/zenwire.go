@@ -23,15 +23,31 @@ package gateway
 // the right wire gets 429s — the body rules from zenfp.go still apply).
 //
 // zenDo is therefore a small purpose-built HTTP/1.1 client: it opens a uTLS
-// connection replaying opencode 1.19.6's ClientHello (zenBunHello, captured
-// from opencode 1.19.6 / bun 1.4.4 with `openssl s_server -msg`, see
-// the recapture recipe at the bottom of this comment) and writes the request head in bun's
-// exact shape:
+// connection replaying opencode's ClientHello (zenBunHello) and writes the request head in
+// the opencode CLI's exact shape:
 //
 //	Authorization, Content-Type, User-Agent, x-opencode-client,
 //	x-opencode-project, x-opencode-request, x-opencode-session,
 //	x-opencode-session-id, Connection, Accept, Host, Accept-Encoding,
 //	Content-Length
+//
+// OpenCode keeps two active CLI tracks (as of 2026-11-26): v1.19.6 on the
+// OpenCode 1 track and v2.2.7 on the OpenCode 2 track (the latest major
+// line). Their TLS ClientHellos are structurally identical — both are the
+// bun runtime's hello (verified by diffing captures: same cipher list and
+// order, same extensions in the same order, same ALPN "http/1.1") — so the
+// replayed hello covers both tracks. Only the HTTP head differs:
+//
+//	1.19.6 (replayed here — verified against the live gate 2026-11-25):
+//	  UA "opencode/1.19.6 ai-sdk/… runtime/bun/…", x-opencode-project
+//	  "global", x-opencode-request msg_…, no trace headers.
+//	2.2.7: UA "opencode/latest/2.2.7/cli", x-opencode-project is a 40-hex
+//	  project hash, plus traceparent, b3, x-session-affinity and
+//	  x-session-id (the header set the gateway's old 2.0.29 patch sent and
+//	  zen accepted through October), but no x-opencode-request.
+//
+// If zen ever starts rejecting the 1.x head, switch the head (and the UA
+// default in internal/settings) to the 2.x set; the hello stays the same.
 //
 // One connection per request: no pooling, closed when the body closes or
 // the client context is cancelled. The TLS handshake and key shares are
@@ -42,7 +58,8 @@ package gateway
 // provider at it (provider.opencode.options.baseURL in opencode.json,
 // NODE_TLS_REJECT_UNAUTHORIZED=0), `opencode run -m opencode/<model>`,
 // take the first ClientHello from the -msg log, prepend the record header
-// 16 03 01 <len16> and base64 it into zenBunHello.
+// 16 03 01 <len16> and base64 it into zenBunHello. Either CLI track works
+// — capture from whichever release you plan to mimic the HTTP head of.
 
 import (
 	"bufio"
@@ -66,10 +83,11 @@ import (
 	"github.com/kmmuntasir/nano-llm-proxy/internal/settings"
 )
 
-// zenBunHello is the TLS record (16 03 01 …) of opencode 1.19.6's
-// ClientHello to a local capture server; its SNI ("localhost") is replaced
-// with the real host on every connection. See the comment above for how to
-// recapture.
+// zenBunHello is the TLS record (16 03 01 …) of the opencode CLI's
+// ClientHello (captured from opencode 1.19.6 over bun; the same hello
+// shape as the 2.2.7 track) to a local capture server; its SNI
+// ("localhost") is replaced with the real host on every connection. See
+// the comment above for the two CLI tracks and how to recapture.
 const zenBunHello = "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"
 
 // zenDialTimeout and zenHandshakeTimeout mirror initHTTPClient's transport.

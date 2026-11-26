@@ -15,8 +15,10 @@ Release notes are generated from commit prefixes, so `feat:`, `fix:`,
   client's wire, not just the request shape: a perfectly-formed body still
   answers `429 FreeUsageLimitError` unless it arrives exactly the way the
   opencode CLI (the bun runtime) sends it. The gateway's zen upstream now
-  speaks raw HTTP/1.1 over a uTLS connection replaying opencode 1.19.6's
-  TLS ClientHello, with bun's header order and casing, and injects the
+  speaks raw HTTP/1.1 over a uTLS connection replaying the opencode CLI's
+  TLS ClientHello (identical for both active CLI tracks — v1.19.6 and
+  v2.2.7 — since both run on bun), with the 1.19.6 CLI's header order and
+  casing, and injects the
   `<env>` block a system message must carry (bisected against live zen:
   TLS hello, HTTP/1.1 head, `stream:true`, a tool named `read`, a
   structurally valid `x-opencode-session`, and the env block are all
